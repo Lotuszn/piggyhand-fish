@@ -1,0 +1,1079 @@
+package com.piggyhand.fish;
+
+import android.content.Context;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+import de.robv.android.xposed.XposedBridge;
+
+/**
+ * 闲鱼币任务全自动引擎（逆向自闲鱼猪手 1.3.9 c.dr/c.x3/c.jb/c.tk 状态机）。
+ * 进程内串行执行：direct 发请求 → 轮询响应分文件 → 解析 → 下一步。
+ *
+ * 流程：
+ *  1. queryolivertasklist {"sceneId":496} 拉任务列表
+ *  2. 分桶：领奖(COMPLETE+needBenefit / AWARD) / ecMall广告(showAds+adType=ecMall → query拿token→push award)
+ *           / 触发(ACCEPTED+clickFinish|EXCUTE|PLAINVISIT|VISIT|SYSTEM_SWITCH)
+ *           / 搜一搜(xianyu/search.html → trigger 带 URL 指纹)
+ *           / 浏览(ACCEPTED+idleCoinFeesAnchor → nextfresh 拉商品逐个 trigger(implId))
+ *  3. 可选：签到 coin.signin / 擦亮 item.polish v2.0 / 卖鱼 coin.fishing.sold / 小店 daily.benefit
+ *  4. 结果写 rh_tasks_result.json
+ *
+ * 触发：am broadcast -a com.piggyhand.fish.MTOP_CALL --es api __RUN_TASKS__
+ *       [--es extras '{"signin":true,"polish":false,"sold":false,"shop":false,"browse":true}']
+ */
+public final class FishTaskAuto {
+
+    private static final String TASK_LIST_API = "mtop.taobao.idle.task.queryolivertasklist";
+    private static final String TASK_BENEFIT_API = "mtop.taobao.idle.task.getolivertaskbenefit";
+    private static final String TASK_TRIGGER_API = "mtop.taobao.idle.task.uploadolivertasktrigger";
+    private static final String NEXT_FRESH_API = "mtop.taobao.idlehome.idle.coin.nextfresh";
+    private static final String SEARCH_API = "mtop.taobao.idlemtopsearch.search";
+    private static final String AD_QUERY_API = "mtop.taobao.idle.play.ad.query";
+    private static final String AD_EVENT_API = "mtop.taobao.idle.play.ad.event.push";
+    private static final String AD_EVENT_QUERY_API = "mtop.taobao.idle.play.ad.event.query";
+    private static final String SIGNIN_API = "mtop.taobao.idle.coin.signin";
+    private static final String POLISH_API = "mtop.taobao.idle.item.polish";
+    private static final String SHOP_BENEFIT_API = "mtop.taobao.idle.startup.shop.daily.benefit";
+    private static final String LOTTERY_FEEDS_API = "mtop.taobao.idle.coin.lottery.feeds";
+    private static final String LOTTERY_BET_API = "mtop.taobao.idle.coin.lottery.bet";
+
+    // 夺宝页面环境参数（10-16 实测抓包值，服务端接受复用）
+    private static final String DEFAULT_GPS = "29.524192,106.471432";
+    private static final String FISH_AD_CODE = "500107";
+    private static final String DEFAULT_ASAC = "3A25C045163E7A9NHV1SCK";
+
+    private static final int REQ_TIMEOUT_S = 30;
+    private static final int BROWSE_MAX_STEPS = 60;   // 浏览任务单次最多上报次数保护
+    private static final long BROWSE_GAP_MS = 5000;   // 浏览上报基础间隔
+
+    private final ClassLoader cl;
+    private final String cacheDir;
+    private final Set<String> processed = new HashSet<>();
+    private final StringBuilder report = new StringBuilder();
+    private volatile boolean abort = false;
+    private static android.content.Context appCtx;
+
+    private FishTaskAuto(ClassLoader cl, String cacheDir) {
+        this.cl = cl;
+        this.cacheDir = cacheDir;
+    }
+
+    /** 防重入：一轮未跑完时忽略新触发（自动跑与手动广播可能撞车） */
+    private static final java.util.concurrent.atomic.AtomicBoolean RUNNING =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    /** 广播入口（receiver 线程调用，内部自起工作线程） */
+    public static void launch(Context ctx, String extrasJson) {
+        if (!RUNNING.compareAndSet(false, true)) {
+            log("[tasks] engine already running, trigger ignored");
+            return;
+        }
+        appCtx = ctx.getApplicationContext() != null ? ctx.getApplicationContext() : ctx;
+        final ClassLoader cl = ctx.getClassLoader();
+        java.io.File ext = ctx.getExternalCacheDir();
+        final String dir = ext != null ? ext.getAbsolutePath()
+                : "/storage/emulated/0/Android/data/com.taobao.idlefish/cache";
+        new Thread(() -> {
+            try {
+                new FishTaskAuto(cl, dir).run(extrasJson);
+            } finally {
+                RUNNING.set(false);
+            }
+        }, "rh-tasks").start();
+    }
+
+    /**
+     * 每日自动跑（免电脑值守）：每日首次进入闲鱼主进程后延迟 45s 触发一轮引擎。
+     * 日期标记存 rh_pref.json 的 autorun_date；延迟等首页 mtop 流量起来（direct 通道借壳需要载体）。
+     * 调用点：FishMtopHook.registerInvoker（Application.attach 后，各进程都会进，内部做主进程过滤）。
+     */
+    public static void autoRunDaily(Context ctx) {
+        try {
+            // 仅主进程执行（子进程没有 mtop SDK）
+            String proc = null;
+            try {
+                proc = (String) android.app.Application.class.getMethod("getProcessName").invoke(null);
+            } catch (Throwable ignored) {
+            }
+            if (proc != null && proc.contains(":")) return;
+
+            // 配置开关：enabled / autoRun 关闭则不自动跑（模块 UI 可切）
+            int intervalHours = 4;
+            try {
+                ConfigManager cfg = ConfigManager.load();
+                if (cfg == null || !cfg.enabled || !cfg.autoRun) {
+                    log("[auto-run] disabled by config (enabled="
+                            + (cfg != null && cfg.enabled) + ", autoRun="
+                            + (cfg != null && cfg.autoRun) + "), skip");
+                    return;
+                }
+                intervalHours = Math.max(1, cfg.autoRunIntervalHours);
+            } catch (Throwable t) {
+                log("[auto-run] config check fail, continue: " + t);
+            }
+
+            // 时间戳标记：距上次自动跑 >= intervalHours 小时才触发。
+            // 标记存 internal files（external cache 会被闲鱼清理导致标记丢失——10-16 实测）。
+            long now = System.currentTimeMillis();
+            java.io.File mark;
+            try {
+                java.io.File dir = ctx.getFilesDir();
+                mark = new java.io.File(dir != null ? dir
+                        : new java.io.File("/data/data/com.taobao.idlefish/files"), "rh_autorun.txt");
+            } catch (Throwable t) {
+                mark = new java.io.File("/data/data/com.taobao.idlefish/files", "rh_autorun.txt");
+            }
+            long last = 0;
+            try {
+                last = Long.parseLong(new String(java.nio.file.Files.readAllBytes(
+                        mark.toPath()), "UTF-8").trim());
+            } catch (Throwable ignored) {
+                // 首次运行无标记，视为 0
+            }
+            if (last == 0) {
+                // 兼容旧 external 标记：autorun_date=今天 视为刚跑过（防升级当天重复跑）
+                try {
+                    java.io.File ext = ctx.getExternalCacheDir();
+                    String body = new String(java.nio.file.Files.readAllBytes(
+                            new java.io.File(ext, "rh_pref.json").toPath()), "UTF-8");
+                    String today = new java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
+                            .format(new java.util.Date());
+                    if (body.contains("\"autorun_date\":\"" + today + "\"")) {
+                        last = now;
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+            long gapMs = now - last;
+            if (gapMs < intervalHours * 3600_000L) {
+                log("[auto-run] last run " + (gapMs / 60000) + " min ago < interval "
+                        + intervalHours + "h, skip");
+                return;
+            }
+            // 先写标记再延迟触发：防进程快速重启导致重复跑
+            try {
+                java.nio.file.Files.write(mark.toPath(), String.valueOf(now).getBytes("UTF-8"));
+                log("[auto-run] marker written: " + mark.getAbsolutePath());
+            } catch (Throwable t) {
+                log("[auto-run] marker write FAILED (will re-run next launch): " + t);
+            }
+            log("[auto-run] scheduled in 45s (interval " + intervalHours
+                    + "h, last " + (last == 0 ? "never" : gapMs / 60000 + " min ago") + ")");
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        Thread.sleep(45000);
+                    } catch (InterruptedException ignored) {
+                    }
+                    launch(ctx, "{}");
+                }
+            }, "rh-autorun").start();
+        } catch (Throwable t) {
+            log("[auto-run] schedule FAILED: " + t);
+        }
+    }
+
+    /* ============================ 主流程 ============================ */
+
+    private void run(String extrasJson) {
+        long t0 = System.currentTimeMillis();
+        log("=== task auto run start ===");
+        org.json.JSONObject extras = parseObj(extrasJson);
+        boolean doSignin = opt(extras, "signin", false);
+        boolean doPolish = opt(extras, "polish", false);
+        boolean doSold = opt(extras, "sold", false);
+        boolean doShop = opt(extras, "shop", false);
+        boolean doBrowse = opt(extras, "browse", true);
+        boolean claimOnly = opt(extras, "claim_only", false);
+        if (claimOnly) doBrowse = false;
+
+        try {
+            /* 0. 附带日常：签到 / 擦亮 / 卖鱼 / 小店 */
+            if (doSignin) callApi(SIGNIN_API, "1.0", "{}", "签到");
+            if (doPolish) runPolish();
+            if (doSold) report.append("[卖鱼] 跳过：钓场玩法在闲鱼 7.25.31 已移除（APK 内无 fishing 接口，猪手旧功能）\n");
+            if (doShop) callApi(SHOP_BENEFIT_API, "1.0", "{}", "小店日福利");
+
+            /* 1. 拉任务列表 */
+            org.json.JSONObject resp = callApi(TASK_LIST_API, "2.0", "{\"sceneId\":496}", "任务列表");
+            List<org.json.JSONObject> tasks = extractTasks(resp);
+            if (tasks == null) {
+                report.append("任务列表获取失败\n");
+                finish(t0);
+                return;
+            }
+            report.append("任务总数: ").append(tasks.size()).append('\n');
+
+            List<String[]> claimList = new ArrayList<>();   // {deliveryId, title}
+            List<String[]> triggerList = new ArrayList<>(); // {deliveryId, title}
+            List<String[]> adEventList = new ArrayList<>(); // {deliveryId, adEventPushJson}
+            List<String[]> searchList = new ArrayList<>();  // {deliveryId, title, action, fromToken, groupId}
+            List<String[]> ecMallList = new ArrayList<>();  // {deliveryId, title, action}
+            List<String[]> treasureList = new ArrayList<>(); // {deliveryId, title} 好物夺宝
+            String[] browseTask = null;                     // {deliveryId, sceneId}
+            List<String> claimDone = new ArrayList<>();
+            List<String> claimFail = new ArrayList<>();
+
+            /* 2. 分桶 */
+            for (org.json.JSONObject t : tasks) {
+                String did = str(t, "deliveryId");
+                if (did == null || processed.contains(did)) continue;
+                processed.add(did);
+                org.json.JSONObject m = t.optJSONObject("materialDTO");
+                org.json.JSONObject tb = t.optJSONObject("taskBenefitDTO");
+                String status = str(t, "idleTaskStatus");
+                String actionType = m == null ? "" : optStr(m, "actionType");
+                String title = m == null ? "?" : optStr(m, "title");
+                String action = m == null ? "" : optStr(m, "action");
+                String scene = str(t, "sceneId");
+                boolean needBenefit = tb != null && "true".equals(optStr(tb, "needBenefit"));
+
+                if ("COMPLETE".equals(status) && needBenefit || "AWARD".equals(status)) {
+                    claimList.add(new String[]{did, title});
+                } else if ("ACCEPTED".equals(status) && action.contains("showAds") && action.contains("adType=ecMall")) {
+                    // ecMall 广告任务（10-15 纯协议破防 104637：query 拿服务端 token → 等 rewardDuration
+                    // → event.query 预检 → event.push 提交 award。伪造 token 报 CSJ_TOKEN_MISMATCH，
+                    // token 必须取自 play.ad.query 响应）
+                    ecMallList.add(new String[]{did, title, action});
+                } else if ("ACCEPTED".equals(status) && action.contains("showAds")) {
+                    // 激励视频任务（协议可完成：play.ad.event.push 自报 complete，实测有效）
+                    String ev = extractAdEventPush(action);
+                    if (ev != null) adEventList.add(new String[]{did, ev, optStr(m, "subTitle")});
+                    else report.append("[广告] ").append(title).append(" 无 adEventPush 参数，跳过\n");
+                } else if ("ACCEPTED".equals(status) && action.contains("xianyu/search.html")) {
+                    // 搜一搜任务（协议可完成：trigger 携带 action URL 任务指纹，10-14 实测破防 79495）
+                    searchList.add(new String[]{did, title, action, str(t, "fromToken"), str(t, "groupId")});
+                } else if ("ACCEPTED".equals(status) && action.contains("bbdbindex.html")) {
+                    // 好物夺宝任务（10-16 纯协议破防 3137：feeds 拿当日 signUpId → bet 投一注 100 币
+                    // → AWARD。signUpId 从 feeds 响应 cardList 自举，gps/fishAdCode 复用抓包值）
+                    treasureList.add(new String[]{did, title});
+                } else if ("ACCEPTED".equals(status)
+                        && ("clickFinish".equals(actionType) || "EXCUTE".equals(actionType)
+                        || "PLAINVISIT".equals(actionType) || "VISIT".equals(actionType)
+                        || "SYSTEM_SWITCH".equals(actionType))) {
+                    // T1 打法：did+fromToken+groupId（10-14 实测外跳 7 任务破防，纯 did 则 ILLEGAL）
+                    // 10-15 扩容：VISIT/SYSTEM_SWITCH 也收——昨日 attack_outjump 全量扫 SUCCESS 组
+                    // 大量 VISIT（99053/103086/93949/81424），旧分桶漏掉导致 VISIT 任务空转
+                    triggerList.add(new String[]{did, title, str(t, "fromToken"), str(t, "groupId")});
+                } else if ("ACCEPTED".equals(status) && "idleCoinFeesAnchor".equals(actionType)) {
+                    browseTask = new String[]{did, scene == null ? "496" : scene};
+                }
+            }
+            report.append("可领:").append(claimList.size())
+                    .append(" 可触发:").append(triggerList.size())
+                    .append(" 视频任务:").append(adEventList.size())
+                    .append(" 搜一搜:").append(searchList.size())
+                    .append(" ecMall:").append(ecMallList.size())
+                    .append(" 夺宝:").append(treasureList.size())
+                    .append(" 浏览:").append(browseTask != null ? 1 : 0).append('\n');
+
+            /* 3. 先领已完成的 */
+            for (String[] c : claimList) {
+                if (abort) break;
+                claimOne(c[0], c[1], claimDone, claimFail);
+                sleep(1200);
+            }
+
+            /* 3.5 激励视频任务：play.ad.event.push 自报 complete（服务端无广告凭证校验，实测有效）
+             *     循环 maxTimes 次，每次间隔 5s，完成即领奖 */
+            for (String[] ad : adEventList) {
+                if (abort) break;
+                runAdEventTask(ad[0], ad[1], claimDone, claimFail);
+                sleep(2000);
+            }
+
+            /* 3.6 搜一搜任务：trigger 携带 action URL 任务指纹（10-14 实测 79495 破防：
+             *     纯 did ILLEGAL，带 URL 参数组 SUCCESS 且 times 0→1） */
+            for (String[] s : searchList) {
+                if (abort || claimOnly) break;
+                runSearchTask(s[0], s[1], s[2], s[3], s[4], claimDone, claimFail);
+                sleep(2000);
+            }
+
+            /* 3.7 ecMall 广告任务：纯协议链（10-15 实测 104637 ACCEPTED→AWARD） */
+            for (String[] ec : ecMallList) {
+                if (abort || claimOnly) break;
+                runEcMallTask(ec[0], ec[1], ec[2], claimDone, claimFail);
+                sleep(2000);
+            }
+
+            /* 3.8 好物夺宝：feeds 拿 signUpId → bet 投一注（10-16 实测 3137 AWARD→领奖） */
+            for (String[] tt : treasureList) {
+                if (abort || claimOnly) break;
+                runTreasureBetTask(tt[0], tt[1], claimDone, claimFail);
+                sleep(2000);
+            }
+
+            /* 4. 触发桶：uploadolivertasktrigger 带 T1 参数（did+fromToken+groupId）。
+             *    10-14 实测：纯 did ILLEGAL；带 fromToken+groupId 后外跳类 7 任务 SUCCESS 推进
+             *    （芭芭农场/头条/蚂蚁森林/大众点评/美团/消消乐/百度极速版）。
+             *    仍 ILLEGAL 的（服务端云控逐任务判定）标记跳过，不重试不降级。
+             *    claim_only 模式整段跳过。 */
+            for (String[] tg : triggerList) {
+                if (abort || claimOnly) break;
+                org.json.JSONObject p = new org.json.JSONObject();
+                try {
+                    p.put("sceneId", 496);
+                    p.put("deliveryId", tg[0]);
+                    if (tg[2] != null && tg[2].length() > 0) p.put("fromToken", tg[2]);
+                    if (tg[3] != null && tg[3].length() > 0) {
+                        try { p.put("groupId", Long.parseLong(tg[3])); } catch (Throwable e) { p.put("groupId", tg[3]); }
+                    }
+                } catch (Throwable ignored) {
+                }
+                org.json.JSONObject tr = callApi(TASK_TRIGGER_API, "1.0", p.toString(),
+                        "触发任务 " + tg[1]);
+                String ret = firstRet(tr);
+                if (tr == null || ret == null) {
+                    report.append("[触发] ").append(tg[1]).append(" -> 无响应，跳过\n");
+                } else if (ret.contains("SUCCESS")) {
+                    report.append("[触发] ").append(tg[1]).append(" -> ").append(ret).append('\n');
+                    // loop 任务补打（如点击频道好物 10/10）。10-15 优化：先复核再补打——
+                    // 盲补对"一次即完成"任务浪费 10 轮（新设备首跑 300s 超时的主因）。
+                    // 每轮：复核状态 → AWARD/COMPLETE 即停；times 不动即停（幂等无意义）
+                    int prevTimes = -1;
+                    for (int k = 0; k < 10 && !abort; k++) {
+                        sleep(2000);
+                        String st = null;
+                        int times = -1, max = -1;
+                        List<org.json.JSONObject> tl = extractTasks(
+                                callApi(TASK_LIST_API, "2.0", "{\"sceneId\":496}", "补打复核 " + tg[1]));
+                        if (tl != null) {
+                            for (org.json.JSONObject t : tl) {
+                                if (tg[0].equals(str(t, "deliveryId"))) {
+                                    st = str(t, "idleTaskStatus");
+                                    org.json.JSONObject pd = t.optJSONObject("progressDTO");
+                                    if (pd != null) {
+                                        try { times = Integer.parseInt(str(pd, "times")); } catch (Throwable ig) {}
+                                        try { max = Integer.parseInt(str(pd, "maxTimes")); } catch (Throwable ig) {}
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                        if ("AWARD".equals(st) || "COMPLETE".equals(st)) break;
+                        if (max > 0 && times >= max) break;
+                        if (k > 0 && times == prevTimes) break; // times 没动：SUCCESS 幂等，停
+                        prevTimes = times;
+                        org.json.JSONObject tr2 = callApi(TASK_TRIGGER_API, "1.0", p.toString(),
+                                "补打 " + tg[1] + "#" + (k + 2));
+                        String r2 = firstRet(tr2);
+                        if (r2 == null || !r2.contains("SUCCESS")) {
+                            if (r2 != null) report.append("[触发] ").append(tg[1])
+                                    .append(" 补打#").append(k + 2).append(" -> ").append(r2).append('\n');
+                            break;
+                        }
+                    }
+                } else {
+                    report.append("[触发] ").append(tg[1]).append(" -> ").append(ret)
+                            .append("（云控判定需真实行为，协议跳过）\n");
+                }
+                sleep(1200);
+            }
+
+            /* 5. 浏览任务：nextfresh 拉商品 → 逐个 trigger(implId) */
+            if (doBrowse && browseTask != null && !abort) {
+                browseForTask(browseTask[0], browseTask[1], claimDone, claimFail);
+            }
+
+            /* 6. 收尾再领（触发/浏览完成后的奖励）。
+             *    10-15 实测：trigger SUCCESS 后服务端异步翻 AWARD 有数秒延迟，
+             *    单次立即复核会漏领 → 等待 + 双轮复核 */
+            if (!abort) {
+                for (int round = 0; round < 2; round++) {
+                    sleep(6000); // 等服务端异步记账
+                    resp = callApi(TASK_LIST_API, "2.0", "{\"sceneId\":496}",
+                            "任务列表复核" + (round + 1));
+                    List<org.json.JSONObject> tasks2 = extractTasks(resp);
+                    if (tasks2 == null) continue;
+                    for (org.json.JSONObject t : tasks2) {
+                        String did = str(t, "deliveryId");
+                        if (did == null || processed.contains(did)) continue;
+                        org.json.JSONObject tb = t.optJSONObject("taskBenefitDTO");
+                        String status = str(t, "idleTaskStatus");
+                        org.json.JSONObject m = t.optJSONObject("materialDTO");
+                        String title = m == null ? "?" : optStr(m, "title");
+                        boolean needBenefit = tb != null && "true".equals(optStr(tb, "needBenefit"));
+                        if (("COMPLETE".equals(status) && needBenefit) || "AWARD".equals(status)) {
+                            processed.add(did);
+                            claimOne(did, title, claimDone, claimFail);
+                            sleep(800);
+                        }
+                    }
+                }
+            }
+
+            report.append("领取成功 ").append(claimDone.size()).append(": ").append(claimDone).append('\n');
+            report.append("领取失败 ").append(claimFail.size()).append(": ").append(claimFail).append('\n');
+        } catch (Throwable t) {
+            report.append("引擎异常: ").append(t).append('\n');
+            log("task auto FAIL: " + t);
+        }
+        finish(t0);
+    }
+
+    /* ============================ 激励视频任务 ============================ */
+
+    /** 从 action URL 提取 adEventPush 参数（urlencode JSON），eventType 改写为 complete */
+    private static String extractAdEventPush(String action) {
+        try {
+            int k = action.indexOf("adEventPush=");
+            if (k < 0) return null;
+            String v = action.substring(k + "adEventPush=".length());
+            int amp = v.indexOf('&');
+            if (amp >= 0) v = v.substring(0, amp);
+            String json = java.net.URLDecoder.decode(v, "UTF-8");
+            org.json.JSONObject j = new org.json.JSONObject(json);
+            j.put("eventType", "complete");
+            return j.toString();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private void runAdEventTask(String deliveryId, String adEventJson, List<String> done, List<String> fail) {
+        // 10-15 新设备实测（7.28.30）：play.ad.event.push 请求生效但响应不走落盘通道
+        // （callApi 全 TIMEOUT 而 times 照样推进）→ 以"任务列表 times 复核"为判定，
+        // 无响应也继续打，打满 maxTimes 次后复核领奖
+        int maxTimes = 4; // 单任务上报上限保护
+        int ok = 0, noResp = 0;
+        for (int i = 0; i < maxTimes && !abort; i++) {
+            org.json.JSONObject resp = callApi(AD_EVENT_API, "1.0", adEventJson, "广告事件 " + (i + 1));
+            String ret = firstRet(resp);
+            if (resp == null) {
+                noResp++;
+                report.append("[广告] 第 ").append(i + 1).append(" 次 无响应（7.28.30 响应不落盘，继续）\n");
+                sleep(5000);
+                continue; // 无响应≠失败：以最终 times 复核判定
+            }
+            if (ret != null && ret.contains("SUCCESS")) {
+                ok++;
+                report.append("[广告] 第 ").append(i + 1).append(" 次 complete -> ").append(ret).append('\n');
+            } else {
+                report.append("[广告] 第 ").append(i + 1).append(" 次 -> ").append(ret).append('\n');
+                break; // 非成功（如已达上限/参数问题）即停
+            }
+            sleep(5000);
+        }
+        // 复核 times 决定领奖
+        int times = -1, max = -1;
+        String st = null;
+        List<org.json.JSONObject> tl = extractTasks(
+                callApi(TASK_LIST_API, "2.0", "{\"sceneId\":496}", "广告复核"));
+        if (tl != null) {
+            for (org.json.JSONObject t : tl) {
+                if (deliveryId.equals(str(t, "deliveryId"))) {
+                    st = str(t, "idleTaskStatus");
+                    org.json.JSONObject pd = t.optJSONObject("progressDTO");
+                    if (pd != null) {
+                        try { times = Integer.parseInt(str(pd, "times")); } catch (Throwable ig) {}
+                        try { max = Integer.parseInt(str(pd, "maxTimes")); } catch (Throwable ig) {}
+                    }
+                    break;
+                }
+            }
+        }
+        report.append("[广告] 复核: status=").append(st).append(" times=").append(times)
+                .append('/').append(max).append(" (respOk=").append(ok).append(" noResp=").append(noResp).append(")\n");
+        if ("AWARD".equals(st) || "COMPLETE".equals(st) || (max > 0 && times >= max) || ok > 0) {
+            claimOne(deliveryId, "视频任务", done, fail);
+        }
+    }
+
+    /* ============================ 浏览任务 ============================ */
+
+    /** 商品池（多任务共享一次 nextfresh 拉取） */
+    private List<String> itemPool = null;
+
+    private List<String> itemPool() {
+        if (itemPool != null) return itemPool;
+        List<String> list = new ArrayList<>();
+        org.json.JSONObject nf = callApi(NEXT_FRESH_API, "1.0",
+                "{\"enableDx\":true,\"lastResponseCount\":0,\"pageNumber\":1}", "浏览任务商品源");
+        if (nf != null) {
+            org.json.JSONObject data = nf.optJSONObject("data");
+            org.json.JSONArray cards = data == null ? null : data.optJSONArray("cardList");
+            if (cards != null) {
+                for (int i = 0; i < cards.length(); i++) {
+                    org.json.JSONObject card = cards.optJSONObject(i);
+                    org.json.JSONObject cd = card == null ? null : card.optJSONObject("cardData");
+                    if (cd == null) continue;
+                    // 7.25.31: itemId 在 trackParams 里（老版在 cardData 顶层）；广告卡(bizType=AD)排除
+                    String bizType = optStr(cd, "bizType");
+                    if ("AD".equalsIgnoreCase(bizType)) continue;
+                    String itemId = optStr(cd, "itemId");
+                    if (itemId.isEmpty()) {
+                        org.json.JSONObject tp = cd.optJSONObject("trackParams");
+                        if (tp != null) itemId = optStr(tp, "itemId");
+                    }
+                    if (itemId != null && itemId.length() > 0) list.add(itemId);
+                }
+            }
+        }
+        itemPool = list;
+        return list;
+    }
+
+    /** 搜一搜任务：trigger 携带 action URL 全参数（任务指纹）+ 真实搜索行为支撑，完成即领奖 */
+    private void runSearchTask(String deliveryId, String title, String action, String fromToken, String groupId,
+                               List<String> done, List<String> fail) {
+        org.json.JSONObject tr = new org.json.JSONObject();
+        try {
+            tr.put("sceneId", 496);
+            tr.put("deliveryId", deliveryId);
+            // action URL 查询参数全量透传（implId=xyb001/channelSrp=xybrw/adPositionCode/refpid...）
+            android.net.Uri u = android.net.Uri.parse(action);
+            for (String k : new String[]{"implId", "channelSrp", "adPositionCode", "adOrderPositionCode", "refpid", "k_usetanx"}) {
+                String v = u.getQueryParameter(k);
+                if (v != null) tr.put(k, v);
+            }
+            if (fromToken != null && fromToken.length() > 0) tr.put("fromToken", fromToken);
+            if (groupId != null && groupId.length() > 0) {
+                try { tr.put("groupId", Long.parseLong(groupId)); } catch (Throwable e) { tr.put("groupId", groupId); }
+            }
+        } catch (Throwable t) {
+            report.append("[搜一搜] ").append(title).append(" 参数组装失败: ").append(t).append('\n');
+        }
+        callApi(TASK_TRIGGER_API, "1.0", tr.toString(), "搜一搜触发 " + title);
+        // 行为支撑：真实搜索一次（非必需，双保险）
+        callApi(SEARCH_API, "1.0", "{\"q\":\"闲鱼\",\"pageNumber\":1,\"pageSize\":10}", "搜一搜行为 " + title);
+        // 复核并领奖
+        org.json.JSONObject resp = callApi(TASK_LIST_API, "2.0", "{\"sceneId\":496}", "搜一搜复核");
+        String status = null;
+        List<org.json.JSONObject> tasks2 = extractTasks(resp);
+        if (tasks2 != null) {
+            for (org.json.JSONObject t : tasks2) {
+                if (deliveryId.equals(str(t, "deliveryId"))) { status = str(t, "idleTaskStatus"); break; }
+            }
+        }
+        if ("AWARD".equals(status) || "COMPLETE".equals(status)) {
+            claimOne(deliveryId, title, done, fail);
+        } else {
+            report.append("[搜一搜] ").append(title).append(" 未推进（status=").append(status).append("）\n");
+        }
+    }
+
+    /* ============================ ecMall 广告任务 ============================ */
+
+    /**
+     * ecMall 广告任务纯协议链（10-15 实测 104637 ACCEPTED→AWARD，真实链路逆向自 CsjMallActivity 会话）：
+     * 1. play.ad.query {code: adPositionCode, extra:{scenarioId, sourceType}} —— 服务端签发会话 token
+     *    （伪造 token 报 FAIL_BIZ_CSJ_TOKEN_MISMATCH"广告奖励会话已失效"；响应 data 顶层含
+     *     token/implId，attributes.taskConfig.browse.rewardDuration 为要求浏览秒数）
+     * 2. 等 rewardDuration 秒（默认 20，服务端校验时间间隔）
+     * 3. play.ad.event.query 预检（data.used=false 为可提交）
+     * 4. play.ad.event.push {adPositionCode, eventType:award, token, implId} —— SERVER_ERROR 可重试
+     *    （实测同 token 第 2 次成功；TOKEN_MISMATCH 则会话失效重试无意义）
+     * 5. 复核任务列表 → AWARD 领奖。
+     * 注意：100 币档领奖可能被当日 RMB 等值限额拦（FAIL_BIZ_IDL_COIN_TASK_RMB_CHECK_ERROR，
+     * 客户端自带 asac 同样被拦），AWARD 状态留给下一轮运行补领。
+     */
+    private void runEcMallTask(String deliveryId, String title, String action, List<String> done, List<String> fail) {
+        String poscode = null, scenarioId = null, sourceType = null;
+        try {
+            android.net.Uri u = android.net.Uri.parse(action);
+            poscode = u.getQueryParameter("adPositionCode");
+            scenarioId = u.getQueryParameter("scenarioId");
+            sourceType = u.getQueryParameter("sourceType");
+        } catch (Throwable ignored) {
+        }
+        if (poscode == null || poscode.length() == 0) {
+            report.append("[ecMall] ").append(title).append(" 无 adPositionCode，跳过\n");
+            return;
+        }
+        String extra = objJson("scenarioId", scenarioId == null ? "" : scenarioId,
+                "sourceType", sourceType == null ? "FEEDS_SLOT" : sourceType);
+        org.json.JSONObject q = callApi(AD_QUERY_API, "1.0",
+                objJson("code", poscode, "extra", extra), "ecMall ad.query " + title);
+        String ret = firstRet(q);
+        if (q == null || ret == null || !ret.contains("SUCCESS")) {
+            report.append("[ecMall] ").append(title).append(" ad.query 失败: ")
+                    .append(ret == null ? "无响应" : ret).append('\n');
+            return;
+        }
+        org.json.JSONObject d = q.optJSONObject("data");
+        String token = d == null ? null : optStr(d, "token");
+        String implId = d == null ? null : optStr(d, "implId");
+        int duration = 20; // rewardDuration 默认 20s
+        if (d != null) {
+            String attr = optStr(d, "attributes");
+            if (attr.length() > 0) {
+                try {
+                    org.json.JSONObject a = new org.json.JSONObject(attr);
+                    org.json.JSONObject tc = a.optJSONObject("taskConfig");
+                    org.json.JSONObject browse = tc == null ? null : tc.optJSONObject("browse");
+                    if (browse != null) {
+                        int dr = parseInt(optStr(browse, "rewardDuration"), 20);
+                        if (dr > 0) duration = dr;
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        if (token == null || token.length() == 0) {
+            report.append("[ecMall] ").append(title).append(" 未下发 token，跳过\n");
+            return;
+        }
+        report.append("[ecMall] ").append(title).append(" token=").append(token)
+                .append(" 浏览时长=").append(duration).append("s，等待中\n");
+        sleep(duration * 1000L + 2000);
+        // 预检（失败不阻断，仅记录）
+        org.json.JSONObject pre = callApi(AD_EVENT_QUERY_API, "1.0",
+                objJson("adPositionCode", poscode, "eventType", "award", "token", token, "implId", implId),
+                "ecMall 预检 " + title);
+        String preRet = firstRet(pre);
+        report.append("[ecMall] 预检 -> ").append(preRet == null ? "无响应" : preRet).append('\n');
+        // 提交 award（首发基本必 SERVER_ERROR，同 token 间隔 30s 重试稳定成功——
+        // 5s 短间隔×3 实测全败，30s 间隔第 2 发起稳定过；TOKEN_MISMATCH 则会话失效停止）
+        String pushRet = null;
+        for (int i = 0; i < 5 && !abort; i++) {
+            org.json.JSONObject push = callApi(AD_EVENT_API, "1.0",
+                    objJson("adPositionCode", poscode, "eventType", "award", "token", token, "implId", implId),
+                    "ecMall push " + title + (i > 0 ? "#" + (i + 1) : ""));
+            pushRet = firstRet(push);
+            if (pushRet != null && (pushRet.contains("SUCCESS") || pushRet.contains("TOKEN_MISMATCH"))) break;
+            sleep(30000);
+        }
+        report.append("[ecMall] push -> ").append(pushRet == null ? "无响应" : pushRet).append('\n');
+        // 复核领奖
+        sleep(3000);
+        org.json.JSONObject resp = callApi(TASK_LIST_API, "2.0", "{\"sceneId\":496}", "ecMall 复核");
+        String status = null;
+        List<org.json.JSONObject> tasks2 = extractTasks(resp);
+        if (tasks2 != null) {
+            for (org.json.JSONObject t : tasks2) {
+                if (deliveryId.equals(str(t, "deliveryId"))) {
+                    status = str(t, "idleTaskStatus");
+                    break;
+                }
+            }
+        }
+        if ("AWARD".equals(status) || "COMPLETE".equals(status)) {
+            claimOne(deliveryId, title, done, fail);
+        } else {
+            report.append("[ecMall] ").append(title).append(" 未推进（status=").append(status).append("）\n");
+        }
+    }
+
+    /* ============================ 好物夺宝 ============================ */
+
+    /**
+     * 好物夺宝纯协议链（10-16 实测 3137：bet SUCCESS → AWARD → 领奖）：
+     * feeds(fishAdCode+gps) 响应 cardList 含当日各场次 signUpId →
+     * bet({asac,attentionSuc:false,betNumber:1,fishAdCode,gps,signUpId}) 投一注（100 币）→
+     * 复核任务 AWARD → 领奖。signUpId 每日场次不同，从 feeds 自举。
+     */
+    private void runTreasureBetTask(String deliveryId, String title, List<String> done, List<String> fail) {
+        org.json.JSONObject feeds = callApi(LOTTERY_FEEDS_API, "1.0",
+                objJson("fishAdCode", FISH_AD_CODE, "gps", DEFAULT_GPS), "夺宝 feeds " + title);
+        String signUpId = null;
+        String fRet = firstRet(feeds);
+        if (feeds != null && fRet != null && fRet.contains("SUCCESS")) {
+            org.json.JSONObject d = feeds.optJSONObject("data");
+            org.json.JSONArray cards = d == null ? null : d.optJSONArray("cardList");
+            if (cards != null && cards.length() > 0) {
+                org.json.JSONObject c0 = cards.optJSONObject(0);
+                signUpId = c0 == null ? null : optStr(c0, "signUpId");
+            }
+        }
+        if (signUpId == null || signUpId.length() == 0) {
+            report.append("[夺宝] ").append(title).append(" 未取到 signUpId（ret=")
+                    .append(fRet == null ? "无响应" : fRet).append("），跳过\n");
+            return;
+        }
+        // 投一注（100 闲鱼币）。bet 首发如 SERVER_ERROR 可同参重试（同 ecMall push 经验）
+        String betRet = null;
+        for (int i = 0; i < 3 && !abort; i++) {
+            org.json.JSONObject bet = callApi(LOTTERY_BET_API, "1.0",
+                    objJson("asac", DEFAULT_ASAC, "attentionSuc", "false", "betNumber", "1",
+                            "fishAdCode", FISH_AD_CODE, "gps", DEFAULT_GPS, "signUpId", signUpId),
+                    "夺宝 bet " + title + (i > 0 ? "#" + (i + 1) : ""));
+            betRet = firstRet(bet);
+            if (betRet != null && betRet.contains("SUCCESS")) break;
+            sleep(8000);
+        }
+        report.append("[夺宝] ").append(title).append(" bet(").append(signUpId).append(") -> ")
+                .append(betRet == null ? "无响应" : betRet).append('\n');
+        if (betRet == null || !betRet.contains("SUCCESS")) return;
+        // 复核领奖
+        sleep(3000);
+        org.json.JSONObject resp = callApi(TASK_LIST_API, "2.0", "{\"sceneId\":496}", "夺宝复核");
+        String status = null;
+        List<org.json.JSONObject> tasks2 = extractTasks(resp);
+        if (tasks2 != null) {
+            for (org.json.JSONObject t : tasks2) {
+                if (deliveryId.equals(str(t, "deliveryId"))) {
+                    status = str(t, "idleTaskStatus");
+                    break;
+                }
+            }
+        }
+        if ("AWARD".equals(status) || "COMPLETE".equals(status)) {
+            claimOne(deliveryId, title, done, fail);
+        } else {
+            report.append("[夺宝] ").append(title).append(" 未推进（status=").append(status).append("）\n");
+        }
+    }
+
+    /* ============================ 擦亮（参考猪手 c_tk/c_nb/c_sk） ============================ */
+
+    /**
+     * 擦亮全流程（猪手同款）：
+     * 1. 每日一次标记（猪手存 polish_<userId>=日期，这里存 rh_pref.json 的 polish_date）
+     * 2. 一次调用 mtop.taobao.idle.item.polish v2.0 {"type":"originaljson"}，
+     *    服务端自动擦亮全部在售宝贝，响应 data.exposureItems 返回擦亮的宝贝列表
+     * 3. 失败码：FAIL_BIZ_IDLE_USER_POLISH_AGAIN（今日已擦过）/
+     *    FAIL_BIZ_ITEM_POLISH_FAILED3（今日次数用完）→ 猪手同款也写日期标记防反复重试
+     */
+    private void runPolish() {
+        String today = new java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
+                .format(new java.util.Date());
+        String prefPath = cacheDir + "/rh_pref.json";
+        org.json.JSONObject pref = parseObj(readFile(prefPath).trim().isEmpty() ? "{}" : readFile(prefPath));
+        if (today.equals(pref.optString("polish_date"))) {
+            report.append("[擦亮] 今日已擦亮（每日一次标记），跳过\n");
+            return;
+        }
+        org.json.JSONObject resp = callApi(POLISH_API, "2.0", "{\"type\":\"originaljson\"}", "擦亮");
+        String ret = firstRet(resp);
+        int n = 0;
+        if (resp != null) {
+            org.json.JSONObject data = resp.optJSONObject("data");
+            org.json.JSONArray ei = data == null ? null : data.optJSONArray("exposureItems");
+            if (ei != null) n = ei.length();
+        }
+        if (ret != null && ret.contains("SUCCESS")) {
+            // 成功即写标记（含 n=0：服务端受理但无 exposureItems——当日已擦过/无可擦宝贝）。
+            // 猪手原版 onSuccess 不写标记、靠服务端判重兜底，这里改进为成功即记，省每日重复调用
+            report.append(n > 0 ? "[擦亮] SUCCESS：已擦亮 " + n + " 个宝贝\n"
+                    : "[擦亮] SUCCESS：服务端受理（今日已擦过或无可擦宝贝）\n");
+            markPolished(prefPath, pref, today);
+        } else if (ret != null && ret.contains("POLISH_AGAIN")) {
+            report.append("[擦亮] 今日已擦亮过（服务端判重）\n");
+            markPolished(prefPath, pref, today);
+        } else if (ret != null && ret.contains("POLISH_FAILED3")) {
+            report.append("[擦亮] 今日擦亮次数已用完（服务端限制）\n");
+            markPolished(prefPath, pref, today);
+        } else {
+            // 网络失败/无响应：不写标记，下次运行重试
+            report.append("[擦亮] ").append(ret == null ? "无响应，下次重试" : ret).append('\n');
+        }
+    }
+
+    /** 写每日擦亮标记（猪手同款：成功与"已擦过"都写，防反复重试） */
+    private void markPolished(String prefPath, org.json.JSONObject pref, String today) {
+        try {
+            pref.put("polish_date", today);
+            writeFile(prefPath, pref.toString());
+        } catch (Throwable t) {
+            log("markPolished fail: " + t);
+        }
+    }
+
+    private void browseForTask(String deliveryId, String sceneId, List<String> done, List<String> fail) {
+        List<String> idList = itemPool();
+        if (idList.isEmpty()) {
+            report.append("[浏览] 商品源为空，跳过\n");
+            return;
+        }
+        report.append("[浏览] 商品源 ").append(idList.size()).append(" 个\n");
+
+        // needTimes：从任务响应无法稳定拿到时按 10 兜底（"浏览10次推荐"）
+        int needTimes = 10;
+        int okCount = 0;      // 本地成功计数（服务端 times 解析不到时兜底）
+        int idx = 0;          // 当前商品索引
+        int illegalRun = 0;   // 连续 ILLEGAL 计数：>=3 判定任务语义不匹配（如买/卖宝贝），中止
+        long gap = BROWSE_GAP_MS;
+
+        for (int step = 0; step < BROWSE_MAX_STEPS && !abort; step++) {
+            if (idx >= idList.size()) {
+                report.append("[浏览] 商品列表用尽\n");
+                break;
+            }
+            String implId = idList.get(idx);
+            org.json.JSONObject tr = callApi(TASK_TRIGGER_API, "1.0",
+                    objJson("sceneId", sceneId, "implId", implId, "deliveryId", deliveryId),
+                    "浏览上报 " + (idx + 1) + "/" + idList.size());
+            String ret = firstRet(tr);
+            if (tr == null) {
+                report.append("[浏览] 上报无响应，中止\n");
+                break;
+            }
+            if (ret != null && ret.contains("SUCCESS")) {
+                illegalRun = 0;
+                okCount++;
+                org.json.JSONObject data = tr.optJSONObject("data");
+                org.json.JSONObject dto = data == null ? null : data.optJSONObject("taskDTO");
+                org.json.JSONObject pg = dto == null ? null : dto.optJSONObject("progressDTO");
+                int times = pg == null ? -1 : parseInt(optStr(pg, "times"), -1);
+                int need = pg == null ? -1 : parseInt(optStr(pg, "needTimes"), -1);
+                if (need > 0) needTimes = need;
+                report.append("[浏览] step ").append(idx).append(" ok okCount=").append(okCount)
+                        .append(" times=").append(times).append("/").append(need).append('\n');
+                if ((need > 0 && times >= need) || okCount >= needTimes) {
+                    report.append("[浏览] 任务完成（").append(okCount).append("次），开始领奖\n");
+                    claimOne(deliveryId, "浏览任务", done, fail);
+                    return;
+                }
+                idx = times > idx ? times : idx + 1; // 猪手：以服务端 times 为下一索引
+                gap = BROWSE_GAP_MS;                  // 成功后恢复基础间隔
+            } else if (ret != null && ret.contains("ILLEGAL")) {
+                illegalRun++;
+                if (illegalRun >= 3) {
+                    // 语义不匹配（idleCoinFeesAnchor 也被"买/卖宝贝"等真实行为任务复用），
+                    // 商品上报对它永远无效，立即中止避免空转
+                    report.append("[浏览] 连续 ").append(illegalRun)
+                            .append(" 次 ILLEGAL，任务需真实行为，中止\n");
+                    return;
+                }
+                gap = Math.min(gap + 4000, 16000);
+                report.append("[浏览] step ").append(idx).append(" ILLEGAL ").append(illegalRun)
+                        .append("/3，退避 ").append(gap / 1000).append("s\n");
+                sleep(gap);
+                continue;
+            } else {
+                report.append("[浏览] step ").append(idx).append(" -> ").append(ret).append("，换下一个\n");
+                idx++;
+            }
+            sleep(gap);
+        }
+        // 循环结束：若本地成功数足够也领一次
+        if (okCount >= needTimes) {
+            report.append("[浏览] 达到次数（兜底判定），领奖\n");
+            claimOne(deliveryId, "浏览任务", done, fail);
+        }
+    }
+
+    /* ============================ 领奖 ============================ */
+
+    private void claimOne(String deliveryId, String title, List<String> done, List<String> fail) {
+        org.json.JSONObject resp = callApi(TASK_BENEFIT_API, "1.0",
+                objJson("sceneId", "496", "deliveryId", deliveryId), "领奖 " + title);
+        String ret = firstRet(resp);
+        String rewardDesc = "";
+        if (resp != null) {
+            org.json.JSONObject data = resp.optJSONObject("data");
+            org.json.JSONObject dto = data == null ? null : data.optJSONObject("taskDTO");
+            if (dto != null) {
+                org.json.JSONArray rewards = dto.optJSONArray("rewards");
+                rewardDesc = rewards == null ? "" : rewards.toString();
+            }
+        }
+        boolean ok = ret != null && ret.contains("SUCCESS");
+        // SUCCESS 即视为成功（rewards 空可能是非币奖励或当日已领的幂等响应）
+        if (ok) {
+            done.add(title + "(" + deliveryId + ")");
+            report.append("[领取] ").append(title).append(" -> ").append(ret)
+                    .append(" rewards=").append(rewardDesc).append('\n');
+        } else {
+            fail.add(title + "(" + deliveryId + ")");
+            report.append("[领取] ").append(title).append(" -> ").append(ret == null ? "无响应" : ret).append('\n');
+        }
+    }
+
+    /* ============================ 请求与文件通道 ============================ */
+
+    /** direct 发请求 + 轮询响应分文件。返回解析后的 JSON 或 null */
+    private org.json.JSONObject callApi(String api, String ver, String paramsJson, String tag) {
+        String f = respFile(api);
+        sleep(300); // 让指纹稳定
+        String fp0 = fileFp(f);
+        boolean sent = ApiDirect.send(cl, api, ver, paramsJson);
+        if (!sent) {
+            log("[tasks] direct send failed: " + api);
+            return null;
+        }
+        long deadline = System.currentTimeMillis() + REQ_TIMEOUT_S * 1000L;
+        while (System.currentTimeMillis() < deadline && !abort) {
+            sleep(400);
+            String fp = fileFp(f);
+            if (fp != null && !fp.equals(fp0)) {
+                String body = readFile(f);
+                try {
+                    org.json.JSONObject j = new org.json.JSONObject(body);
+                    String ret = firstRet(j);
+                    log("[tasks] " + tag + " -> " + ret);
+                    return j;
+                } catch (Throwable e) {
+                    log("[tasks] resp parse fail " + api + ": " + e);
+                    return null;
+                }
+            }
+        }
+        log("[tasks] timeout: " + tag);
+        return null;
+    }
+
+    private String respFile(String api) {
+        String last = api;
+        int dot = last.lastIndexOf('.');
+        if (dot >= 0) last = last.substring(dot + 1);
+        return cacheDir + "/rh_resp_" + last + ".json";
+    }
+
+    private String fileFp(String path) {
+        try {
+            java.io.File f = new java.io.File(path);
+            if (!f.exists() || f.length() == 0) return null;
+            return f.length() + ":" + f.lastModified();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private String readFile(String path) {
+        try {
+            java.io.FileInputStream in = new java.io.FileInputStream(path);
+            byte[] b = new byte[in.available()];
+            int n = in.read(b);
+            in.close();
+            return n > 0 ? new String(b, "UTF-8") : "";
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    private void writeFile(String path, String content) {
+        try {
+            java.io.FileWriter w = new java.io.FileWriter(path, false);
+            w.write(content);
+            w.close();
+        } catch (Throwable t) {
+            log("writeFile fail: " + t);
+        }
+    }
+
+    /* ============================ JSON 工具 ============================ */
+
+    private List<org.json.JSONObject> extractTasks(org.json.JSONObject resp) {
+        if (resp == null) return null;
+        org.json.JSONObject data = resp.optJSONObject("data");
+        org.json.JSONArray arr = data == null ? null : data.optJSONArray("taskList");
+        if (arr == null) return null;
+        List<org.json.JSONObject> out = new ArrayList<>();
+        for (int i = 0; i < arr.length(); i++) {
+            org.json.JSONObject t = arr.optJSONObject(i);
+            if (t != null) out.add(t);
+        }
+        return out;
+    }
+
+    private static String firstRet(org.json.JSONObject resp) {
+        if (resp == null) return null;
+        org.json.JSONArray ret = resp.optJSONArray("ret");
+        return ret != null && ret.length() > 0 ? ret.optString(0) : String.valueOf(resp.opt("ret"));
+    }
+
+    private static String objJson(String... kv) {
+        try {
+            org.json.JSONObject j = new org.json.JSONObject();
+            for (int i = 0; i + 1 < kv.length; i += 2) j.put(kv[i], kv[i + 1]);
+            return j.toString();
+        } catch (Throwable t) {
+            return "{}";
+        }
+    }
+
+    private static org.json.JSONObject parseObj(String s) {
+        try {
+            return s == null ? new org.json.JSONObject() : new org.json.JSONObject(s);
+        } catch (Throwable t) {
+            return new org.json.JSONObject();
+        }
+    }
+
+    private static boolean opt(org.json.JSONObject j, String k, boolean def) {
+        return j == null ? def : j.optBoolean(k, def);
+    }
+
+    private static String str(org.json.JSONObject j, String k) {
+        return j == null ? null : j.optString(k, null);
+    }
+
+    private static String optStr(org.json.JSONObject j, String k) {
+        return j.optString(k, "");
+    }
+
+    private static int parseInt(String s, int def) {
+        try {
+            return Integer.parseInt(s.trim());
+        } catch (Throwable t) {
+            return def;
+        }
+    }
+
+    /* ============================ 收尾 ============================ */
+
+    private void finish(long t0) {
+        report.append("耗时 ").append((System.currentTimeMillis() - t0) / 1000).append("s\n");
+        String out = report.toString();
+        writeFile(cacheDir + "/rh_tasks_result.txt", out);
+        log("=== task auto done ===\n" + out);
+        notifyDone(out);
+    }
+
+    /** 跑批结果通知栏推送（免连电脑可见） */
+    private void notifyDone(String out) {
+        try {
+            android.content.Context c = appCtx;
+            if (c == null) return;
+            android.app.NotificationManager nm = (android.app.NotificationManager)
+                    c.getSystemService(android.content.Context.NOTIFICATION_SERVICE);
+            if (nm == null) return;
+            String channelId = "reward_hook";
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                nm.createNotificationChannel(new android.app.NotificationChannel(
+                        channelId, "任务引擎结果", android.app.NotificationManager.IMPORTANCE_DEFAULT));
+            }
+            int done = 0, failed = 0;
+            for (String line : out.split("\n")) {
+                if (line.startsWith("领取成功")) done = parseCount(line);
+                else if (line.startsWith("领取失败")) failed = parseCount(line);
+            }
+            String summary = done > 0 || failed > 0
+                    ? "领取 " + done + " 笔" + (failed > 0 ? "，失败 " + failed + " 笔" : "")
+                    : "跑批完成（无领取动作）";
+            android.app.Notification.Builder b = android.os.Build.VERSION.SDK_INT >= 26
+                    ? new android.app.Notification.Builder(c, channelId)
+                    : new android.app.Notification.Builder(c);
+            b.setSmallIcon(android.R.drawable.ic_menu_send)
+                    .setContentTitle("RewardHook · " + summary)
+                    .setContentText(summary)
+                    .setStyle(new android.app.Notification.BigTextStyle()
+                            .bigText(out.length() > 3500 ? out.substring(0, 3500) : out))
+                    .setAutoCancel(true);
+            nm.notify(1001, b.build());
+            log("notification sent: " + summary);
+        } catch (Throwable t) {
+            log("notify FAILED: " + t);
+        }
+    }
+
+    /** 解析 "领取成功 2: [a, b]" 行中的数字 */
+    private static int parseCount(String line) {
+        try {
+            int colon = line.indexOf(':');
+            return Integer.parseInt(line.substring("领取成功".length(), colon).trim());
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    private static void sleep(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
+            // 外层循环通过 abort 无法感知 interrupt；此处保持安静
+        }
+    }
+
+    private static void log(String msg) {
+        XposedBridge.log("[RewardHook] " + msg);
+    }
+}

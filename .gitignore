@@ -1,0 +1,18 @@
+# 构建产物
+build/
+*.apk
+*.idsig
+*.log
+
+# 签名（绝不入库）
+.keystore/
+
+# IDE
+.idea/
+*.iml
+.gradle/
+local.properties
+
+# OS
+.DS_Store
+Thumbs.db

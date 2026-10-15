@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">咸鱼小猪手</string>
+    <string name="module_desc">看广告/浏览任务奖励直领模块：日志侦察 + 骗过本地校验 + 直接调用发奖方法</string>
+</resources>
