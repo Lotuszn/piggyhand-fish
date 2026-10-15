@@ -46,6 +46,15 @@
                     android:text="v1.0"
                     android:textColor="@color/white"
                     android:textSize="11sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:alpha="0.65"
+                    android:text="酷安@ Lotuszn"
+                    android:textColor="@color/white"
+                    android:textSize="11sp" />
         </LinearLayout>
 
         <!-- 状态卡 -->
