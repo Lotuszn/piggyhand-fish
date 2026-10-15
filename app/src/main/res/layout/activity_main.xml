@@ -43,7 +43,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
                     android:alpha="0.7"
-                    android:text="v1.0"
+                    android:text="v1.0.1"
                     android:textColor="@color/white"
                     android:textSize="11sp" />
 
@@ -52,7 +52,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
                     android:alpha="0.65"
-                    android:text="酷安@ Lotuszn"
+                    android:text="酷安@Lotuszn"
                     android:textColor="@color/white"
                     android:textSize="11sp" />
         </LinearLayout>
