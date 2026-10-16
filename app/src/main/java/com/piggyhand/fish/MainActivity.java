@@ -62,7 +62,7 @@ public class MainActivity extends Activity {
 
     /* 控件 */
     private TextView tvVersion, tvStatus, tvStatusMeta, tvReport, tvGhSub, tvGhVal, tvHoursNum;
-    private View dotNew, pulseHalo, scoutArgs, rowUpdate, rowCoolapk;
+    private View dotNew, dotOk, pulseHalo, scoutArgs, rowUpdate, rowCoolapk;
     private View linkPicker; // 下载渠道选择弹层（非空 = 正在显示）
     private LiquidSwitch swAutoRun, swMtop, swAds, swScout;
     private LiquidSlider sliderHours;
@@ -112,6 +112,7 @@ public class MainActivity extends Activity {
         tvGhVal = findViewById(R.id.tvGhVal);
         tvHoursNum = findViewById(R.id.tvHoursNum);
         dotNew = findViewById(R.id.dotNew);
+        dotOk = findViewById(R.id.dotOk);
         pulseHalo = findViewById(R.id.pulseHalo);
         scoutArgs = findViewById(R.id.scoutArgs);
         rowUpdate = findViewById(R.id.rowUpdate);
@@ -425,16 +426,24 @@ public class MainActivity extends Activity {
                     // 网络失败（如国内直连 api.github.com 不通）：可见可重试，不再静默
                     updateCheckFailed = true;
                     dotNew.setVisibility(View.GONE);
+                    dotOk.setVisibility(View.GONE);
+                    tvGhSub.setVisibility(View.VISIBLE);
                     tvGhSub.setText("检查失败 · 点按重试");
                     tvGhSub.setTextColor(0xFF8A8B92);
                 } else if (hasUpdate) {
                     dotNew.setVisibility(View.VISIBLE);
+                    dotOk.setVisibility(View.GONE);
+                    tvGhSub.setVisibility(View.VISIBLE);
                     tvGhSub.setText("发现新版本 · 点击前往下载");
                     tvGhSub.setTextColor(0xFFC76800);
                     tvGhVal.setText("v" + latest + " ›");
                 } else {
-                    // 已是最新：副标题隐藏，行内容自动收缩居中
-                    tvGhSub.setVisibility(View.GONE);
+                    // 已是最新：绿点 + 「当前为最新版 + 版本号」
+                    dotNew.setVisibility(View.GONE);
+                    dotOk.setVisibility(View.VISIBLE);
+                    tvGhSub.setVisibility(View.VISIBLE);
+                    tvGhSub.setText("当前为最新版 v" + UpdateChecker.currentVersion(MainActivity.this));
+                    tvGhSub.setTextColor(0xFF0DB85A);
                 }
             }
         });

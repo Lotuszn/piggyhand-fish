@@ -105,7 +105,7 @@
                                     android:id="@+id/tvVersion"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="v1.0.3 · LSPosed"
+                                    android:text="v1.0.4 · LSPosed"
                                     android:textColor="@color/brand_deep"
                                     android:textSize="10sp"
                                     android:textStyle="bold" />
@@ -903,11 +903,19 @@
                                     android:background="@drawable/dot_new"
                                     android:visibility="gone" />
 
+                                <View
+                                    android:id="@+id/dotOk"
+                                    android:layout_width="7dp"
+                                    android:layout_height="7dp"
+                                    android:layout_marginEnd="5dp"
+                                    android:background="@drawable/dot_ok"
+                                    android:visibility="gone" />
+
                                 <TextView
                                     android:id="@+id/tvGhVal"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="v1.0.3 ›"
+                                    android:text="v1.0.4 ›"
                                     android:textColor="@color/text_sub"
                                     android:textSize="11sp" />
                             </LinearLayout>
