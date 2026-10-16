@@ -56,6 +56,8 @@ public final class FishTaskAuto {
     private final StringBuilder report = new StringBuilder();
     private volatile boolean abort = false;
     private static android.content.Context appCtx;
+    /** 每任务 Toast 气泡开关（config.toastNotify，默认开） */
+    private static volatile boolean toastOn = true;
 
     private FishTaskAuto(ClassLoader cl, String cacheDir) {
         this.cl = cl;
@@ -73,6 +75,11 @@ public final class FishTaskAuto {
             return;
         }
         appCtx = ctx.getApplicationContext() != null ? ctx.getApplicationContext() : ctx;
+        try {
+            ConfigManager tcfg = ConfigManager.load();
+            toastOn = tcfg == null || tcfg.toastNotify;
+        } catch (Throwable ignored) {
+        }
         final ClassLoader cl = ctx.getClassLoader();
         java.io.File ext = ctx.getExternalCacheDir();
         final String dir = ext != null ? ext.getAbsolutePath()
@@ -84,6 +91,68 @@ public final class FishTaskAuto {
                 RUNNING.set(false);
             }
         }, "rh-tasks").start();
+    }
+
+    /** 主线程 Toast 气泡（任务完成逐项提示）；全程 try-catch，任何异常不影响宿主 */
+    private static void toast(String msg) {
+        if (!toastOn || appCtx == null) return;
+        try {
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                try {
+                    android.widget.Toast.makeText(appCtx, msg,
+                            android.widget.Toast.LENGTH_SHORT).show();
+                } catch (Throwable ignored) {
+                }
+            });
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 从签到/小店等通用响应中挖 rewards JSON 串（供 coinSuffix 用），找不到返回空 */
+    private static String signinRewards(org.json.JSONObject resp) {
+        try {
+            if (resp == null) return "";
+            org.json.JSONObject data = resp.optJSONObject("data");
+            if (data == null) return "";
+            org.json.JSONArray rw = data.optJSONArray("rewards");
+            if (rw != null) return rw.toString();
+            org.json.JSONObject res = data.optJSONObject("result");
+            if (res != null) {
+                rw = res.optJSONArray("rewards");
+                if (rw != null) return rw.toString();
+            }
+            rw = data.optJSONArray("rewardList");
+            return rw == null ? "" : rw.toString();
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /** 从领奖 rewards JSON 提取金币合计，返回 " +N币" 后缀（解析失败返回空串） */
+    private static String coinSuffix(String rewardsJson) {
+        try {
+            if (rewardsJson == null || rewardsJson.isEmpty()) return "";
+            org.json.JSONArray arr = new org.json.JSONArray(rewardsJson);
+            int total = 0;
+            for (int i = 0; i < arr.length(); i++) {
+                org.json.JSONObject r = arr.optJSONObject(i);
+                if (r == null) continue;
+                String[] keys = {"coinNum", "coin", "amount", "value"};
+                for (String k : keys) {
+                    if (r.has(k)) {
+                        try {
+                            total += Integer.parseInt(
+                                    String.valueOf(r.get(k)).replaceAll("[^0-9-]", ""));
+                        } catch (Throwable ignored) {
+                        }
+                        break;
+                    }
+                }
+            }
+            return total > 0 ? " +" + total + "币" : "";
+        } catch (Throwable t) {
+            return "";
+        }
     }
 
     /**
@@ -194,10 +263,18 @@ public final class FishTaskAuto {
 
         try {
             /* 0. 附带日常：签到 / 擦亮 / 卖鱼 / 小店 */
-            if (doSignin) callApi(SIGNIN_API, "1.0", "{}", "签到");
+            if (doSignin) {
+                org.json.JSONObject sgn = callApi(SIGNIN_API, "1.0", "{}", "签到");
+                String sret = firstRet(sgn);
+                if (sret != null && sret.contains("SUCCESS")) toast("✓ 每日签到" + coinSuffix(signinRewards(sgn)));
+            }
             if (doPolish) runPolish();
             if (doSold) report.append("[卖鱼] 跳过：钓场玩法在闲鱼 7.25.31 已移除（APK 内无 fishing 接口，猪手旧功能）\n");
-            if (doShop) callApi(SHOP_BENEFIT_API, "1.0", "{}", "小店日福利");
+            if (doShop) {
+                org.json.JSONObject shp = callApi(SHOP_BENEFIT_API, "1.0", "{}", "小店日福利");
+                String shret = firstRet(shp);
+                if (shret != null && shret.contains("SUCCESS")) toast("✓ 小店日福利");
+            }
 
             /* 1. 拉任务列表 */
             org.json.JSONObject resp = callApi(TASK_LIST_API, "2.0", "{\"sceneId\":496}", "任务列表");
@@ -752,6 +829,7 @@ public final class FishTaskAuto {
             // 猪手原版 onSuccess 不写标记、靠服务端判重兜底，这里改进为成功即记，省每日重复调用
             report.append(n > 0 ? "[擦亮] SUCCESS：已擦亮 " + n + " 个宝贝\n"
                     : "[擦亮] SUCCESS：服务端受理（今日已擦过或无可擦宝贝）\n");
+            if (n > 0) toast("✓ 擦亮 " + n + " 个宝贝");
             markPolished(prefPath, pref, today);
         } else if (ret != null && ret.contains("POLISH_AGAIN")) {
             report.append("[擦亮] 今日已擦亮过（服务端判重）\n");
@@ -870,6 +948,7 @@ public final class FishTaskAuto {
             done.add(title + "(" + deliveryId + ")");
             report.append("[领取] ").append(title).append(" -> ").append(ret)
                     .append(" rewards=").append(rewardDesc).append('\n');
+            toast("✓ " + title + coinSuffix(rewardDesc));
         } else {
             fail.add(title + "(" + deliveryId + ")");
             report.append("[领取] ").append(title).append(" -> ").append(ret == null ? "无响应" : ret).append('\n');
@@ -1015,6 +1094,14 @@ public final class FishTaskAuto {
         writeFile(cacheDir + "/rh_tasks_result.txt", out);
         log("=== task auto done ===\n" + out);
         notifyDone(out);
+        // 收尾气泡：本轮共领多少项
+        int done = 0, failed = 0;
+        for (String line : out.split("\n")) {
+            if (line.startsWith("领取成功")) done = parseCount(line);
+            else if (line.startsWith("领取失败")) failed = parseCount(line);
+        }
+        toast("跑批完成 · 成功 " + done + (failed > 0 ? " · 失败 " + failed : "")
+                + " · 用时 " + (System.currentTimeMillis() - t0) / 1000 + "s");
     }
 
     /** 跑批结果通知栏推送（免连电脑可见） */
@@ -1042,7 +1129,7 @@ public final class FishTaskAuto {
                     ? new android.app.Notification.Builder(c, channelId)
                     : new android.app.Notification.Builder(c);
             b.setSmallIcon(android.R.drawable.ic_menu_send)
-                    .setContentTitle("RewardHook · " + summary)
+                    .setContentTitle("咸鱼小猪手 · " + summary)
                     .setContentText(summary)
                     .setStyle(new android.app.Notification.BigTextStyle()
                             .bigText(out.length() > 3500 ? out.substring(0, 3500) : out))

@@ -21,7 +21,8 @@ public class ConfigManager {
             "  \"autoRunIntervalHours\": 4,\n" +
             "  \"targets\": [\"com.taobao.idlefish\"],\n" +
             "  \"mtopHook\": true,\n" +
-            "  \"scout\": false,\n" +
+            "  \"toastNotify\": true,\n" +
+            "  \"scout\": true,\n" +
             "  \"scoutPattern\": \"reward|bonus|coin\",\n" +
             "  \"maxScoutMethods\": 400,\n" +
             "  \"adSdkPresets\": true,\n" +
@@ -41,6 +42,7 @@ public class ConfigManager {
     public boolean scout = true;
     public boolean adSdkPresets = true;
     public boolean mtopHook = true;
+    public boolean toastNotify = true;
     public String scoutPattern = "reward|bonus|coin";
     public int maxScoutMethods = 400;
 
@@ -100,6 +102,7 @@ public class ConfigManager {
             c.scout = o.optBoolean("scout", true);
             c.adSdkPresets = o.optBoolean("adSdkPresets", true);
             c.mtopHook = o.optBoolean("mtopHook", true);
+            c.toastNotify = o.optBoolean("toastNotify", true);
             c.scoutPattern = o.optString("scoutPattern", "reward|bonus|coin");
             c.maxScoutMethods = o.optInt("maxScoutMethods", 400);
 

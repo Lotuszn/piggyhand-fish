@@ -42,6 +42,7 @@ public class MainActivity extends Activity {
     private static final String FISH_PKG = "com.taobao.idlefish";
     private static final String RELEASES_URL =
             "https://github.com/Lotuszn/piggyhand-fish/releases/latest";
+    private static final String COOLAPK_URL = "https://www.coolapk.com/u/2206962";
 
     /* 导航 */
     private ViewGroup track;
@@ -55,7 +56,7 @@ public class MainActivity extends Activity {
 
     /* 控件 */
     private TextView tvVersion, tvStatus, tvStatusMeta, tvReport, tvGhSub, tvGhVal, tvHoursNum;
-    private View dotNew, pulseHalo, scoutArgs, rowGithub;
+    private View dotNew, pulseHalo, scoutArgs, rowGithub, rowCoolapk;
     private LiquidSwitch swAutoRun, swMtop, swAds, swScout;
     private LiquidSlider sliderHours;
     private EditText etPattern, etMax;
@@ -106,6 +107,7 @@ public class MainActivity extends Activity {
         pulseHalo = findViewById(R.id.pulseHalo);
         scoutArgs = findViewById(R.id.scoutArgs);
         rowGithub = findViewById(R.id.rowGithub);
+        rowCoolapk = findViewById(R.id.rowCoolapk);
         swAutoRun = findViewById(R.id.swAutoRun);
         swMtop = findViewById(R.id.swMtop);
         swAds = findViewById(R.id.swAds);
@@ -134,7 +136,7 @@ public class MainActivity extends Activity {
         swAutoRun.setOnSilent(cfg.optBoolean("autoRun", true));
         swMtop.setOnSilent(cfg.optBoolean("mtopHook", true));
         swAds.setOnSilent(cfg.optBoolean("adSdkPresets", true));
-        swScout.setOnSilent(cfg.optBoolean("scout", false));
+        swScout.setOnSilent(cfg.optBoolean("scout", true));
         scoutArgs.setVisibility(swScout.isOn() ? View.VISIBLE : View.GONE);
         etPattern.setText(cfg.optString("scoutPattern", "reward|bonus|coin"));
         etMax.setText(String.valueOf(cfg.optInt("maxScoutMethods", 400)));
@@ -208,6 +210,25 @@ public class MainActivity extends Activity {
             public void onClick(View v) {
                 try {
                     startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(RELEASES_URL)));
+                } catch (Throwable t) {
+                    Toast.makeText(MainActivity.this, "无可用浏览器", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+
+        // ===== 酷安行点击 → 作者主页：优先直拉酷安 App（免 MIUI 关联启动确认），未装则浏览器 =====
+        rowCoolapk.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Intent cool = new Intent(Intent.ACTION_VIEW, Uri.parse(COOLAPK_URL));
+                cool.setPackage("com.coolapk.market");
+                try {
+                    startActivity(cool);
+                    return;
+                } catch (Throwable ignored) {
+                }
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(COOLAPK_URL)));
                 } catch (Throwable t) {
                     Toast.makeText(MainActivity.this, "无可用浏览器", Toast.LENGTH_SHORT).show();
                 }

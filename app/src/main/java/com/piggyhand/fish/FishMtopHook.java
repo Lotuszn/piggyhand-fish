@@ -322,6 +322,14 @@ public final class FishMtopHook {
                                     if (req != null && req.contains("REPORT")) {
                                         body = readCacheFile("rh_tasks_result.txt");
                                         if (body == null) body = "";
+                                    } else if (req != null && req.startsWith("RUN")) {
+                                        // 任务触发指令（绕过 MIUI 对跨 App 广播的拦截）：
+                                        // RUN            → 默认全任务
+                                        // RUN {"signin":true,...} → 带 extras
+                                        String extras = req.length() > 3 ? req.substring(3).trim() : null;
+                                        if (extras != null && extras.isEmpty()) extras = null;
+                                        FishTaskAuto.launch(appCtx, extras);
+                                        body = "OK";
                                     }
                                     java.io.OutputStream os = s.getOutputStream();
                                     os.write(body.getBytes("UTF-8"));
