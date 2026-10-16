@@ -61,7 +61,7 @@ public class MainActivity extends Activity {
     private boolean pillReady = false;
 
     /* 控件 */
-    private TextView tvVersion, tvStatus, tvStatusMeta, tvReport, tvGhSub, tvGhVal, tvHoursNum;
+    private TextView tvVersion, tvStatus, tvStatusMeta, tvReport, tvGhSub, tvGhVal, tvHoursNum, tvRootWarn;
     private View dotNew, dotOk, pulseHalo, scoutArgs, rowUpdate, rowCoolapk;
     private View linkPicker; // 下载渠道选择弹层（非空 = 正在显示）
     private LiquidSwitch swAutoRun, swMtop, swAds, swScout, swPolish;
@@ -110,6 +110,7 @@ public class MainActivity extends Activity {
         tvReport = findViewById(R.id.tvReport);
         tvGhSub = findViewById(R.id.tvGhSub);
         tvGhVal = findViewById(R.id.tvGhVal);
+        tvRootWarn = findViewById(R.id.tvRootWarn);
         tvHoursNum = findViewById(R.id.tvHoursNum);
         dotNew = findViewById(R.id.dotNew);
         dotOk = findViewById(R.id.dotOk);
@@ -304,6 +305,20 @@ public class MainActivity extends Activity {
             registerReceiver(resultReceiver, f);
         }
 
+        // Root 权限检测（异步防 ANR；未授权设备首次调用 su 可能触发管理器弹窗，5s 超时判失败）
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final boolean ok = hasRootAccess();
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        tvRootWarn.setVisibility(ok ? View.GONE : View.VISIBLE);
+                    }
+                });
+            }
+        }, "rh-root-check").start();
+
         // 延迟检查更新（避免抢首帧渲染）
         new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
             @Override
@@ -449,6 +464,9 @@ public class MainActivity extends Activity {
                     tvGhSub.setVisibility(View.VISIBLE);
                     tvGhSub.setText("检查失败 · 点按重试");
                     tvGhSub.setTextColor(0xFF8A8B92);
+                    // 主页 banner 版本号恢复默认
+                    tvVersion.setTextColor(0xFFB35F00);
+                    tvVersion.setText("v" + UpdateChecker.currentVersion(MainActivity.this) + " · LSPosed");
                 } else if (hasUpdate) {
                     dotNew.setVisibility(View.VISIBLE);
                     dotOk.setVisibility(View.GONE);
@@ -456,6 +474,9 @@ public class MainActivity extends Activity {
                     tvGhSub.setText("发现新版本 · 点击前往下载");
                     tvGhSub.setTextColor(0xFFC76800);
                     tvGhVal.setText("v" + latest + " ›");
+                    // 主页 banner 版本号：红色提醒 + 前缀文案
+                    tvVersion.setTextColor(0xFFD32F2F);
+                    tvVersion.setText("请及时更新插件 v" + latest);
                 } else {
                     // 已是最新：绿点 + 「当前为最新版 + 版本号」
                     dotNew.setVisibility(View.GONE);
@@ -463,6 +484,9 @@ public class MainActivity extends Activity {
                     tvGhSub.setVisibility(View.VISIBLE);
                     tvGhSub.setText("当前为最新版 v" + UpdateChecker.currentVersion(MainActivity.this));
                     tvGhSub.setTextColor(0xFF0DB85A);
+                    // 主页 banner 版本号：绿色
+                    tvVersion.setTextColor(0xFF0DB85A);
+                    tvVersion.setText("v" + UpdateChecker.currentVersion(MainActivity.this) + " · LSPosed");
                 }
             }
         });
@@ -835,6 +859,27 @@ public class MainActivity extends Activity {
         while ((line = br.readLine()) != null) sb.append(line).append('\n');
         br.close();
         return sb.toString();
+    }
+
+    /** root 可用性检测：su -c id 输出含 uid=0 即已授权（未授权被拒 / 无 su 二进制 / 超时均判否） */
+    private static boolean hasRootAccess() {
+        Process p = null;
+        try {
+            p = Runtime.getRuntime().exec(new String[]{"su", "-c", "id"});
+            boolean done = p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+            if (!done) {
+                p.destroy();
+                return false;
+            }
+            String out = readAll(p.getInputStream());
+            return out.contains("uid=0");
+        } catch (Throwable t) {
+            try {
+                if (p != null) p.destroy();
+            } catch (Throwable ignored) {
+            }
+            return false;
+        }
     }
 
     @Override

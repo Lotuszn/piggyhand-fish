@@ -1,6 +1,6 @@
 {
-  "latest": "1.0.5",
+  "latest": "1.0.6",
   "url": "https://github.com/Lotuszn/piggyhand-fish/releases/latest",
   "cnUrl": "https://gitee.com/lotuszn/piggyhand-fish/releases",
-  "notes": "v1.0.5 · 日志功能修复：跑批报告三通道读取（直读/socket/root）带逐通道诊断与授权引导；立即跑批改 socket 直触发，不再依赖广播"
+  "notes": "v1.0.6 · 主页 banner 版本号三态显示（最新版绿色/有新版红色提醒）；新增 Root 权限检测，未授权时红字提示授予"
 }

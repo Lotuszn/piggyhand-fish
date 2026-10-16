@@ -105,7 +105,7 @@
                                     android:id="@+id/tvVersion"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="v1.0.5 · LSPosed"
+                                    android:text="v1.0.6 · LSPosed"
                                     android:textColor="@color/brand_deep"
                                     android:textSize="10sp"
                                     android:textStyle="bold" />
@@ -119,6 +119,19 @@
                                     android:textSize="10sp" />
                             </LinearLayout>
                         </LinearLayout>
+
+                        <!-- Root 权限提醒（检测到 su 不可用时显示） -->
+                        <TextView
+                            android:id="@+id/tvRootWarn"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:gravity="center"
+                            android:text="请授予小猪手 Root 权限"
+                            android:textColor="#D32F2F"
+                            android:textSize="10.5sp"
+                            android:textStyle="bold"
+                            android:visibility="gone" />
 
                         <!-- 状态卡 -->
                         <LinearLayout
@@ -972,7 +985,7 @@
                                     android:id="@+id/tvGhVal"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="v1.0.5 ›"
+                                    android:text="v1.0.6 ›"
                                     android:textColor="@color/text_sub"
                                     android:textSize="11sp" />
                             </LinearLayout>
