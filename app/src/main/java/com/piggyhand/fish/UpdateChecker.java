@@ -3,6 +3,7 @@ package com.piggyhand.fish;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 
 import org.json.JSONObject;
 
@@ -20,6 +21,8 @@ import java.net.URL;
  * 版本比较逐段数值：1.0.10 > 1.0.9。
  */
 public class UpdateChecker {
+
+    private static final String TAG = "UpdateChecker";
 
     public interface Callback {
         /**
@@ -57,6 +60,8 @@ public class UpdateChecker {
                 String[] jsonUrls = {VERSION_URL_GITEE, VERSION_URL_JSD};
                 for (String u : jsonUrls) {
                     latest = fetchVersionJson(u, 4000);
+                    Log.i(TAG, latest != null ? "HIT  " + u + " -> " + latest
+                                              : "MISS " + u);
                     if (latest != null) {
                         failed = false;
                         break;
@@ -66,6 +71,8 @@ public class UpdateChecker {
                 // 源 3：GitHub releases API
                 if (latest == null) {
                     latest = fetchGithubLatest(6000);
+                    Log.i(TAG, latest != null ? "HIT  " + GH_API + " -> " + latest
+                                              : "MISS " + GH_API);
                     if (latest != null) failed = false;
                 }
 
@@ -90,8 +97,10 @@ public class UpdateChecker {
                     .openConnection();
             conn.setConnectTimeout(timeoutMs);
             conn.setReadTimeout(timeoutMs);
+            conn.setInstanceFollowRedirects(true); // Gitee raw 会 302 到 raw.giteeusercontent.com
             conn.setRequestProperty("User-Agent", "piggyhand-fish");
-            if (conn.getResponseCode() == 200) {
+            int code = conn.getResponseCode();
+            if (code == 200) {
                 BufferedReader br = new BufferedReader(
                         new InputStreamReader(conn.getInputStream(), "UTF-8"));
                 StringBuilder sb = new StringBuilder();
@@ -101,7 +110,9 @@ public class UpdateChecker {
                 String v = new JSONObject(sb.toString()).optString("latest", "").trim();
                 return v.isEmpty() ? null : v;
             }
-        } catch (Throwable ignored) {
+            Log.w(TAG, "http " + code + "  " + url);
+        } catch (Throwable t) {
+            Log.w(TAG, "fail " + url + " : " + t);
         } finally {
             if (conn != null) try { conn.disconnect(); } catch (Throwable ignored) {}
         }
