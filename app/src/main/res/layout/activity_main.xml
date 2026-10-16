@@ -105,7 +105,7 @@
                                     android:id="@+id/tvVersion"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="v1.0.4 · LSPosed"
+                                    android:text="v1.0.5 · LSPosed"
                                     android:textColor="@color/brand_deep"
                                     android:textSize="10sp"
                                     android:textStyle="bold" />
@@ -426,6 +426,63 @@
 
                                 <com.piggyhand.fish.LiquidSwitch
                                     android:id="@+id/swScout"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content" />
+                            </LinearLayout>
+
+                            <View
+                                android:layout_width="match_parent"
+                                android:layout_height="1dp"
+                                android:background="#0F17181C" />
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingTop="9dp"
+                                android:paddingBottom="9dp">
+
+                                <FrameLayout
+                                    android:layout_width="27dp"
+                                    android:layout_height="27dp"
+                                    android:background="@drawable/bg_icon_g">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_gravity="center"
+                                        android:includeFontPadding="false"
+                                        android:text="✨"
+                                        android:textSize="13sp" />
+                                </FrameLayout>
+
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="10dp"
+                                    android:layout_weight="1"
+                                    android:orientation="vertical">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="每日擦亮"
+                                        android:textColor="@color/text_main"
+                                        android:textSize="12.5sp"
+                                        android:textStyle="bold" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="自动擦亮全部在售宝贝"
+                                        android:textColor="@color/text_sub"
+                                        android:textSize="9.5sp" />
+                                </LinearLayout>
+
+                                <com.piggyhand.fish.LiquidSwitch
+                                    android:id="@+id/swPolish"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content" />
                             </LinearLayout>
@@ -915,7 +972,7 @@
                                     android:id="@+id/tvGhVal"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="v1.0.4 ›"
+                                    android:text="v1.0.5 ›"
                                     android:textColor="@color/text_sub"
                                     android:textSize="11sp" />
                             </LinearLayout>

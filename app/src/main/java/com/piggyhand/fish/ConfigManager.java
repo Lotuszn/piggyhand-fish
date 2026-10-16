@@ -22,6 +22,7 @@ public class ConfigManager {
             "  \"targets\": [\"com.taobao.idlefish\"],\n" +
             "  \"mtopHook\": true,\n" +
             "  \"toastNotify\": true,\n" +
+            "  \"polish\": true,\n" +
             "  \"scout\": true,\n" +
             "  \"scoutPattern\": \"reward|bonus|coin\",\n" +
             "  \"maxScoutMethods\": 400,\n" +
@@ -43,6 +44,7 @@ public class ConfigManager {
     public boolean adSdkPresets = true;
     public boolean mtopHook = true;
     public boolean toastNotify = true;
+    public boolean polish = true;
     public String scoutPattern = "reward|bonus|coin";
     public int maxScoutMethods = 400;
 
@@ -103,6 +105,7 @@ public class ConfigManager {
             c.adSdkPresets = o.optBoolean("adSdkPresets", true);
             c.mtopHook = o.optBoolean("mtopHook", true);
             c.toastNotify = o.optBoolean("toastNotify", true);
+        c.polish = o.optBoolean("polish", true);
             c.scoutPattern = o.optString("scoutPattern", "reward|bonus|coin");
             c.maxScoutMethods = o.optInt("maxScoutMethods", 400);
 

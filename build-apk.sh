@@ -6,8 +6,8 @@ set -e
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 SRC="$ROOT"
 # 版本号（改版本只动这里 + app/build.gradle + 布局占位 + version.json 四处）
-VER="1.0.4"
-VERCODE=5
+VER="1.0.5"
+VERCODE=6
 # 交付产物命名（用户规则）：闲鱼小猪手-版本号.apk
 OUT_APK="闲鱼小猪手-$VER.apk"
 # SDK 三件套：android.jar + build-tools(含 aapt2/apksigner) + r8.jar（默认取 fish-work/sdk）

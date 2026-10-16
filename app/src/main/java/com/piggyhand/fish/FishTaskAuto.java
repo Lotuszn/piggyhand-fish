@@ -58,6 +58,8 @@ public final class FishTaskAuto {
     private static android.content.Context appCtx;
     /** 每任务 Toast 气泡开关（config.toastNotify，默认开） */
     private static volatile boolean toastOn = true;
+    /** 每日擦亮开关（配置页 polish；extras 显式传参优先） */
+    private static volatile boolean polishOn = true;
 
     private FishTaskAuto(ClassLoader cl, String cacheDir) {
         this.cl = cl;
@@ -78,6 +80,7 @@ public final class FishTaskAuto {
         try {
             ConfigManager tcfg = ConfigManager.load();
             toastOn = tcfg == null || tcfg.toastNotify;
+            polishOn = tcfg == null || tcfg.polish;
         } catch (Throwable ignored) {
         }
         final ClassLoader cl = ctx.getClassLoader();
@@ -254,7 +257,7 @@ public final class FishTaskAuto {
         log("=== task auto run start ===");
         org.json.JSONObject extras = parseObj(extrasJson);
         boolean doSignin = opt(extras, "signin", false);
-        boolean doPolish = opt(extras, "polish", false);
+        boolean doPolish = extras.has("polish") ? extras.optBoolean("polish") : polishOn;
         boolean doSold = opt(extras, "sold", false);
         boolean doShop = opt(extras, "shop", false);
         boolean doBrowse = opt(extras, "browse", true);

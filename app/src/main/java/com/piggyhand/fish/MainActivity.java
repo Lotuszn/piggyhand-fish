@@ -33,7 +33,7 @@ import java.io.File;
  * 模块主界面（液态玻璃亮色版）：
  * - 三页横滑（主页 / 日志 / 关于）+ 果冻 pill Tab + 贝塞尔缓动视差
  * - 主页：头卡 / 状态脉冲 / 立即跑批 / 四开关（LiquidSwitch）/ 间隔滑块（LiquidSlider）
- * - 日志：四通道读跑批报告（直读 / socket / su / 广播回传）
+ * - 日志：三通道读跑批报告（直读 / socket / su，全失败时逐通道诊断），跑批触发走 socket RUN
  * - 关于：GitHub 更新检查（有新版本红点 + 副标题，无则隐藏副标题自动居中）
  * - 配置即改即存（SharedPreferences），重启闲鱼生效
  */
@@ -64,7 +64,7 @@ public class MainActivity extends Activity {
     private TextView tvVersion, tvStatus, tvStatusMeta, tvReport, tvGhSub, tvGhVal, tvHoursNum;
     private View dotNew, dotOk, pulseHalo, scoutArgs, rowUpdate, rowCoolapk;
     private View linkPicker; // 下载渠道选择弹层（非空 = 正在显示）
-    private LiquidSwitch swAutoRun, swMtop, swAds, swScout;
+    private LiquidSwitch swAutoRun, swMtop, swAds, swScout, swPolish;
     private LiquidSlider sliderHours;
     private EditText etPattern, etMax;
     private Button btnRun, btnRefresh;
@@ -121,6 +121,7 @@ public class MainActivity extends Activity {
         swMtop = findViewById(R.id.swMtop);
         swAds = findViewById(R.id.swAds);
         swScout = findViewById(R.id.swScout);
+        swPolish = findViewById(R.id.swPolish);
         sliderHours = findViewById(R.id.sliderHours);
         etPattern = findViewById(R.id.etPattern);
         etMax = findViewById(R.id.etMax);
@@ -146,6 +147,7 @@ public class MainActivity extends Activity {
         swMtop.setOnSilent(cfg.optBoolean("mtopHook", true));
         swAds.setOnSilent(cfg.optBoolean("adSdkPresets", true));
         swScout.setOnSilent(cfg.optBoolean("scout", true));
+        swPolish.setOnSilent(cfg.optBoolean("polish", true));
         scoutArgs.setVisibility(swScout.isOn() ? View.VISIBLE : View.GONE);
         etPattern.setText(cfg.optString("scoutPattern", "reward|bonus|coin"));
         etMax.setText(String.valueOf(cfg.optInt("maxScoutMethods", 400)));
@@ -169,6 +171,9 @@ public class MainActivity extends Activity {
                 scoutArgs.setVisibility(on ? View.VISIBLE : View.GONE);
             }
         });
+        swPolish.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+            @Override public void onToggle(boolean on) { put("polish", on); }
+        });
 
         // ===== 滑块监听：拖动刷新显示，松手落定持久化 =====
         sliderHours.setOnValueChangeListener(new LiquidSlider.OnValueChangeListener() {
@@ -180,28 +185,42 @@ public class MainActivity extends Activity {
             }
         });
 
-        // ===== 立即跑批 =====
+        // ===== 立即跑批：socket 直触发引擎（MIUI 拦跨 App 广播，旧广播通道已废弃）=====
         btnRun.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                try {
-                    Intent i = new Intent(ACTION_MTOP_CALL);
-                    i.setPackage(FISH_PKG);
-                    i.putExtra("api", "__RUN_TASKS__");
-                    sendBroadcast(i);
-                    btnRun.setText("已触发 · 闲鱼内执行中…");
-                    btnRun.postDelayed(new Runnable() {
-                        @Override
-                        public void run() {
-                            btnRun.setText("立即跑批");
-                        }
-                    }, 5000);
-                    Toast.makeText(MainActivity.this, "已触发引擎，闲鱼打开后自动执行", Toast.LENGTH_SHORT).show();
-                    Intent fish = getPackageManager().getLaunchIntentForPackage(FISH_PKG);
-                    if (fish != null) startActivity(fish);
-                } catch (Throwable t) {
-                    Toast.makeText(MainActivity.this, "触发失败: " + t, Toast.LENGTH_LONG).show();
-                }
+                btnRun.setText("触发中…");
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        final String resp = socketCmd("RUN");
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                boolean ok = resp != null && resp.contains("OK");
+                                btnRun.setText(ok ? "已触发 · 闲鱼内执行中…" : "未连通 · 打开闲鱼后重试");
+                                Toast.makeText(MainActivity.this,
+                                        ok ? "引擎已启动，跑批进行中，完成后通知栏推送"
+                                                : "socket 未连通：请先打开闲鱼（引擎随进程加载），再点立即跑批",
+                                        Toast.LENGTH_LONG).show();
+                                if (!ok) {
+                                    // 兜底：拉起闲鱼，进程起来引擎自动加载，稍后再点一次即可
+                                    try {
+                                        Intent fish = getPackageManager().getLaunchIntentForPackage(FISH_PKG);
+                                        if (fish != null) startActivity(fish);
+                                    } catch (Throwable ignored) {
+                                    }
+                                }
+                                btnRun.postDelayed(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        btnRun.setText("立即跑批");
+                                    }
+                                }, 5000);
+                            }
+                        });
+                    }
+                }, "rh-run-cmd").start();
             }
         });
 
@@ -641,17 +660,10 @@ public class MainActivity extends Activity {
 
     private void refreshLog() {
         tvReport.setText("加载中…");
-        try {
-            Intent i = new Intent(ACTION_MTOP_CALL);
-            i.setPackage(FISH_PKG);
-            i.putExtra("api", "__GET_RESULT__");
-            sendBroadcast(i);
-        } catch (Throwable ignored) {
-        }
         pollReport(0);
     }
 
-    /** 轮询三通道读报告（su 首次会等 root 管理器授权，必须后台线程防 ANR） */
+    /** 轮询读报告（su 首次会等 root 管理器授权，必须后台线程防 ANR） */
     private void pollReport(final int attempt) {
         if (attempt >= 3) return;
         tvReport.postDelayed(new Runnable() {
@@ -660,16 +672,14 @@ public class MainActivity extends Activity {
                 new Thread(new Runnable() {
                     @Override
                     public void run() {
-                        final String text = tryReadReport();
+                        final ReadResult r = tryReadReport();
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
-                                if (text != null) {
-                                    tvReport.setText(text);
+                                if (r.text != null) {
+                                    tvReport.setText("· 读取通道: " + r.via + "\n\n" + r.text);
                                 } else if (attempt >= 2) {
-                                    tvReport.setText("无法读取报告。\n\n"
-                                            + "· root 设备：首次请在 APatch / root 管理器弹窗中允许咸鱼小猪手的 su 授权，然后重新点「刷新报告」\n"
-                                            + "· 或下拉通知栏查看上次结果");
+                                    tvReport.setText(r.diag + DIAG_FOOT);
                                 } else {
                                     pollReport(attempt + 1);
                                 }
@@ -681,18 +691,64 @@ public class MainActivity extends Activity {
         }, attempt == 0 ? 400 : 1500);
     }
 
-    /** 四通道读报告：1) 直读 2) 本机 socket（闲鱼活着即通，免权限）3) su root 读 4) 广播回传 */
-    private static String tryReadReport() {
-        String path = "/storage/emulated/0/Android/data/com.taobao.idlefish/cache/rh_tasks_result.txt";
-        String t = readPlain(path);
-        if (t != null) return t;
-        t = readViaSocket();
-        if (t != null) return t;
-        return readViaSu(path);
+    private static final String DIAG_FOOT =
+            "\n\n解决步骤：\n"
+                    + "1. root 授权：打开 Magisk / APatch → 超级用户 → 允许「咸鱼小猪手」，回本页点「刷新报告」\n"
+                    + "2. MIUI 联网放行：安全中心 → 应用管理 → 咸鱼小猪手 → 联网控制 → 允许 WLAN 与数据\n"
+                    + "3. 保持闲鱼在后台运行（报告服务随闲鱼进程启动，端口 27715）\n"
+                    + "4. 最近一次跑批结果也会推送在通知栏";
+
+    /** 四通道读报告结果：text=报告全文 / via=成功通道 / diag=全失败诊断 */
+    private static class ReadResult {
+        String text;
+        String via;
+        String diag;
     }
 
-    /** 本机 socket 通道：连闲鱼主进程的报告服务（127.0.0.1:27715，无任何权限依赖） */
-    private static String readViaSocket() {
+    /**
+     * 通道优先级：1) 直读文件 2) 本机 socket（闲鱼活着即通，免权限）3) su root 读。
+     * 广播回传（ACTION_RESULT）作为独立即时通道由 resultReceiver 承担，不在此列。
+     */
+    private static ReadResult tryReadReport() {
+        String path = "/storage/emulated/0/Android/data/com.taobao.idlefish/cache/rh_tasks_result.txt";
+        ReadResult r = new ReadResult();
+        StringBuilder diag = new StringBuilder("无法读取跑批报告\n\n逐通道诊断：\n");
+        String[] p = readPlain(path);
+        if (p[0] != null) { r.text = p[0]; r.via = "直读文件"; return r; }
+        diag.append("· 直读：").append(p[1]).append('\n');
+        p = readViaSocket();
+        if (p[0] != null) { r.text = p[0]; r.via = "socket (127.0.0.1:27715)"; return r; }
+        diag.append("· socket：").append(p[1]).append('\n');
+        p = readViaSu(path);
+        if (p[0] != null) { r.text = p[0]; r.via = "su (root)"; return r; }
+        diag.append("· su (root)：").append(p[1]).append('\n');
+        r.diag = diag.toString();
+        return r;
+    }
+
+    /** 向报告服务发指令（RUN / REPORT），返回响应全文，失败返回 null */
+    private static String socketCmd(String cmd) {
+        java.net.Socket s = null;
+        try {
+            s = new java.net.Socket();
+            s.connect(new java.net.InetSocketAddress("127.0.0.1", 27715), 2500);
+            s.setSoTimeout(3000);
+            java.io.OutputStream os = s.getOutputStream();
+            os.write((cmd + "\n").getBytes("UTF-8"));
+            os.flush();
+            return readAll(s.getInputStream());
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            try {
+                if (s != null) s.close();
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    /** 本机 socket 通道：连闲鱼主进程的报告服务（127.0.0.1:27715，无任何权限依赖）。返回 {内容, 失败原因} */
+    private static String[] readViaSocket() {
         java.net.Socket s = null;
         try {
             s = new java.net.Socket();
@@ -701,61 +757,84 @@ public class MainActivity extends Activity {
             java.io.OutputStream os = s.getOutputStream();
             os.write("REPORT\n".getBytes("UTF-8"));
             os.flush();
-            java.io.BufferedReader br = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(s.getInputStream()));
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = br.readLine()) != null) sb.append(line).append('\n');
-            br.close();
-            return sb.length() > 0 ? sb.toString() : null;
+            String body = readAll(s.getInputStream());
+            return body.length() > 0 ? new String[]{body, null}
+                    : new String[]{null, "服务返回空（跑批报告尚未生成）"};
+        } catch (java.net.SocketTimeoutException e) {
+            return new String[]{null, "连接超时（闲鱼进程可能被杀，或 MIUI 联网管控拦截了本机回环）"};
+        } catch (java.net.ConnectException e) {
+            return new String[]{null, "连接被拒（端口未监听，闲鱼未启动或引擎未加载）"};
         } catch (Throwable t) {
+            return new String[]{null, "失败: " + t.getClass().getSimpleName()};
+        } finally {
             try {
                 if (s != null) s.close();
             } catch (Throwable ignored) {
             }
-            return null;
         }
     }
 
-    private static String readPlain(String path) {
+    private static String[] readPlain(String path) {
         try {
             File f = new File(path);
-            if (!f.exists() || !f.canRead()) return null;
-            java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(f));
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = br.readLine()) != null) sb.append(line).append('\n');
-            br.close();
-            return sb.length() > 0 ? sb.toString() : null;
-        } catch (Throwable ignored) {
-            return null;
+            if (!f.exists()) return new String[]{null, "文件不存在（先在闲鱼里跑一轮任务）"};
+            if (!f.canRead()) return new String[]{null, "无读取权限（Android 11+ 沙盒隔离，正常现象，走后续通道）"};
+            String t = readAll(new java.io.FileInputStream(f));
+            return t.length() > 0 ? new String[]{t, null} : new String[]{null, "文件为空"};
+        } catch (Throwable t) {
+            return new String[]{null, "读取异常: " + t.getClass().getSimpleName()};
         }
     }
 
-    /** root 通道：LSPosed 经 APatch 刷入的设备必有 su——模块 App 首次请求 root 会在管理器弹授权 */
-    private static String readViaSu(String path) {
+    /** root 通道：su 读沙盒内报告。授权弹窗首次出现需用户确认，waitFor 放宽到 10s。返回 {内容, 失败原因} */
+    private static String[] readViaSu(String path) {
         Process p = null;
         try {
             p = Runtime.getRuntime().exec(new String[]{"su", "-c", "cat " + path});
-            boolean done = p.waitFor(8, java.util.concurrent.TimeUnit.SECONDS);
+            boolean done = p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
             if (!done) {
                 p.destroy();
-                return null;
+                return new String[]{null, "等待授权超时（root 管理器弹窗未确认——打开 Magisk / APatch → 超级用户 → 允许咸鱼小猪手）"};
             }
-            java.io.BufferedReader br = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(p.getInputStream()));
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = br.readLine()) != null) sb.append(line).append('\n');
-            br.close();
-            return sb.length() > 0 ? sb.toString() : null;
+            String out = readAll(p.getInputStream());
+            String err = readAll(p.getErrorStream());
+            if (out.length() > 0) return new String[]{out, null};
+            int code;
+            try {
+                code = p.exitValue();
+            } catch (Throwable t) {
+                code = -1;
+            }
+            if (code != 0) {
+                String e = err == null ? "" : err.trim();
+                if (e.contains("No such file")) {
+                    return new String[]{null, "命令失败：报告文件不存在（先在闲鱼里跑一轮任务）"};
+                }
+                if (e.contains("not in sudoers") || e.contains("denied") || e.contains("denied by")) {
+                    return new String[]{null, "授权被拒 (exit " + code + "): " + e};
+                }
+                return new String[]{null, "执行失败 (exit " + code + (e.length() > 0 ? ": " + e : "") + ")"};
+            }
+            return new String[]{null, err != null && err.length() > 0 ? "失败: " + err.trim() : "无输出（报告文件不存在？）"};
+        } catch (java.io.IOException e) {
+            return new String[]{null, "su 不存在（设备未 root，或 root 管理器未提供 su）"};
         } catch (Throwable t) {
             try {
                 if (p != null) p.destroy();
             } catch (Throwable ignored) {
             }
-            return null;
+            return new String[]{null, "失败: " + t.getClass().getSimpleName()};
         }
+    }
+
+    /** 流读取公共方法：按行读到 EOF */
+    private static String readAll(java.io.InputStream is) throws java.io.IOException {
+        java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(is));
+        StringBuilder sb = new StringBuilder();
+        String line;
+        while ((line = br.readLine()) != null) sb.append(line).append('\n');
+        br.close();
+        return sb.toString();
     }
 
     @Override
