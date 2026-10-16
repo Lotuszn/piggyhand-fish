@@ -22,7 +22,7 @@ echo "[1/8] aapt2 编译资源 + 生成 R.java"
   -I "$AJ" \
   --manifest app/src/main/AndroidManifest.xml \
   --min-sdk-version 26 --target-sdk-version 34 \
-  --version-code 3 --version-name 1.0.2 \
+  --version-code 4 --version-name 1.0.3 \
   -A app/src/main/assets \
   --java build/gen \
   build/res.zip
