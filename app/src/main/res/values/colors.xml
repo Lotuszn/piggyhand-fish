@@ -1,14 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="brand_top">#FF9500</color>
-    <color name="brand_bottom">#FFC837</color>
-    <color name="brand_deep">#F2790D</color>
-    <color name="page_bg">#F6F6F8</color>
-    <color name="card_bg">#FFFFFF</color>
-    <color name="card_stroke">#ECECF0</color>
-    <color name="text_main">#1A1B1F</color>
+    <!-- 液态玻璃亮色主题色板 -->
+    <color name="text_main">#17181C</color>
     <color name="text_sub">#8A8B92</color>
-    <color name="ok_green">#34C759</color>
+    <color name="text_faint">#B9BAC0</color>
+    <color name="accent">#E07800</color>
+    <color name="link_orange">#C76800</color>
+    <color name="brand_deep">#B35F00</color>
+    <color name="btn_text">#3A2400</color>
+    <color name="ok_green">#0DB85A</color>
+    <color name="dot_red">#FF3B30</color>
+    <color name="glass_white">#8CFFFFFF</color>
+    <color name="page_bg">#EEF0F4</color>
     <color name="code_bg">#23242A</color>
     <color name="code_text">#D6E2F0</color>
     <color name="white">#FFFFFF</color>

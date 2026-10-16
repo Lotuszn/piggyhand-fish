@@ -1,5 +1,6 @@
 package com.piggyhand.fish;
 
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -7,15 +8,18 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Typeface;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.view.Gravity;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Button;
-import android.widget.CompoundButton;
 import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -24,27 +28,41 @@ import org.json.JSONObject;
 import java.io.File;
 
 /**
- * 模块主界面：
- * - 状态卡 / 立即跑一轮 / 上次报告（广播+文件双通道）/ 功能开关（autoRun/mtopHook/adSdkPresets/scout）
- * - 开关式配置：每项带中文说明，保存后重启闲鱼生效；原始 JSON 已不再暴露给用户
+ * 模块主界面（液态玻璃亮色版）：
+ * - 三页横滑（主页 / 日志 / 关于）+ 果冻 pill Tab + 贝塞尔缓动视差
+ * - 主页：头卡 / 状态脉冲 / 立即跑批 / 四开关（LiquidSwitch）/ 间隔滑块（LiquidSlider）
+ * - 日志：四通道读跑批报告（直读 / socket / su / 广播回传）
+ * - 关于：GitHub 更新检查（有新版本红点 + 副标题，无则隐藏副标题自动居中）
+ * - 配置即改即存（SharedPreferences），重启闲鱼生效
  */
 public class MainActivity extends Activity {
 
     private static final String ACTION_MTOP_CALL = "com.piggyhand.fish.MTOP_CALL";
     private static final String ACTION_RESULT = "com.piggyhand.fish.RESULT";
     private static final String FISH_PKG = "com.taobao.idlefish";
+    private static final String RELEASES_URL =
+            "https://github.com/Lotuszn/piggyhand-fish/releases/latest";
 
-    private TextView tvReport;
-    private TextView tvConfigTitle;
-    private LinearLayout layoutToggles;
-    private Button btnSave;
-    private Button btnRun;
-    private boolean reportShown = false;
-    private boolean configShown = false;
+    /* 导航 */
+    private ViewGroup track;
+    private View pagesWrap;
+    private View pill;
+    private LinearLayout tabHome, tabLog, tabAbout;
+    private ImageView[] tabIcons;
+    private TextView[] tabLabels;
+    private int cur = 0;
+    private boolean pillReady = false;
 
-    private Switch swAutoRun, swMtop, swAds, swScout;
-    private EditText etPattern, etMax, etInterval;
-    private LinearLayout layoutScoutArgs, layoutAutoRunArgs;
+    /* 控件 */
+    private TextView tvVersion, tvStatus, tvStatusMeta, tvReport, tvGhSub, tvGhVal, tvHoursNum;
+    private View dotNew, pulseHalo, scoutArgs, rowGithub;
+    private LiquidSwitch swAutoRun, swMtop, swAds, swScout;
+    private LiquidSlider sliderHours;
+    private EditText etPattern, etMax;
+    private Button btnRun, btnRefresh;
+
+    private boolean dirty = false;
+    private boolean logLoaded = false;
 
     private final BroadcastReceiver resultReceiver = new BroadcastReceiver() {
         @Override
@@ -59,38 +77,99 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().setStatusBarColor(0xFFE08600); // 状态栏与品牌渐变衔接
+
+        // 亮色状态栏 / 导航栏，与 blob 背景衔接
+        getWindow().setStatusBarColor(0xFFFDF3E3);
+        getWindow().setNavigationBarColor(0xFFF2F4F8);
+        getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+
         setContentView(R.layout.activity_main);
 
-        TextView tvVersion = findViewById(R.id.tvVersion);
-        TextView tvStatus = findViewById(R.id.tvStatus);
+        track = findViewById(R.id.track);
+        pagesWrap = findViewById(R.id.pagesWrap);
+        pill = findViewById(R.id.pill);
+        tabHome = findViewById(R.id.tabHome);
+        tabLog = findViewById(R.id.tabLog);
+        tabAbout = findViewById(R.id.tabAbout);
+        tabIcons = new ImageView[]{findViewById(R.id.ivTabHome), findViewById(R.id.ivTabLog), findViewById(R.id.ivTabAbout)};
+        tabLabels = new TextView[]{findViewById(R.id.tvTabHome), findViewById(R.id.tvTabLog), findViewById(R.id.tvTabAbout)};
+
+        tvVersion = findViewById(R.id.tvVersion);
+        tvStatus = findViewById(R.id.tvStatus);
+        tvStatusMeta = findViewById(R.id.tvStatusMeta);
         tvReport = findViewById(R.id.tvReport);
-        tvConfigTitle = findViewById(R.id.tvConfigTitle);
-        layoutToggles = findViewById(R.id.layoutToggles);
-        btnSave = findViewById(R.id.btnSave);
+        tvGhSub = findViewById(R.id.tvGhSub);
+        tvGhVal = findViewById(R.id.tvGhVal);
+        tvHoursNum = findViewById(R.id.tvHoursNum);
+        dotNew = findViewById(R.id.dotNew);
+        pulseHalo = findViewById(R.id.pulseHalo);
+        scoutArgs = findViewById(R.id.scoutArgs);
+        rowGithub = findViewById(R.id.rowGithub);
+        swAutoRun = findViewById(R.id.swAutoRun);
+        swMtop = findViewById(R.id.swMtop);
+        swAds = findViewById(R.id.swAds);
+        swScout = findViewById(R.id.swScout);
+        sliderHours = findViewById(R.id.sliderHours);
+        etPattern = findViewById(R.id.etPattern);
+        etMax = findViewById(R.id.etMax);
         btnRun = findViewById(R.id.btnRun);
-        Button btnReport = findViewById(R.id.btnReport);
+        btnRefresh = findViewById(R.id.btnRefresh);
 
         // 版本号
-        try {
-            tvVersion.setText("v" + getPackageManager()
-                    .getPackageInfo(getPackageName(), 0).versionName + " · LSPosed 模块");
-        } catch (Throwable ignored) {
-        }
+        String ver = UpdateChecker.currentVersion(this);
+        tvVersion.setText("v" + ver + " · LSPosed");
+        tvGhVal.setText("v" + ver + " ›");
 
         // 模块启用状态：读自身 SharedPreferences（不得调 ConfigManager.load——
         // 它内部用 XSharedPreferences/XposedBridge，模块自身进程无 Xposed 环境会闪退）
-        boolean on = true;
-        try {
-            SharedPreferences sp0 = getSharedPreferences("config", Context.MODE_PRIVATE);
-            on = new org.json.JSONObject(sp0.getString("config_json", ConfigManager.DEFAULT_JSON))
-                    .optBoolean("enabled", true);
-        } catch (Throwable ignored) {
-        }
-        tvStatus.setText(on ? "模块运行中 · 闲鱼启动自动接管" : "模块未启用 · 请在 LSPosed 中启用本模块");
-        tvStatus.setTextColor(getColor(on ? R.color.text_main : R.color.brand_deep));
+        JSONObject cfg = currentConfig();
+        boolean enabled = cfg.optBoolean("enabled", true);
+        tvStatus.setText(enabled ? "引擎运行中" : "模块未启用 · 请在 LSPosed 中启用");
+        tvStatus.setTextColor(enabled ? 0xFF17181C : 0xFFB35F00);
+        int hours = cfg.optInt("autoRunIntervalHours", 4);
+        tvStatusMeta.setText("自动间隔 " + hours + " 小时");
 
-        // 立即跑
+        // ===== 开关初始态（静默，不触发持久化） =====
+        swAutoRun.setOnSilent(cfg.optBoolean("autoRun", true));
+        swMtop.setOnSilent(cfg.optBoolean("mtopHook", true));
+        swAds.setOnSilent(cfg.optBoolean("adSdkPresets", true));
+        swScout.setOnSilent(cfg.optBoolean("scout", false));
+        scoutArgs.setVisibility(swScout.isOn() ? View.VISIBLE : View.GONE);
+        etPattern.setText(cfg.optString("scoutPattern", "reward|bonus|coin"));
+        etMax.setText(String.valueOf(cfg.optInt("maxScoutMethods", 400)));
+        sliderHours.setValueSilent(hours);
+        tvHoursNum.setText(String.valueOf(hours));
+
+        // ===== 开关监听：即改即存 =====
+        swAutoRun.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+            @Override public void onToggle(boolean on) { put("autoRun", on); }
+        });
+        swMtop.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+            @Override public void onToggle(boolean on) { put("mtopHook", on); }
+        });
+        swAds.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+            @Override public void onToggle(boolean on) { put("adSdkPresets", on); }
+        });
+        swScout.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+            @Override
+            public void onToggle(boolean on) {
+                put("scout", on);
+                scoutArgs.setVisibility(on ? View.VISIBLE : View.GONE);
+            }
+        });
+
+        // ===== 滑块监听：拖动刷新显示，松手落定持久化 =====
+        sliderHours.setOnValueChangeListener(new LiquidSlider.OnValueChangeListener() {
+            @Override
+            public void onChanged(int value, boolean fromUser) {
+                tvHoursNum.setText(String.valueOf(value));
+                tvStatusMeta.setText("自动间隔 " + value + " 小时");
+                if (fromUser) put("autoRunIntervalHours", value);
+            }
+        });
+
+        // ===== 立即跑批 =====
         btnRun.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -103,7 +182,7 @@ public class MainActivity extends Activity {
                     btnRun.postDelayed(new Runnable() {
                         @Override
                         public void run() {
-                            btnRun.setText("立即跑一轮任务");
+                            btnRun.setText("立即跑批");
                         }
                     }, 5000);
                     Toast.makeText(MainActivity.this, "已触发引擎，闲鱼打开后自动执行", Toast.LENGTH_SHORT).show();
@@ -115,40 +194,56 @@ public class MainActivity extends Activity {
             }
         });
 
-        // 报告：展开时发 __GET_RESULT__（部分 ROM 会拦跨 App 广播），同时轮询直读引擎报告文件双保险
-        btnReport.setOnClickListener(new View.OnClickListener() {
+        // ===== 刷新报告 =====
+        btnRefresh.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                reportShown = !reportShown;
-                tvReport.setVisibility(reportShown ? View.VISIBLE : View.GONE);
-                if (reportShown) {
-                    tvReport.setText("加载中…");
-                    Intent i = new Intent(ACTION_MTOP_CALL);
-                    i.setPackage(FISH_PKG);
-                    i.putExtra("api", "__GET_RESULT__");
-                    sendBroadcast(i);
-                    pollReport(0);
+                refreshLog();
+            }
+        });
+
+        // ===== GitHub 行点击 → 浏览器打开 Releases =====
+        rowGithub.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(RELEASES_URL)));
+                } catch (Throwable t) {
+                    Toast.makeText(MainActivity.this, "无可用浏览器", Toast.LENGTH_SHORT).show();
                 }
             }
         });
 
-        // 功能开关区展开
-        tvConfigTitle.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                configShown = !configShown;
-                layoutToggles.setVisibility(configShown ? View.VISIBLE : View.GONE);
-                btnSave.setVisibility(configShown ? View.VISIBLE : View.GONE);
-                tvConfigTitle.setText(configShown ? "功能开关 ▾" : "功能开关 ▸");
-                if (configShown) buildToggles();
-            }
-        });
+        // ===== Tab 切换 =====
+        View.OnClickListener tl0 = new View.OnClickListener() {
+            @Override public void onClick(View v) { setIndex(0); }
+        };
+        View.OnClickListener tl1 = new View.OnClickListener() {
+            @Override public void onClick(View v) { setIndex(1); }
+        };
+        View.OnClickListener tl2 = new View.OnClickListener() {
+            @Override public void onClick(View v) { setIndex(2); }
+        };
+        tabHome.setOnClickListener(tl0);
+        tabLog.setOnClickListener(tl1);
+        tabAbout.setOnClickListener(tl2);
+        setTabVisual(0, true);
+        setTabVisual(1, false);
+        setTabVisual(2, false);
 
-        // 保存：开关状态组装进当前 JSON
-        btnSave.setOnClickListener(new View.OnClickListener() {
+        // 状态脉冲光环
+        startPulse();
+
+        // pill 定位 + 页面初始偏移（等布局完成）
+        tabHome.post(new Runnable() {
             @Override
-            public void onClick(View v) {
-                saveToggles();
+            public void run() {
+                final float w = pagesWrap.getWidth();
+                for (int i = 0; i < track.getChildCount(); i++) {
+                    track.getChildAt(i).setTranslationX(i * w);
+                }
+                placePill(0, false);
+                pillReady = true;
             }
         });
 
@@ -159,126 +254,154 @@ public class MainActivity extends Activity {
         } else {
             registerReceiver(resultReceiver, f);
         }
+
+        // 延迟检查更新（避免抢首帧渲染）
+        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                checkUpdate();
+            }
+        }, 700);
     }
 
-    /* ============================ 功能开关区 ============================ */
+    /* ============================ 导航：三页横滑 + 果冻 pill ============================ */
 
-    private void buildToggles() {
-        layoutToggles.removeAllViews();
-        JSONObject cfg = currentConfig();
+    private View tab(int i) {
+        return i == 0 ? tabHome : i == 1 ? tabLog : tabAbout;
+    }
 
-        swAutoRun = addToggle("自动跑任务", "打开闲鱼时自动执行一轮任务（间隔可调）", cfg.optBoolean("autoRun", true));
-        swMtop = addToggle("网络请求侦察", "记录闲鱼全部网络请求日志（排障用，日常可关）", cfg.optBoolean("mtopHook", true));
-        swAds = addToggle("广告 SDK 监控", "监控穿山甲 / 优量汇 / 快手广告 SDK 调用", cfg.optBoolean("adSdkPresets", true));
-        swScout = addToggle("类扫描侦察", "按关键词批量扫描 App 内方法调用（深度排障，会略降性能）", cfg.optBoolean("scout", false));
+    private void setIndex(int i) {
+        if (i == cur) return;
+        final int dir = i > cur ? 1 : -1;
 
-        // 自动跑子参数：间隔小时数
-        layoutAutoRunArgs = new LinearLayout(this);
-        layoutAutoRunArgs.setOrientation(LinearLayout.VERTICAL);
-        layoutAutoRunArgs.setPadding(dp(28), 0, 0, 0);
-        layoutAutoRunArgs.setVisibility(swAutoRun.isChecked() ? View.VISIBLE : View.GONE);
-        TextView lb0 = smallLabel("自动跑间隔（小时，默认 4：距上次跑完 4 小时后，再次打开闲鱼自动执行）");
-        etInterval = new EditText(this);
-        etInterval.setText(String.valueOf(cfg.optInt("autoRunIntervalHours", 4)));
-        etInterval.setTextSize(11);
-        styleBox(etInterval);
-        layoutAutoRunArgs.addView(lb0);
-        layoutAutoRunArgs.addView(etInterval);
-        layoutToggles.addView(layoutAutoRunArgs);
+        if (pillReady) animatePill(i, dir);
 
-        // scout 子参数：关键词 + 扫描上限
-        layoutScoutArgs = new LinearLayout(this);
-        layoutScoutArgs.setOrientation(LinearLayout.VERTICAL);
-        layoutScoutArgs.setPadding(dp(28), 0, 0, 0);
-        layoutScoutArgs.setVisibility(swScout.isChecked() ? View.VISIBLE : View.GONE);
+        // 页面横滑（ViewPager 式：各页叠在本地 0 位，仅动 translationX，
+        // 规避父容器把超出自身边界的子页裁剪掉的问题）+ 入页视差
+        animatePages(cur, i, dir);
 
-        TextView lb1 = smallLabel("扫描关键词（| 分隔）");
-        etPattern = new EditText(this);
-        etPattern.setText(cfg.optString("scoutPattern", "reward|bonus|coin"));
-        etPattern.setTextSize(11);
-        styleBox(etPattern);
-        TextView lb2 = smallLabel("最大扫描方法数");
-        etMax = new EditText(this);
-        etMax.setText(String.valueOf(cfg.optInt("maxScoutMethods", 400)));
-        etMax.setTextSize(11);
-        styleBox(etMax);
+        setTabVisual(cur, false);
+        setTabVisual(i, true);
+        cur = i;
 
-        layoutScoutArgs.addView(lb1);
-        layoutScoutArgs.addView(etPattern);
-        layoutScoutArgs.addView(lb2);
-        layoutScoutArgs.addView(etMax);
-        layoutToggles.addView(layoutScoutArgs);
+        // 首次进日志页自动拉一次报告
+        if (i == 1 && !logLoaded) {
+            logLoaded = true;
+            refreshLog();
+        }
+    }
 
-        swAutoRun.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+    /** 页面横滑动画：每帧更新各页 translationX，入页带视差偏移 + 透明度渐入 */
+    private void animatePages(final int from, final int to, final int dir) {
+        final float w = pagesWrap.getWidth();
+        if (w <= 0) return;
+        ValueAnimator a = ValueAnimator.ofFloat(0f, 1f);
+        a.setDuration(550);
+        a.setInterpolator(BezierInterpolator.jelly());
+        a.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
             @Override
-            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
-                layoutAutoRunArgs.setVisibility(isChecked ? View.VISIBLE : View.GONE);
+            public void onAnimationUpdate(ValueAnimator anim) {
+                float t = (float) anim.getAnimatedValue();
+                float off = (from + (to - from) * t) * w;
+                int n = track.getChildCount();
+                for (int idx = 0; idx < n; idx++) {
+                    View page = track.getChildAt(idx);
+                    float base = idx * w - off;
+                    if (idx == to) {
+                        page.setTranslationX(base + dir * -dp(26) * (1f - t));
+                        page.setAlpha(0.4f + 0.6f * t);
+                    } else {
+                        page.setTranslationX(base);
+                    }
+                }
             }
         });
+        a.start();
+    }
 
-        swScout.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+    /** pill 滑动：中段拉伸 1.32 倍模拟果冻，两端回收 */
+    private void animatePill(int i, int dir) {
+        View tab = tab(i);
+        final float fromTx = pill.getTranslationX();
+        final float toTx = tab.getX() + dp(3) - dp(7);
+        final float stretch = Math.min(1.32f, 1f + Math.abs(toTx - fromTx) / (240 * getResources().getDisplayMetrics().density));
+        pill.setPivotX(dir > 0 ? 0 : pill.getWidth());
+        ValueAnimator a = ValueAnimator.ofFloat(0f, 1f);
+        a.setDuration(560);
+        a.setInterpolator(BezierInterpolator.jelly());
+        a.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
             @Override
-            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
-                layoutScoutArgs.setVisibility(isChecked ? View.VISIBLE : View.GONE);
+            public void onAnimationUpdate(ValueAnimator anim) {
+                float t = (float) anim.getAnimatedValue();
+                pill.setTranslationX(fromTx + (toTx - fromTx) * t);
+                float s = 1f + (stretch - 1f) * (float) Math.sin(Math.PI * t);
+                pill.setScaleX(s);
             }
         });
-
-        // 说明
-        TextView note = smallLabel("以上开关保存后需重启闲鱼生效 · 任务结果通过通知栏推送");
-        note.setPadding(0, dp(10), 0, 0);
-        layoutToggles.addView(note);
+        a.start();
     }
 
-    /** 一行开关：左侧标题+说明，右侧 Switch */
-    private Switch addToggle(String title, String desc, boolean checked) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(0, dp(10), 0, dp(10));
-
-        LinearLayout left = new LinearLayout(this);
-        left.setOrientation(LinearLayout.VERTICAL);
-        TextView t = new TextView(this);
-        t.setText(title);
-        t.setTextSize(14);
-        t.setTypeface(Typeface.DEFAULT_BOLD);
-        t.setTextColor(getColor(R.color.text_main));
-        TextView d = new TextView(this);
-        d.setText(desc);
-        d.setTextSize(11);
-        d.setTextColor(getColor(R.color.text_sub));
-        d.setPadding(0, dp(2), dp(8), 0);
-        left.addView(t);
-        left.addView(d);
-
-        Switch sw = new Switch(this);
-        sw.setChecked(checked);
-
-        row.addView(left, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        row.addView(sw, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        layoutToggles.addView(row);
-        return sw;
+    private void placePill(int i, boolean animate) {
+        View tab = tab(i);
+        float tx = tab.getX() + dp(3) - dp(7);
+        int w = tab.getWidth() - dp(6);
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) pill.getLayoutParams();
+        if (lp.width != w) {
+            lp.width = w;
+            pill.setLayoutParams(lp);
+        }
+        pill.setPivotX(0);
+        if (animate) {
+            pill.animate().translationX(tx).setDuration(300).start();
+        } else {
+            pill.setTranslationX(tx);
+        }
     }
 
-    private TextView smallLabel(String text) {
-        TextView t = new TextView(this);
-        t.setText(text);
-        t.setTextSize(11);
-        t.setTextColor(getColor(R.color.text_sub));
-        t.setPadding(0, dp(6), 0, dp(2));
-        return t;
+    private void setTabVisual(int i, boolean on) {
+        tabIcons[i].setColorFilter(on ? 0xFFE07800 : 0x6617181C);
+        tabLabels[i].setTextColor(on ? 0xFFC76800 : 0xFF8A8B92);
+        tabLabels[i].setTypeface(Typeface.DEFAULT, on ? Typeface.BOLD : Typeface.NORMAL);
+        tabIcons[i].animate().scaleX(on ? 1.1f : 1f).scaleY(on ? 1.1f : 1f)
+                .translationY(on ? -dp(1) : 0).setDuration(280).start();
     }
 
-    private void styleBox(EditText et) {
-        et.setBackground(getDrawable(R.drawable.bg_code));
-        et.setTextColor(getColor(R.color.code_text));
-        et.setPadding(dp(10), dp(8), dp(10), dp(8));
+    private void startPulse() {
+        ValueAnimator p = ValueAnimator.ofFloat(0f, 1f);
+        p.setDuration(1800);
+        p.setRepeatCount(ValueAnimator.INFINITE);
+        p.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override
+            public void onAnimationUpdate(ValueAnimator a) {
+                float t = (float) a.getAnimatedValue();
+                pulseHalo.setScaleX(1f + t * 1.6f);
+                pulseHalo.setScaleY(1f + t * 1.6f);
+                pulseHalo.setAlpha(1f - t);
+            }
+        });
+        p.start();
     }
 
-    private int dp(int v) {
-        return (int) (v * getResources().getDisplayMetrics().density);
+    /* ============================ 更新检查 ============================ */
+
+    private void checkUpdate() {
+        UpdateChecker.check(this, new UpdateChecker.Callback() {
+            @Override
+            public void onResult(boolean hasUpdate, String latest) {
+                if (hasUpdate) {
+                    dotNew.setVisibility(View.VISIBLE);
+                    tvGhSub.setText("发现新版本 · 点击前往下载");
+                    tvGhSub.setTextColor(0xFFC76800);
+                    tvGhVal.setText("v" + latest + " ›");
+                } else {
+                    // 无新版本：副标题隐藏，行内容自动收缩居中
+                    tvGhSub.setVisibility(View.GONE);
+                }
+            }
+        });
     }
+
+    /* ============================ 配置读写 ============================ */
 
     private JSONObject currentConfig() {
         try {
@@ -293,42 +416,73 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void saveToggles() {
+    private void put(String key, Object val) {
         try {
             JSONObject o = currentConfig();
-            o.put("enabled", o.optBoolean("enabled", true));
-            o.put("autoRun", swAutoRun.isChecked());
-            try {
-                int h = Integer.parseInt(etInterval.getText().toString().trim());
-                o.put("autoRunIntervalHours", Math.max(1, h));
-            } catch (Throwable ignored) {
-                o.put("autoRunIntervalHours", 4);
+            o.put(key, val);
+            // 关键词/上限输入框内容一并带上（若用户改过未失焦也兜底读一次）
+            if (etPattern != null && etMax != null) {
+                String pat = etPattern.getText().toString().trim();
+                o.put("scoutPattern", pat.isEmpty() ? "reward|bonus|coin" : pat);
+                try {
+                    o.put("maxScoutMethods", Integer.parseInt(etMax.getText().toString().trim()));
+                } catch (Throwable ignored) {
+                    o.put("maxScoutMethods", 400);
+                }
             }
-            o.put("mtopHook", swMtop.isChecked());
-            o.put("adSdkPresets", swAds.isChecked());
-            o.put("scout", swScout.isChecked());
-            o.put("scoutPattern", etPattern.getText().toString().trim().isEmpty()
-                    ? "reward|bonus|coin" : etPattern.getText().toString().trim());
-            try {
-                o.put("maxScoutMethods", Integer.parseInt(etMax.getText().toString().trim()));
-            } catch (Throwable ignored) {
-                o.put("maxScoutMethods", 400);
-            }
-            persist(o.toString());
-        } catch (Throwable t) {
-            Toast.makeText(this, "保存失败: " + t, Toast.LENGTH_LONG).show();
+            persistSilent(o);
+        } catch (Throwable ignored) {
         }
     }
 
-    /* ============================ 报告轮询 ============================ */
+    private void persistSilent(JSONObject o) {
+        SharedPreferences sp = getSharedPreferences("config", Context.MODE_PRIVATE);
+        sp.edit().putString("config_json", o.toString()).apply();
+        openPrefsPerm();
+        dirty = true;
+    }
+
+    /** 放开文件权限，让 LSPosed 的 XSharedPreferences 能在目标进程读到 */
+    private void openPrefsPerm() {
+        try {
+            File prefsDir = new File(getApplicationInfo().dataDir, "shared_prefs");
+            prefsDir.setExecutable(true, false);
+            prefsDir.setReadable(true, false);
+            File xml = new File(prefsDir, "config.xml");
+            xml.setReadable(true, false);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        if (dirty) {
+            dirty = false;
+            Toast.makeText(this, "配置已保存 · 重启闲鱼生效", Toast.LENGTH_SHORT).show();
+        }
+        super.onPause();
+    }
+
+    /* ============================ 报告四通道读取 ============================ */
+
+    private void refreshLog() {
+        tvReport.setText("加载中…");
+        try {
+            Intent i = new Intent(ACTION_MTOP_CALL);
+            i.setPackage(FISH_PKG);
+            i.putExtra("api", "__GET_RESULT__");
+            sendBroadcast(i);
+        } catch (Throwable ignored) {
+        }
+        pollReport(0);
+    }
 
     /** 轮询三通道读报告（su 首次会等 root 管理器授权，必须后台线程防 ANR） */
     private void pollReport(final int attempt) {
-        if (attempt >= 3 || !reportShown) return;
+        if (attempt >= 3) return;
         tvReport.postDelayed(new Runnable() {
             @Override
             public void run() {
-                if (!reportShown) return;
                 new Thread(new Runnable() {
                     @Override
                     public void run() {
@@ -336,13 +490,12 @@ public class MainActivity extends Activity {
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
-                                if (!reportShown) return;
                                 if (text != null) {
                                     tvReport.setText(text);
                                 } else if (attempt >= 2) {
                                     tvReport.setText("无法读取报告。\n\n"
-                                            + "· root 设备：首次请在 APatch / root 管理器弹窗中允许 RewardHook 的 su 授权，然后重新点「查看上次跑批报告」\n"
-                                            + "· 或下拉通知栏查看「RewardHook」上次结果");
+                                            + "· root 设备：首次请在 APatch / root 管理器弹窗中允许咸鱼小猪手的 su 授权，然后重新点「刷新报告」\n"
+                                            + "· 或下拉通知栏查看上次结果");
                                 } else {
                                     pollReport(attempt + 1);
                                 }
@@ -440,25 +593,7 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 
-    private String loadConfig() {
-        SharedPreferences sp = getSharedPreferences("config", Context.MODE_PRIVATE);
-        return sp.getString("config_json", ConfigManager.DEFAULT_JSON);
-    }
-
-    private void persist(String json) {
-        SharedPreferences sp = getSharedPreferences("config", Context.MODE_PRIVATE);
-        sp.edit().putString("config_json", json).apply();
-
-        // 放开文件权限，让 LSPosed 的 XSharedPreferences 能在目标进程读到
-        try {
-            File prefsDir = new File(getApplicationInfo().dataDir, "shared_prefs");
-            prefsDir.setExecutable(true, false);
-            prefsDir.setReadable(true, false);
-            File xml = new File(prefsDir, "config.xml");
-            xml.setReadable(true, false);
-        } catch (Throwable ignored) {
-        }
-
-        Toast.makeText(this, "已保存，重启闲鱼生效", Toast.LENGTH_SHORT).show();
+    private int dp(int v) {
+        return (int) (v * getResources().getDisplayMetrics().density);
     }
 }

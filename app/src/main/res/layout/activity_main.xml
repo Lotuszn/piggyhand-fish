@@ -1,192 +1,1028 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@color/page_bg"
-    android:fillViewport="true"
-    android:scrollbars="none">
+    android:layout_height="match_parent">
+
+    <!-- 底层色斑背景（模糊光斑图） -->
+    <ImageView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:src="@drawable/bg_blobs"
+        android:importantForAccessibility="no" />
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="20dp">
+        android:layout_height="match_parent"
+        android:orientation="vertical">
 
-        <!-- 顶部品牌卡 -->
-        <LinearLayout
+        <!-- ============ 页面容器 ============ -->
+        <FrameLayout
+            android:id="@+id/pagesWrap"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="@drawable/bg_header"
-            android:orientation="vertical"
-            android:padding="24dp">
+            android:layout_height="0dp"
+            android:layout_weight="1">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="咸鱼小猪手"
-                android:textColor="@color/white"
-                android:textSize="26sp"
-                android:textStyle="bold" />
+            <FrameLayout
+                android:id="@+id/track"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent">
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:alpha="0.85"
-                    android:text="闲鱼任务自动化引擎 · 看广告 / 浏览 / 夺宝 / 搜一搜 / 领奖全自动"
-                    android:textColor="@color/white"
-                    android:textSize="12sp" />
+                <!-- ===== 第 1 页：主页 ===== -->
+                <ScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:fillViewport="true"
+                    android:scrollbars="none"
+                    android:overScrollMode="never">
 
-                <TextView
-                    android:id="@+id/tvVersion"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:alpha="0.7"
-                    android:text="v1.0.1"
-                    android:textColor="@color/white"
-                    android:textSize="11sp" />
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:paddingLeft="12dp"
+                        android:paddingRight="12dp"
+                        android:paddingTop="10dp"
+                        android:paddingBottom="6dp">
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:alpha="0.65"
-                    android:text="酷安@Lotuszn"
-                    android:textColor="@color/white"
-                    android:textSize="11sp" />
-        </LinearLayout>
+                        <!-- 头卡 -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bg_glass"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingLeft="15dp"
+                            android:paddingRight="13dp"
+                            android:paddingTop="12dp"
+                            android:paddingBottom="12dp">
 
-        <!-- 状态卡 -->
-        <LinearLayout
+                            <FrameLayout
+                                android:layout_width="38dp"
+                                android:layout_height="38dp"
+                                android:background="@drawable/bg_logo_badge">
+
+                                <ImageView
+                                    android:layout_width="26dp"
+                                    android:layout_height="26dp"
+                                    android:layout_gravity="center"
+                                    android:scaleType="fitCenter"
+                                    android:src="@drawable/fish_logo"
+                                    android:importantForAccessibility="no" />
+                            </FrameLayout>
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:layout_marginStart="10dp"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="咸鱼小猪手"
+                                    android:textColor="@color/text_main"
+                                    android:textSize="17sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="2dp"
+                                    android:text="闲鱼任务自动化引擎"
+                                    android:textColor="@color/text_sub"
+                                    android:textSize="10sp" />
+                            </LinearLayout>
+
+                            <LinearLayout
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:gravity="end"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:id="@+id/tvVersion"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="v1.0.2 · LSPosed"
+                                    android:textColor="@color/brand_deep"
+                                    android:textSize="10sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="2dp"
+                                    android:text="酷安@Lotuszn"
+                                    android:textColor="@color/text_sub"
+                                    android:textSize="10sp" />
+                            </LinearLayout>
+                        </LinearLayout>
+
+                        <!-- 状态卡 -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="9dp"
+                            android:background="@drawable/bg_glass"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingLeft="14dp"
+                            android:paddingRight="14dp"
+                            android:paddingTop="9dp"
+                            android:paddingBottom="9dp">
+
+                            <FrameLayout
+                                android:layout_width="22dp"
+                                android:layout_height="22dp">
+
+                                <View
+                                    android:id="@+id/pulseHalo"
+                                    android:layout_width="9dp"
+                                    android:layout_height="9dp"
+                                    android:layout_gravity="center"
+                                    android:background="@drawable/dot_ok" />
+
+                                <View
+                                    android:layout_width="9dp"
+                                    android:layout_height="9dp"
+                                    android:layout_gravity="center"
+                                    android:background="@drawable/dot_ok" />
+                            </FrameLayout>
+
+                            <TextView
+                                android:id="@+id/tvStatus"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="8dp"
+                                android:layout_weight="1"
+                                android:text="引擎运行中"
+                                android:textColor="@color/text_main"
+                                android:textSize="12.5sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tvStatusMeta"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="自动间隔 4 小时"
+                                android:textColor="@color/text_sub"
+                                android:textSize="10.5sp" />
+                        </LinearLayout>
+
+                        <!-- 主按钮 -->
+                        <Button
+                            android:id="@+id/btnRun"
+                            android:layout_width="match_parent"
+                            android:layout_height="46dp"
+                            android:layout_marginTop="10dp"
+                            android:background="@drawable/bg_btn_run"
+                            android:letterSpacing="0.14"
+                            android:text="立即跑批"
+                            android:textColor="@color/btn_text"
+                            android:textSize="14sp"
+                            android:textStyle="bold" />
+
+                        <!-- 功能开关 -->
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginLeft="3dp"
+                            android:layout_marginTop="11dp"
+                            android:layout_marginBottom="6dp"
+                            android:letterSpacing="0.2"
+                            android:text="功能开关"
+                            android:textColor="#6617181C"
+                            android:textSize="10.5sp"
+                            android:textStyle="bold" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bg_glass"
+                            android:orientation="vertical"
+                            android:paddingLeft="13dp"
+                            android:paddingRight="13dp"
+                            android:paddingTop="2dp"
+                            android:paddingBottom="2dp">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingTop="9dp"
+                                android:paddingBottom="9dp">
+
+                                <FrameLayout
+                                    android:layout_width="27dp"
+                                    android:layout_height="27dp"
+                                    android:background="@drawable/bg_icon_o">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_gravity="center"
+                                        android:includeFontPadding="false"
+                                        android:text="⚡"
+                                        android:textSize="13sp" />
+                                </FrameLayout>
+
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="10dp"
+                                    android:layout_weight="1"
+                                    android:orientation="vertical">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="自动跑批"
+                                        android:textColor="@color/text_main"
+                                        android:textSize="12.5sp"
+                                        android:textStyle="bold" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="闲鱼启动超间隔自动执行"
+                                        android:textColor="@color/text_sub"
+                                        android:textSize="9.5sp" />
+                                </LinearLayout>
+
+                                <com.piggyhand.fish.LiquidSwitch
+                                    android:id="@+id/swAutoRun"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content" />
+                            </LinearLayout>
+
+                            <View
+                                android:layout_width="match_parent"
+                                android:layout_height="1dp"
+                                android:background="#0F17181C" />
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingTop="9dp"
+                                android:paddingBottom="9dp">
+
+                                <FrameLayout
+                                    android:layout_width="27dp"
+                                    android:layout_height="27dp"
+                                    android:background="@drawable/bg_icon_g">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_gravity="center"
+                                        android:includeFontPadding="false"
+                                        android:text="📡"
+                                        android:textSize="13sp" />
+                                </FrameLayout>
+
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="10dp"
+                                    android:layout_weight="1"
+                                    android:orientation="vertical">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="mtop 直调"
+                                        android:textColor="@color/text_main"
+                                        android:textSize="12.5sp"
+                                        android:textStyle="bold" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="借壳协议栈免签名发送"
+                                        android:textColor="@color/text_sub"
+                                        android:textSize="9.5sp" />
+                                </LinearLayout>
+
+                                <com.piggyhand.fish.LiquidSwitch
+                                    android:id="@+id/swMtop"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content" />
+                            </LinearLayout>
+
+                            <View
+                                android:layout_width="match_parent"
+                                android:layout_height="1dp"
+                                android:background="#0F17181C" />
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingTop="9dp"
+                                android:paddingBottom="9dp">
+
+                                <FrameLayout
+                                    android:layout_width="27dp"
+                                    android:layout_height="27dp"
+                                    android:background="@drawable/bg_icon_p">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_gravity="center"
+                                        android:includeFontPadding="false"
+                                        android:text="🧹"
+                                        android:textSize="13sp" />
+                                </FrameLayout>
+
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="10dp"
+                                    android:layout_weight="1"
+                                    android:orientation="vertical">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="响应净化"
+                                        android:textColor="@color/text_main"
+                                        android:textSize="12.5sp"
+                                        android:textStyle="bold" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="去广告 · 过滤 · 排序"
+                                        android:textColor="@color/text_sub"
+                                        android:textSize="9.5sp" />
+                                </LinearLayout>
+
+                                <com.piggyhand.fish.LiquidSwitch
+                                    android:id="@+id/swAds"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content" />
+                            </LinearLayout>
+
+                            <View
+                                android:layout_width="match_parent"
+                                android:layout_height="1dp"
+                                android:background="#0F17181C" />
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingTop="9dp"
+                                android:paddingBottom="9dp">
+
+                                <FrameLayout
+                                    android:layout_width="27dp"
+                                    android:layout_height="27dp"
+                                    android:background="@drawable/bg_icon_b">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_gravity="center"
+                                        android:includeFontPadding="false"
+                                        android:text="🔍"
+                                        android:textSize="13sp" />
+                                </FrameLayout>
+
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="10dp"
+                                    android:layout_weight="1"
+                                    android:orientation="vertical">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="侦察模式"
+                                        android:textColor="@color/text_main"
+                                        android:textSize="12.5sp"
+                                        android:textStyle="bold" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="扫描类名挂日志钩子"
+                                        android:textColor="@color/text_sub"
+                                        android:textSize="9.5sp" />
+                                </LinearLayout>
+
+                                <com.piggyhand.fish.LiquidSwitch
+                                    android:id="@+id/swScout"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content" />
+                            </LinearLayout>
+                        </LinearLayout>
+
+                        <!-- 侦察模式子参数（开关打开时显示） -->
+                        <LinearLayout
+                            android:id="@+id/scoutArgs"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:background="@drawable/bg_glass"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingLeft="13dp"
+                            android:paddingRight="13dp"
+                            android:paddingTop="10dp"
+                            android:paddingBottom="10dp"
+                            android:visibility="gone">
+
+                            <EditText
+                                android:id="@+id/etPattern"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:background="@drawable/bg_input"
+                                android:hint="关键词 | 分隔"
+                                android:inputType="text"
+                                android:maxLines="1"
+                                android:paddingLeft="10dp"
+                                android:paddingRight="10dp"
+                                android:paddingTop="8dp"
+                                android:paddingBottom="8dp"
+                                android:textColor="@color/text_main"
+                                android:textColorHint="@color/text_faint"
+                                android:textSize="10sp" />
+
+                            <EditText
+                                android:id="@+id/etMax"
+                                android:layout_width="64dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="8dp"
+                                android:background="@drawable/bg_input"
+                                android:gravity="center"
+                                android:hint="上限"
+                                android:inputType="number"
+                                android:maxLines="1"
+                                android:paddingTop="8dp"
+                                android:paddingBottom="8dp"
+                                android:textColor="@color/text_main"
+                                android:textColorHint="@color/text_faint"
+                                android:textSize="10sp" />
+                        </LinearLayout>
+
+                        <!-- 跑批间隔滑块 -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:background="@drawable/bg_glass"
+                            android:orientation="vertical"
+                            android:paddingLeft="15dp"
+                            android:paddingRight="15dp"
+                            android:paddingTop="12dp"
+                            android:paddingBottom="10dp">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="bottom"
+                                android:orientation="horizontal">
+
+                                <TextView
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:text="跑批间隔"
+                                    android:textColor="@color/text_main"
+                                    android:textSize="12sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvHoursNum"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="4"
+                                    android:textColor="@color/accent"
+                                    android:textSize="15sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="2dp"
+                                    android:text="小时"
+                                    android:textColor="@color/text_sub"
+                                    android:textSize="9.5sp" />
+                            </LinearLayout>
+
+                            <com.piggyhand.fish.LiquidSlider
+                                android:id="@+id/sliderHours"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="6dp" />
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="horizontal">
+
+                                <TextView
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:text="1h"
+                                    android:textColor="@color/text_faint"
+                                    android:textSize="9sp" />
+
+                                <TextView
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:gravity="center"
+                                    android:text="6h"
+                                    android:textColor="@color/text_faint"
+                                    android:textSize="9sp" />
+
+                                <TextView
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:gravity="end"
+                                    android:text="12h"
+                                    android:textColor="@color/text_faint"
+                                    android:textSize="9sp" />
+                            </LinearLayout>
+                        </LinearLayout>
+                    </LinearLayout>
+                </ScrollView>
+
+                <!-- ===== 第 2 页：日志 ===== -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:orientation="vertical"
+                    android:paddingLeft="12dp"
+                    android:paddingRight="12dp"
+                    android:paddingTop="10dp"
+                    android:paddingBottom="8dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginLeft="3dp"
+                        android:layout_marginBottom="6dp"
+                        android:letterSpacing="0.2"
+                        android:text="跑批报告"
+                        android:textColor="#6617181C"
+                        android:textSize="10.5sp"
+                        android:textStyle="bold" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_glass"
+                        android:orientation="vertical"
+                        android:padding="10dp">
+
+                        <ScrollView
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:scrollbars="none"
+                            android:overScrollMode="never">
+
+                            <TextView
+                                android:id="@+id/tvReport"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:fontFamily="monospace"
+                                android:lineSpacingExtra="4dp"
+                                android:padding="4dp"
+                                android:text="暂无跑批记录（先跑一轮）"
+                                android:textColor="#3C3F45"
+                                android:textSize="10sp" />
+                        </ScrollView>
+                    </LinearLayout>
+
+                    <Button
+                        android:id="@+id/btnRefresh"
+                        android:layout_width="match_parent"
+                        android:layout_height="44dp"
+                        android:layout_marginTop="10dp"
+                        android:background="@drawable/bg_btn_refresh"
+                        android:text="刷新报告"
+                        android:textColor="@color/text_main"
+                        android:textSize="12.5sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <!-- ===== 第 3 页：关于 ===== -->
+                <ScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:fillViewport="true"
+                    android:scrollbars="none"
+                    android:overScrollMode="never">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:paddingLeft="12dp"
+                        android:paddingRight="12dp"
+                        android:paddingTop="10dp"
+                        android:paddingBottom="6dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginLeft="3dp"
+                            android:layout_marginBottom="6dp"
+                            android:letterSpacing="0.2"
+                            android:text="通用"
+                            android:textColor="#6617181C"
+                            android:textSize="10.5sp"
+                            android:textStyle="bold" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bg_glass"
+                            android:orientation="vertical"
+                            android:paddingLeft="14dp"
+                            android:paddingRight="14dp"
+                            android:paddingTop="2dp"
+                            android:paddingBottom="2dp">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingTop="11dp"
+                                android:paddingBottom="11dp">
+
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:orientation="vertical">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="广播端口"
+                                        android:textColor="@color/text_main"
+                                        android:textSize="12.5sp" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="PC 直调指令通道"
+                                        android:textColor="@color/text_sub"
+                                        android:textSize="10sp" />
+                                </LinearLayout>
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="27715"
+                                    android:textColor="@color/text_sub"
+                                    android:textSize="11sp" />
+                            </LinearLayout>
+
+                            <View
+                                android:layout_width="match_parent"
+                                android:layout_height="1dp"
+                                android:background="#0F17181C" />
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingTop="11dp"
+                                android:paddingBottom="11dp">
+
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:orientation="vertical">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="作用域"
+                                        android:textColor="@color/text_main"
+                                        android:textSize="12.5sp" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="LSPosed 注入目标"
+                                        android:textColor="@color/text_sub"
+                                        android:textSize="10sp" />
+                                </LinearLayout>
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="闲鱼"
+                                    android:textColor="@color/text_sub"
+                                    android:textSize="11sp" />
+                            </LinearLayout>
+
+                            <View
+                                android:layout_width="match_parent"
+                                android:layout_height="1dp"
+                                android:background="#0F17181C" />
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingTop="11dp"
+                                android:paddingBottom="11dp">
+
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:orientation="vertical">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="报告通道"
+                                        android:textColor="@color/text_main"
+                                        android:textSize="12.5sp" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="通知 · Socket · 落盘"
+                                        android:textColor="@color/text_sub"
+                                        android:textSize="10sp" />
+                                </LinearLayout>
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="四级"
+                                    android:textColor="@color/text_sub"
+                                    android:textSize="11sp" />
+                            </LinearLayout>
+                        </LinearLayout>
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginLeft="3dp"
+                            android:layout_marginTop="13dp"
+                            android:layout_marginBottom="6dp"
+                            android:letterSpacing="0.2"
+                            android:text="关于"
+                            android:textColor="#6617181C"
+                            android:textSize="10.5sp"
+                            android:textStyle="bold" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bg_glass"
+                            android:orientation="vertical"
+                            android:paddingLeft="14dp"
+                            android:paddingRight="14dp"
+                            android:paddingTop="2dp"
+                            android:paddingBottom="2dp">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingTop="11dp"
+                                android:paddingBottom="11dp">
+
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:orientation="vertical">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="酷安"
+                                        android:textColor="@color/text_main"
+                                        android:textSize="12.5sp" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="作者主页"
+                                        android:textColor="@color/text_sub"
+                                        android:textSize="10sp" />
+                                </LinearLayout>
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="@Lotuszn ›"
+                                    android:textColor="@color/text_sub"
+                                    android:textSize="11sp" />
+                            </LinearLayout>
+
+                            <View
+                                android:layout_width="match_parent"
+                                android:layout_height="1dp"
+                                android:background="#0F17181C" />
+
+                            <LinearLayout
+                                android:id="@+id/rowGithub"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:foreground="?android:attr/selectableItemBackground"
+                                android:clickable="true"
+                                android:focusable="true"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingTop="11dp"
+                                android:paddingBottom="11dp">
+
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:orientation="vertical">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="GitHub"
+                                        android:textColor="@color/text_main"
+                                        android:textSize="12.5sp" />
+
+                                    <TextView
+                                        android:id="@+id/tvGhSub"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="检查更新中…"
+                                        android:textColor="@color/text_sub"
+                                        android:textSize="10sp" />
+                                </LinearLayout>
+
+                                <View
+                                    android:id="@+id/dotNew"
+                                    android:layout_width="7dp"
+                                    android:layout_height="7dp"
+                                    android:layout_marginEnd="5dp"
+                                    android:background="@drawable/dot_new"
+                                    android:visibility="gone" />
+
+                                <TextView
+                                    android:id="@+id/tvGhVal"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="v1.0.2 ›"
+                                    android:textColor="@color/text_sub"
+                                    android:textSize="11sp" />
+                            </LinearLayout>
+                        </LinearLayout>
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="14dp"
+                            android:layout_marginBottom="8dp"
+                            android:gravity="center"
+                            android:text="引擎在闲鱼进程内自主运行"
+                            android:textColor="@color/text_faint"
+                            android:textSize="10.5sp" />
+                    </LinearLayout>
+                </ScrollView>
+            </FrameLayout>
+        </FrameLayout>
+
+        <!-- ============ Tab 栏 ============ -->
+        <FrameLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:background="@drawable/bg_card"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:padding="18dp">
+            android:layout_height="62dp"
+            android:layout_marginLeft="14dp"
+            android:layout_marginRight="14dp"
+            android:layout_marginBottom="10dp"
+            android:background="@drawable/bg_glass">
 
             <View
-                android:layout_width="10dp"
-                android:layout_height="10dp"
-                android:background="@drawable/dot_ok" />
+                android:id="@+id/pill"
+                android:layout_width="80dp"
+                android:layout_height="48dp"
+                android:layout_gravity="start|center_vertical"
+                android:layout_marginStart="7dp"
+                android:background="@drawable/bg_glass_pill" />
 
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
-                android:orientation="vertical">
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:paddingLeft="7dp"
+                android:paddingRight="7dp">
 
-                <TextView
-                    android:id="@+id/tvStatus"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="模块运行中 · 闲鱼启动自动接管"
-                    android:textColor="@color/text_main"
-                    android:textSize="14sp"
-                    android:textStyle="bold" />
+                <LinearLayout
+                    android:id="@+id/tabHome"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical">
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="3dp"
-                    android:text="打开闲鱼 45 秒后自动跑一轮（默认间隔 4 小时），结果推送通知栏"
-                    android:textColor="@color/text_sub"
-                    android:textSize="11sp" />
+                    <ImageView
+                        android:id="@+id/ivTabHome"
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:src="@drawable/ic_tab_home"
+                        android:importantForAccessibility="no" />
+
+                    <TextView
+                        android:id="@+id/tvTabHome"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="3dp"
+                        android:text="主页"
+                        android:textSize="9.5sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/tabLog"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical">
+
+                    <ImageView
+                        android:id="@+id/ivTabLog"
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:src="@drawable/ic_tab_log"
+                        android:importantForAccessibility="no" />
+
+                    <TextView
+                        android:id="@+id/tvTabLog"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="3dp"
+                        android:text="日志"
+                        android:textSize="9.5sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/tabAbout"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical">
+
+                    <ImageView
+                        android:id="@+id/ivTabAbout"
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:src="@drawable/ic_tab_about"
+                        android:importantForAccessibility="no" />
+
+                    <TextView
+                        android:id="@+id/tvTabAbout"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="3dp"
+                        android:text="关于"
+                        android:textSize="9.5sp" />
+                </LinearLayout>
             </LinearLayout>
-        </LinearLayout>
-
-        <!-- 主操作 -->
-        <Button
-            android:id="@+id/btnRun"
-            android:layout_width="match_parent"
-            android:layout_height="54dp"
-            android:layout_marginTop="18dp"
-            android:background="@drawable/bg_btn_primary"
-            android:text="立即跑一轮任务"
-            android:textColor="@color/white"
-            android:textSize="16sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center_horizontal"
-            android:layout_marginTop="8dp"
-            android:text="点击后自动打开闲鱼执行 · 任务用尽会快速跳过"
-            android:textColor="@color/text_sub"
-            android:textSize="11sp" />
-
-        <Button
-            android:id="@+id/btnReport"
-            android:layout_width="match_parent"
-            android:layout_height="46dp"
-            android:layout_marginTop="14dp"
-            android:background="@drawable/bg_btn_ghost"
-            android:text="查看上次跑批报告"
-            android:textColor="@color/brand_deep"
-            android:textSize="14sp" />
-
-        <TextView
-            android:id="@+id/tvReport"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:background="@drawable/bg_code"
-            android:fontFamily="monospace"
-            android:padding="14dp"
-            android:text="加载中…"
-            android:textColor="@color/code_text"
-            android:textSize="10sp"
-            android:visibility="gone" />
-
-        <!-- 高级配置（开关式） -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:background="@drawable/bg_card"
-            android:orientation="vertical"
-            android:padding="18dp">
-
-            <TextView
-                android:id="@+id/tvConfigTitle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="功能开关 ▸"
-                android:textColor="@color/text_main"
-                android:textSize="14sp"
-                android:textStyle="bold" />
-
-            <LinearLayout
-                android:id="@+id/layoutToggles"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:orientation="vertical"
-                android:visibility="gone" />
-
-            <Button
-                android:id="@+id/btnSave"
-                android:layout_width="match_parent"
-                android:layout_height="42dp"
-                android:layout_marginTop="10dp"
-                android:background="@drawable/bg_btn_ghost"
-                android:text="保存设置（重启闲鱼生效）"
-                android:textColor="@color/brand_deep"
-                android:textSize="13sp"
-                android:visibility="gone" />
-        </LinearLayout>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center_horizontal"
-            android:layout_marginTop="16dp"
-            android:layout_marginBottom="8dp"
-            android:text="引擎在闲鱼进程内自主运行"
-            android:textColor="@color/text_sub"
-            android:textSize="11sp" />
+        </FrameLayout>
     </LinearLayout>
-</ScrollView>
+</FrameLayout>
