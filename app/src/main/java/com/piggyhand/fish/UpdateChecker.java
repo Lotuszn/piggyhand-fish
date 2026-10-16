@@ -18,8 +18,11 @@ import java.net.URL;
 public class UpdateChecker {
 
     public interface Callback {
-        /** hasUpdate=true 时 latest 为远端版本号 */
-        void onResult(boolean hasUpdate, String latest);
+        /**
+         * failed=true：网络失败（如国内直连 api.github.com 不通），latest 无意义；
+         * failed=false 时 hasUpdate=true 表示远端有新版本，latest 为远端版本号
+         */
+        void onResult(boolean hasUpdate, String latest, boolean failed);
     }
 
     private static final String LATEST_URL =
@@ -38,42 +41,47 @@ public class UpdateChecker {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                String latest = null;
-                boolean has = false;
-                HttpURLConnection conn = null;
-                try {
-                    conn = (HttpURLConnection) new URL(LATEST_URL + "?t=" + System.currentTimeMillis())
-                            .openConnection();
-                    conn.setConnectTimeout(6000);
-                    conn.setReadTimeout(6000);
-                    conn.setRequestProperty("Accept", "application/vnd.github+json");
-                    conn.setRequestProperty("User-Agent", "piggyhand-fish");
-                    int code = conn.getResponseCode();
-                    if (code == 200) {
-                        BufferedReader br = new BufferedReader(
-                                new InputStreamReader(conn.getInputStream(), "UTF-8"));
-                        StringBuilder sb = new StringBuilder();
-                        String line;
-                        while ((line = br.readLine()) != null) sb.append(line);
-                        br.close();
-                        String tag = new JSONObject(sb.toString()).optString("tag_name", "");
-                        if (!tag.isEmpty()) {
-                            latest = tag.startsWith("v") ? tag.substring(1) : tag;
-                            has = isNewer(latest, cur);
-                        }
+            String latest = null;
+            boolean has = false;
+            boolean failed = false;
+            HttpURLConnection conn = null;
+            try {
+                conn = (HttpURLConnection) new URL(LATEST_URL + "?t=" + System.currentTimeMillis())
+                        .openConnection();
+                conn.setConnectTimeout(6000);
+                conn.setReadTimeout(6000);
+                conn.setRequestProperty("Accept", "application/vnd.github+json");
+                conn.setRequestProperty("User-Agent", "piggyhand-fish");
+                int code = conn.getResponseCode();
+                if (code == 200) {
+                    BufferedReader br = new BufferedReader(
+                            new InputStreamReader(conn.getInputStream(), "UTF-8"));
+                    StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = br.readLine()) != null) sb.append(line);
+                    br.close();
+                    String tag = new JSONObject(sb.toString()).optString("tag_name", "");
+                    if (!tag.isEmpty()) {
+                        latest = tag.startsWith("v") ? tag.substring(1) : tag;
+                        has = isNewer(latest, cur);
                     }
-                } catch (Throwable ignored) {
-                } finally {
-                    if (conn != null) try { conn.disconnect(); } catch (Throwable ignored) {}
+                } else {
+                    failed = true;
                 }
-                final boolean fh = has;
-                final String fl = latest;
-                new Handler(Looper.getMainLooper()).post(new Runnable() {
-                    @Override
-                    public void run() {
-                        cb.onResult(fh, fl);
-                    }
-                });
+            } catch (Throwable t) {
+                failed = true;
+            } finally {
+                if (conn != null) try { conn.disconnect(); } catch (Throwable ignored) {}
+            }
+            final boolean fh = has;
+            final String fl = latest;
+            final boolean ff = failed;
+            new Handler(Looper.getMainLooper()).post(new Runnable() {
+                @Override
+                public void run() {
+                    cb.onResult(fh, fl, ff);
+                }
+            });
             }
         }, "rh-update-check").start();
     }

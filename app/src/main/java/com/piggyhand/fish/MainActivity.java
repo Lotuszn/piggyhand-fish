@@ -64,6 +64,7 @@ public class MainActivity extends Activity {
 
     private boolean dirty = false;
     private boolean logLoaded = false;
+    private boolean updateCheckFailed = false;
 
     private final BroadcastReceiver resultReceiver = new BroadcastReceiver() {
         @Override
@@ -204,10 +205,14 @@ public class MainActivity extends Activity {
             }
         });
 
-        // ===== GitHub 行点击 → 浏览器打开 Releases =====
+        // ===== GitHub 行点击：检查失败 → 重试检查；否则浏览器打开 Releases =====
         rowGithub.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                if (updateCheckFailed) {
+                    checkUpdate();
+                    return;
+                }
                 try {
                     startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(RELEASES_URL)));
                 } catch (Throwable t) {
@@ -406,16 +411,26 @@ public class MainActivity extends Activity {
     /* ============================ 更新检查 ============================ */
 
     private void checkUpdate() {
+        updateCheckFailed = false;
+        tvGhSub.setVisibility(View.VISIBLE);
+        tvGhSub.setText("检查更新中…");
+        tvGhSub.setTextColor(0xFF8A8B92);
         UpdateChecker.check(this, new UpdateChecker.Callback() {
             @Override
-            public void onResult(boolean hasUpdate, String latest) {
-                if (hasUpdate) {
+            public void onResult(boolean hasUpdate, String latest, boolean failed) {
+                if (failed) {
+                    // 网络失败（如国内直连 api.github.com 不通）：可见可重试，不再静默
+                    updateCheckFailed = true;
+                    dotNew.setVisibility(View.GONE);
+                    tvGhSub.setText("检查失败 · 点按重试");
+                    tvGhSub.setTextColor(0xFF8A8B92);
+                } else if (hasUpdate) {
                     dotNew.setVisibility(View.VISIBLE);
                     tvGhSub.setText("发现新版本 · 点击前往下载");
                     tvGhSub.setTextColor(0xFFC76800);
                     tvGhVal.setText("v" + latest + " ›");
                 } else {
-                    // 无新版本：副标题隐藏，行内容自动收缩居中
+                    // 已是最新：副标题隐藏，行内容自动收缩居中
                     tvGhSub.setVisibility(View.GONE);
                 }
             }
