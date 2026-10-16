@@ -13,6 +13,8 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
@@ -42,6 +44,10 @@ public class MainActivity extends Activity {
     private static final String FISH_PKG = "com.taobao.idlefish";
     private static final String RELEASES_URL =
             "https://github.com/Lotuszn/piggyhand-fish/releases/latest";
+    private static final String GITEE_RELEASES_URL =
+            "https://gitee.com/lotuszn/piggyhand-fish/releases";
+    private static final String PAN_URL =
+            "https://1827807734.share.123pan.cn/123pan/5faujv-budcH?pwd=iHLf";
     private static final String COOLAPK_URL = "https://www.coolapk.com/u/2206962";
 
     /* 导航 */
@@ -56,7 +62,8 @@ public class MainActivity extends Activity {
 
     /* 控件 */
     private TextView tvVersion, tvStatus, tvStatusMeta, tvReport, tvGhSub, tvGhVal, tvHoursNum;
-    private View dotNew, pulseHalo, scoutArgs, rowGithub, rowCoolapk;
+    private View dotNew, pulseHalo, scoutArgs, rowUpdate, rowCoolapk;
+    private View linkPicker; // 下载渠道选择弹层（非空 = 正在显示）
     private LiquidSwitch swAutoRun, swMtop, swAds, swScout;
     private LiquidSlider sliderHours;
     private EditText etPattern, etMax;
@@ -107,7 +114,7 @@ public class MainActivity extends Activity {
         dotNew = findViewById(R.id.dotNew);
         pulseHalo = findViewById(R.id.pulseHalo);
         scoutArgs = findViewById(R.id.scoutArgs);
-        rowGithub = findViewById(R.id.rowGithub);
+        rowUpdate = findViewById(R.id.rowUpdate);
         rowCoolapk = findViewById(R.id.rowCoolapk);
         swAutoRun = findViewById(R.id.swAutoRun);
         swMtop = findViewById(R.id.swMtop);
@@ -205,19 +212,15 @@ public class MainActivity extends Activity {
             }
         });
 
-        // ===== GitHub 行点击：检查失败 → 重试检查；否则浏览器打开 Releases =====
-        rowGithub.setOnClickListener(new View.OnClickListener() {
+        // ===== 版本更新行点击：检查失败 → 重试检查；否则弹出下载渠道选择 =====
+        rowUpdate.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 if (updateCheckFailed) {
                     checkUpdate();
                     return;
                 }
-                try {
-                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(RELEASES_URL)));
-                } catch (Throwable t) {
-                    Toast.makeText(MainActivity.this, "无可用浏览器", Toast.LENGTH_SHORT).show();
-                }
+                showDownloadPicker();
             }
         });
 
@@ -435,6 +438,132 @@ public class MainActivity extends Activity {
                 }
             }
         });
+    }
+
+    /* ============================ 下载渠道选择弹层 ============================ */
+
+    private void showDownloadPicker() {
+        if (linkPicker != null) return;
+        final ViewGroup root = (ViewGroup) findViewById(android.R.id.content);
+
+        final FrameLayout mask = new FrameLayout(this);
+        mask.setBackgroundColor(0x59000000);
+        mask.setClickable(true);
+        mask.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { dismissPicker(); }
+        });
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackgroundResource(R.drawable.bg_glass);
+        int pad = dp(16);
+        card.setPadding(pad, pad, pad, dp(2));
+
+        TextView title = new TextView(this);
+        title.setText("选择下载渠道");
+        title.setTextSize(13.5f);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(0xFF17181C);
+        card.addView(title);
+
+        card.addView(pickRow("GitHub Releases", "国际源 · 需代理环境", RELEASES_URL));
+        card.addView(divider());
+        card.addView(pickRow("Gitee 发行版", "国内直连 · 推荐", GITEE_RELEASES_URL));
+        card.addView(divider());
+        card.addView(pickRow("123 网盘", "备用通道 · 提取码 iHLf", PAN_URL));
+
+        TextView cancel = new TextView(this);
+        cancel.setText("取消");
+        cancel.setTextSize(11.5f);
+        cancel.setTextColor(0xFF8A8B92);
+        cancel.setGravity(Gravity.CENTER);
+        cancel.setPadding(0, dp(10), 0, dp(10));
+        cancel.setClickable(true);
+        cancel.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { dismissPicker(); }
+        });
+        card.addView(cancel);
+
+        mask.addView(card, new FrameLayout.LayoutParams(
+                dp(280), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+        root.addView(mask, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        linkPicker = mask;
+
+        mask.setAlpha(0f);
+        card.setTranslationY(dp(18));
+        mask.animate().alpha(1f).setDuration(180).start();
+        card.animate().translationY(0f).setDuration(180).start();
+    }
+
+    /** 弹层选项行：标题 + 副标题 + 点击打开链接后收起 */
+    private View pickRow(String title, String sub, final String url) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setClickable(true);
+        row.setFocusable(true);
+        TypedValue tv = new TypedValue();
+        getTheme().resolveAttribute(android.R.attr.selectableItemBackground, tv, true);
+        row.setForeground(getResources().getDrawable(tv.resourceId));
+        int vpad = dp(11);
+        row.setPadding(0, vpad, 0, vpad);
+
+        TextView t = new TextView(this);
+        t.setText(title);
+        t.setTextSize(12.5f);
+        t.setTextColor(0xFF17181C);
+        row.addView(t);
+
+        TextView s = new TextView(this);
+        s.setText(sub);
+        s.setTextSize(10f);
+        s.setTextColor(0xFF8A8B92);
+        s.setPadding(0, dp(2), 0, 0);
+        row.addView(s);
+
+        row.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                dismissPicker();
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+                } catch (Throwable e) {
+                    Toast.makeText(MainActivity.this, "无可用浏览器", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+        return row;
+    }
+
+    private View divider() {
+        View d = new View(this);
+        d.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+        d.setBackgroundColor(0x0F17181C);
+        return d;
+    }
+
+    private void dismissPicker() {
+        if (linkPicker == null) return;
+        final View m = linkPicker;
+        linkPicker = null;
+        m.animate().alpha(0f).setDuration(140).start();
+        // 兜底：Activity onStop 时 Choreographer 帧回调冻结，动画 withEndAction 不执行，
+        // 必须用 Handler 定时强移，否则 clickable 的遮罩残留会挡住整个界面
+        m.postDelayed(new Runnable() {
+            @Override public void run() {
+                ViewGroup p = (ViewGroup) m.getParent();
+                if (p != null) p.removeView(m);
+            }
+        }, 160);
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (linkPicker != null) {
+            dismissPicker();
+            return;
+        }
+        super.onBackPressed();
     }
 
     /* ============================ 配置读写 ============================ */

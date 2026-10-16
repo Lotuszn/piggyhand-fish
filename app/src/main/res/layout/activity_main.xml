@@ -860,7 +860,7 @@
                                 android:background="#0F17181C" />
 
                             <LinearLayout
-                                android:id="@+id/rowGithub"
+                                android:id="@+id/rowUpdate"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:minHeight="56dp"
@@ -881,7 +881,7 @@
                                     <TextView
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="GitHub"
+                                        android:text="版本更新"
                                         android:textColor="@color/text_main"
                                         android:textSize="12.5sp" />
 
