@@ -1,6 +1,6 @@
 {
-  "latest": "1.0.4",
+  "latest": "1.0.3",
   "url": "https://github.com/Lotuszn/piggyhand-fish/releases/latest",
   "cnUrl": "https://gitee.com/lotuszn/piggyhand-fish/releases",
-  "notes": "v1.0.4 测试桩 · 用于验证 11 Pro 远端更新提示（红点）端到端链路"
+  "notes": "v1.0.3 · 体验增强：任务气泡 / 酷安主页直达 / 通知新标题 / socket 触发通道 / 侦察默认开"
 }
