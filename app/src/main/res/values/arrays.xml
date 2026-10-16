@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 默认作用域，装好后也可在 LSPosed 管理器里手动勾选目标应用 -->
+    <string-array name="xposed_scope">
+        <item>com.example.target.app</item>
+    </string-array>
+</resources>
