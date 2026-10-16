@@ -1,6 +1,6 @@
 {
-  "latest": "1.0.3",
+  "latest": "1.0.4",
   "url": "https://github.com/Lotuszn/piggyhand-fish/releases/latest",
   "cnUrl": "https://gitee.com/lotuszn/piggyhand-fish/releases",
-  "notes": "v1.0.3 · 体验增强：任务气泡 / 酷安主页直达 / 通知新标题 / socket 触发通道 / 侦察默认开"
+  "notes": "v1.0.4 · 版本更新行改版：点击弹出 GitHub / Gitee / 123 网盘三渠道选择；已是最新版时显示绿点状态"
 }
