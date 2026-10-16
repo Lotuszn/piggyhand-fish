@@ -5,6 +5,11 @@ set -e
 # 脚本自身目录（工程根），不依赖调用位置
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 SRC="$ROOT"
+# 版本号（改版本只动这里 + app/build.gradle + 布局占位 + version.json 四处）
+VER="1.0.3"
+VERCODE=4
+# 交付产物命名（用户规则）：闲鱼小猪手-版本号.apk
+OUT_APK="闲鱼小猪手-$VER.apk"
 # SDK 三件套：android.jar + build-tools(含 aapt2/apksigner) + r8.jar（默认取 fish-work/sdk）
 AJ="${ANDROID_JAR:-$ROOT/../fish-work/sdk/pf/android-34/android.jar}"
 BT="${BUILD_TOOLS:-$ROOT/../fish-work/sdk/bt/android-14}"
@@ -22,7 +27,7 @@ echo "[1/8] aapt2 编译资源 + 生成 R.java"
   -I "$AJ" \
   --manifest app/src/main/AndroidManifest.xml \
   --min-sdk-version 26 --target-sdk-version 34 \
-  --version-code 4 --version-name 1.0.3 \
+  --version-code $VERCODE --version-name "$VER" \
   -A app/src/main/assets \
   --java build/gen \
   build/res.zip
@@ -85,6 +90,6 @@ if [ ! -f .keystore/debug.keystore ]; then
 fi
 java -jar "$BT/lib/apksigner.jar" sign \
   --ks .keystore/debug.keystore --ks-pass pass:android --key-pass pass:android \
-  --out RewardHook.apk build/aligned.apk
-java -jar "$BT/lib/apksigner.jar" verify --print-certs RewardHook.apk | head -3
-echo "=== DONE: $SRC/RewardHook.apk ($(du -h RewardHook.apk | cut -f1)) ==="
+  --out "$OUT_APK" build/aligned.apk
+java -jar "$BT/lib/apksigner.jar" verify --print-certs "$OUT_APK" | head -3
+echo "=== DONE: $SRC/$OUT_APK ($(du -h "$OUT_APK" | cut -f1)) ==="
