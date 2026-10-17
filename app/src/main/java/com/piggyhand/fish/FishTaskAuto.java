@@ -36,6 +36,14 @@ public final class FishTaskAuto {
     private static final String AD_EVENT_API = "mtop.taobao.idle.play.ad.event.push";
     private static final String AD_EVENT_QUERY_API = "mtop.taobao.idle.play.ad.event.query";
     private static final String SIGNIN_API = "mtop.taobao.idle.coin.signin";
+    // 玩一玩/圈数挑战面板的 7 天签到（与任务面板 coin.signin 是两个独立入口）。
+    // 10-17 抓包接入：参数全量复用真实点击抓包值（asac/gps/fishAdCode 复用有夺宝先例）
+    private static final String PLAY_SIGN_API = "mtop.taobao.idle.play.sign.in";
+    private static final String PLAY_SIGN_DATA = "{\"asac\":\"2A23B272CW28KVB60F0O51\",\"fishAdCode\":\"500107\",\"gps\":\"29.524192,106.471432\",\"playId\":4,\"usertoken\":\"\"}";
+    // 圈数挑战寻宝地图：init 查状态（location/remainStep/mapVersion），roll 掷骰前进（沿途奖励自动结算）。
+    // 10-17 两次真实点击抓包：version=3 固定、outId=客户端毫秒时间戳、locationBefore=上次位置
+    private static final String MAP_INIT_API = "mtop.taobao.idle.treasure.hunt.map.init";
+    private static final String MAP_ROLL_API = "mtop.taobao.idle.treasure.hunt.map.roll";
     private static final String POLISH_API = "mtop.taobao.idle.item.polish";
     private static final String SHOP_BENEFIT_API = "mtop.taobao.idle.startup.shop.daily.benefit";
     private static final String LOTTERY_FEEDS_API = "mtop.taobao.idle.coin.lottery.feeds";
@@ -69,6 +77,68 @@ public final class FishTaskAuto {
     /** 防重入：一轮未跑完时忽略新触发（自动跑与手动广播可能撞车） */
     private static final java.util.concurrent.atomic.AtomicBoolean RUNNING =
             new java.util.concurrent.atomic.AtomicBoolean(false);
+
+    /* -------- 探测调度（B+C 方案 10-17）：轻量拉列表按需钓鱼，替代小时级盲跑 -------- */
+    /** 常规探测间隔：15min 一次只读列表请求 */
+    private static final long PROBE_INTERVAL_MS = 15 * 60_000L;
+    /** 钓鱼后加密探测间隔（紧跟服务端补发节奏） */
+    private static final long PROBE_BURST_MS = 5 * 60_000L;
+    /** 探测失败退避（mtop 未热/网络抖动，宁慢勿漏） */
+    private static final long PROBE_FAIL_MS = 3 * 60_000L;
+    /** 当日云控拒绝缓存：PARAM_ILLEGAL/FROM_APP_REJECT 的任务当日不再重试，次日清零 */
+    private static final java.util.Set<String> rejectedToday =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private static volatile String rejectedDay = "";
+
+    /** 记录当日被云控拒绝的任务（跨轮次有效，日期翻转自动清空） */
+    private static void markRejected(String did) {
+        try {
+            String today = new java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
+                    .format(new java.util.Date());
+            if (!today.equals(rejectedDay)) {
+                rejectedDay = today;
+                rejectedToday.clear();
+            }
+            rejectedToday.add(did);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /**
+     * 轻量探测：拉一次任务列表，统计可跑数量（可领取 + 未被当日拒绝的可触发任务）。
+     * 返回 -1 表示探测失败（通道未热/网络），0=空池，>0=可跑数。单次仅 1 个只读请求。
+     */
+    private static int probeRunnableCount(Context ctx) {
+        try {
+            ClassLoader cl = ctx.getClassLoader();
+            java.io.File ext = ctx.getExternalCacheDir();
+            String dir = ext != null ? ext.getAbsolutePath()
+                    : "/storage/emulated/0/Android/data/com.taobao.idlefish/cache";
+            FishTaskAuto probe = new FishTaskAuto(cl, dir);
+            org.json.JSONObject resp = probe.callApi(TASK_LIST_API, "2.0",
+                    "{\"sceneId\":496}", "探测");
+            List<org.json.JSONObject> tasks = probe.extractTasks(resp);
+            if (tasks == null) return -1;
+            int n = 0;
+            for (org.json.JSONObject t : tasks) {
+                String did = str(t, "deliveryId");
+                if (did == null) continue;
+                String status = str(t, "idleTaskStatus");
+                if ("AWARD".equals(status)) { n++; continue; }
+                if ("COMPLETE".equals(status)) {
+                    org.json.JSONObject tb = t.optJSONObject("taskBenefitDTO");
+                    if (tb != null && "true".equals(optStr(tb, "needBenefit"))) n++;
+                    continue;
+                }
+                if ("ACCEPTED".equals(status) && !rejectedToday.contains(did)) n++;
+            }
+            return n;
+        } catch (Throwable t) {
+            log("[probe] error: " + t);
+            return -1;
+        }
+    }
+
 
     /** 广播入口（receiver 线程调用，内部自起工作线程） */
     public static void launch(Context ctx, String extrasJson) {
@@ -221,28 +291,62 @@ public final class FishTaskAuto {
                 }
             }
             long gapMs = now - last;
-            if (gapMs < intervalHours * 3600_000L) {
-                log("[auto-run] last run " + (gapMs / 60000) + " min ago < interval "
-                        + intervalHours + "h, skip");
-                return;
-            }
-            // 先写标记再延迟触发：防进程快速重启导致重复跑
-            try {
-                java.nio.file.Files.write(mark.toPath(), String.valueOf(now).getBytes("UTF-8"));
-                log("[auto-run] marker written: " + mark.getAbsolutePath());
-            } catch (Throwable t) {
-                log("[auto-run] marker write FAILED (will re-run next launch): " + t);
-            }
-            log("[auto-run] scheduled in 45s (interval " + intervalHours
-                    + "h, last " + (last == 0 ? "never" : gapMs / 60000 + " min ago") + ")");
+            final int interval = Math.max(1, intervalHours);
+            final long intervalMs = interval * 3600_000L;
+            // 打开闲鱼即探测（用户语义 10-17）：45s 等 mtop 通道热 → 首探 → 有货就跑、没货静默。
+            // intervalMs 仅作兜底 force 周期（防统计漏判），不再做启动节流
+            long wait = 45000L;
+            log("[auto-run] app start -> first probe in 45s (last run "
+                    + (last == 0 ? "never" : gapMs / 60000 + " min ago") + ")");
+            final long waitMs = wait;
+            final long lastLaunch0 = last == 0 ? now : last;
+            // 常驻探测循环（B+C 方案）：每 15min 轻量拉任务列表（1 次只读请求），
+            // 有可跑任务才触发完整钓鱼；钓鱼后 3 次加密探测（5min，紧跟服务端补发节奏）；
+            // 探测失败 3min 退避重试；另有 intervalHours 兜底强制跑（防统计漏判）。
+            // 进程死线程亡，下次启动 autoRunDaily 重新拉起——链路自愈
             new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    try {
-                        Thread.sleep(45000);
-                    } catch (InterruptedException ignored) {
+                    long wait = waitMs;
+                    int burst = 0;             // 完成后加密探测余量
+                    long lastLaunch = lastLaunch0;
+                    while (true) {
+                        try {
+                            Thread.sleep(wait);
+                        } catch (InterruptedException e) {
+                            return; // 进程退出/线程被打断即结束
+                        }
+                        int n = probeRunnableCount(ctx);
+                        if (n < 0) {
+                            // 探测失败：短退避重试（mtop 未热/网络抖动）
+                            log("[probe] fail, retry in 3min");
+                            wait = PROBE_FAIL_MS;
+                            continue;
+                        }
+                        boolean runnable = n > 0;
+                        boolean force = System.currentTimeMillis() - lastLaunch >= intervalMs;
+                        if (runnable || force) {
+                            // 有货或兜底到期：写标记（防重启重复）+ 触发完整钓鱼
+                            try {
+                                java.io.File dir2 = ctx.getFilesDir();
+                                java.io.File m2 = new java.io.File(dir2 != null ? dir2
+                                        : new java.io.File("/data/data/com.taobao.idlefish/files"),
+                                        "rh_autorun.txt");
+                                java.nio.file.Files.write(m2.toPath(), String.valueOf(
+                                        System.currentTimeMillis()).getBytes("UTF-8"));
+                            } catch (Throwable ignored) {
+                            }
+                            log("[probe] runnable=" + n + (force && !runnable ? " (force)" : "")
+                                    + " -> launch");
+                            lastLaunch = System.currentTimeMillis();
+                            launch(ctx, "{}");
+                            burst = 3;           // 跑完后紧跟补发节奏加密探测
+                            wait = PROBE_BURST_MS;
+                        } else {
+                            if (burst > 0) burst--;
+                            wait = burst > 0 ? PROBE_BURST_MS : PROBE_INTERVAL_MS;
+                        }
                     }
-                    launch(ctx, "{}");
                 }
             }, "rh-autorun").start();
         } catch (Throwable t) {
@@ -256,7 +360,7 @@ public final class FishTaskAuto {
         long t0 = System.currentTimeMillis();
         log("=== task auto run start ===");
         org.json.JSONObject extras = parseObj(extrasJson);
-        boolean doSignin = opt(extras, "signin", false);
+        boolean doSignin = extras.has("signin") ? extras.optBoolean("signin") : true; // 默认开启：任务面板签到按钮同接口（coin.signin），10-17 前默认 false 从未自动执行
         boolean doPolish = extras.has("polish") ? extras.optBoolean("polish") : polishOn;
         boolean doSold = opt(extras, "sold", false);
         boolean doShop = opt(extras, "shop", false);
@@ -269,8 +373,24 @@ public final class FishTaskAuto {
             if (doSignin) {
                 org.json.JSONObject sgn = callApi(SIGNIN_API, "1.0", "{}", "签到");
                 String sret = firstRet(sgn);
-                if (sret != null && sret.contains("SUCCESS")) toast("✓ 每日签到" + coinSuffix(signinRewards(sgn)));
+                boolean sok = sret != null && sret.contains("SUCCESS");
+                // 落报告：此前只 toast，钓鱼报告里看不到签到结果（10-17 补）
+                report.append("[签到] ").append(sok ? "SUCCESS " + coinSuffix(signinRewards(sgn))
+                        : (sret == null ? "无响应" : sret)).append('\n');
+                if (sok) toast("✓ 每日签到" + coinSuffix(signinRewards(sgn)));
             }
+            if (doSignin) {
+                // 圈数挑战 7 天签到（独立入口，+50/80/100 递进奖励）
+                org.json.JSONObject psn = callApi(PLAY_SIGN_API, "1.0", PLAY_SIGN_DATA, "玩一玩签到");
+                String pret = firstRet(psn);
+                boolean pok = pret != null && pret.contains("SUCCESS");
+                boolean awarded = psn != null && psn.optJSONObject("data") != null
+                        && psn.optJSONObject("data").optBoolean("signInAwarded", false);
+                report.append("[玩一玩签到] ").append(pok ? "SUCCESS" + (awarded ? " 今日已签+奖" : " 幂等(今日已签)")
+                        : (pret == null ? "无响应" : pret)).append('\n');
+                if (pok) toast("✓ 玩一玩签到");
+            }
+            if (opt(extras, "mapRoll", true)) doMapRoll(); // 圈数挑战自动掷骰前进（10-17 抓包接入，默认开）
             if (doPolish) runPolish();
             if (doSold) report.append("[卖鱼] 跳过：钓场玩法在闲鱼 7.25.31 已移除（APK 内无 fishing 接口，猪手旧功能）\n");
             if (doShop) {
@@ -298,12 +418,16 @@ public final class FishTaskAuto {
             String[] browseTask = null;                     // {deliveryId, sceneId}
             List<String> claimDone = new ArrayList<>();
             List<String> claimFail = new ArrayList<>();
+            // 分桶去重专用（仅本轮）。processed 语义=已领取，绝不能在分桶时无差别 add——
+            // 否则收尾复核(:6)会被 processed 卡死，触发完成的任务永远无法补领（10-17 bug 修复）
+            java.util.Set<String> bucketed = new java.util.HashSet<>();
 
             /* 2. 分桶 */
             for (org.json.JSONObject t : tasks) {
                 String did = str(t, "deliveryId");
-                if (did == null || processed.contains(did)) continue;
-                processed.add(did);
+                if (did == null || bucketed.contains(did)) continue;
+                if (rejectedToday.contains(did)) continue; // 当日云控拒绝过的不再重试（10-17）
+                bucketed.add(did);
                 org.json.JSONObject m = t.optJSONObject("materialDTO");
                 org.json.JSONObject tb = t.optJSONObject("taskBenefitDTO");
                 String status = str(t, "idleTaskStatus");
@@ -356,6 +480,7 @@ public final class FishTaskAuto {
             for (String[] c : claimList) {
                 if (abort) break;
                 claimOne(c[0], c[1], claimDone, claimFail);
+                processed.add(c[0]);
                 sleep(1200);
             }
 
@@ -436,7 +561,14 @@ public final class FishTaskAuto {
                                 }
                             }
                         }
-                        if ("AWARD".equals(st) || "COMPLETE".equals(st)) break;
+                        if ("AWARD".equals(st) || "COMPLETE".equals(st)) {
+                            // 任务已推进为可领：就地领取（对齐搜一搜 runner 的闭环模式）。
+                            // 10-17 修复：此前仅 break，依赖收尾复核补领，而复核被分桶时的
+                            // processed 误标记卡死 → 触发完成的奖励全部滞留待手动领取
+                            claimOne(tg[0], tg[1], claimDone, claimFail);
+                            processed.add(tg[0]);
+                            break;
+                        }
                         if (max > 0 && times >= max) break;
                         if (k > 0 && times == prevTimes) break; // times 没动：SUCCESS 幂等，停
                         prevTimes = times;
@@ -452,6 +584,7 @@ public final class FishTaskAuto {
                 } else {
                     report.append("[触发] ").append(tg[1]).append(" -> ").append(ret)
                             .append("（云控判定需真实行为，协议跳过）\n");
+                    markRejected(tg[0]); // 当日不再重试（探测统计与分桶同步跳过）
                 }
                 sleep(1200);
             }
@@ -802,6 +935,299 @@ public final class FishTaskAuto {
 
     /* ============================ 擦亮（参考猪手 c_tk/c_nb/c_sk） ============================ */
 
+    /* ==================== 闲鱼币余额日志（差分法「今日领取」，10-17 定稿） ====================
+     * 思路：总余额是白送字段（map.init → coinNum；coin.signin → data.idleCoinAmount，10-17 抓包实锤 54510）。
+     * 每分钟取值追加当日日志 zhushou_YYYY.MM.DD.log（行格式 yyyy.MM.dd HH:mm:ss 余额），
+     * 闲鱼自己请求这两个接口时 hook 也顺手记一笔（被动，打开闲鱼即刻有值）。
+     * App 读昨日最后一行 + 今日全部行，相邻行差分：涨了累加、跌了（兑换支出）跳过 = 今日领取
+     * （用户语义「只记增加的，不记支出」）。跨天：新一天首行与昨日末行差分自动衔接，无需显式基础值。
+     * 每天清理 3 天前旧文件（闲鱼自己 cache 目录 File.delete 免 root）。
+     */
+    private static final Object COIN_LOG_LOCK = new Object();
+    private static volatile long coinLogLastVal = -1;
+    private static volatile long coinLogLastAt = 0;
+    private static String coinLogLastDay = "";
+    private static String coinLogCleanedDay = "";
+
+    /** 主进程 hook 初始化后调用：定时线程每 30s 借壳 map.init 读总余额写日志（首探 20s 等 mtop 通道热） */
+    public static void startCoinBalanceLogger(final Context ctx) {
+        try {
+            String proc = (String) Class.forName("android.app.Application")
+                    .getMethod("getProcessName").invoke(null);
+            if (proc != null && proc.contains(":")) return; // 仅主进程
+        } catch (Throwable ignored) {
+        }
+        java.util.concurrent.ScheduledExecutorService ses =
+                java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+        ses.scheduleAtFixedRate(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    coinBalanceSnapshot(ctx);
+                } catch (Throwable ignored) {
+                }
+            }
+        }, 20, 30, java.util.concurrent.TimeUnit.SECONDS);
+        log("[coinlog] balance logger armed (every 30s, first in 20s)");
+    }
+
+    /** 主动取值：借壳 map.init（纯查询无副作用）读 coinNum → 记日志 */
+    public static void coinBalanceSnapshot(Context ctx) {
+        try {
+            ClassLoader cl = ctx.getClassLoader();
+            java.io.File ext = ctx.getExternalCacheDir();
+            String dir = ext != null ? ext.getAbsolutePath()
+                    : "/storage/emulated/0/Android/data/com.taobao.idlefish/cache";
+            FishTaskAuto inst = new FishTaskAuto(cl, dir);
+            org.json.JSONObject r = inst.callApi(MAP_INIT_API, "1.0",
+                    "{\"fishAdCode\":\"" + FISH_AD_CODE + "\",\"gps\":\"" + DEFAULT_GPS + "\",\"version\":4}",
+                    "币余额");
+            org.json.JSONObject d = r == null ? null : r.optJSONObject("data");
+            if (d == null) return;
+            long v = parseCoinNum(d.optString("coinNum", ""));
+            if (v <= 0) {
+                org.json.JSONObject ui = d.optJSONObject("userInfo");
+                if (ui != null) v = parseCoinNum(ui.optString("coinNum", ""));
+            }
+            if (v > 0) recordCoinBalance(ctx, v);
+        } catch (Throwable t) {
+            log("[coinlog] snapshot error: " + t);
+        }
+    }
+
+    /** 记一笔余额（主动/被动共用）：同值 5 分钟去重防刷盘，跨天必写（新文件首行=当日基准） */
+    public static void recordCoinBalance(Context ctx, long v) {
+        if (v <= 0) return;
+        try {
+            synchronized (COIN_LOG_LOCK) {
+                long now = System.currentTimeMillis();
+                java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("yyyy.MM.dd", java.util.Locale.US);
+                String day = df.format(new java.util.Date(now));
+                boolean newDay = !day.equals(coinLogLastDay);
+                if (v == coinLogLastVal && now - coinLogLastAt < 300000L && !newDay) return;
+                // files 目录（非 cache）：force-stop/清缓存不会清掉 files，账本必须持久
+                java.io.File ext = ctx.getExternalFilesDir(null);
+                String dir = ext != null ? ext.getAbsolutePath()
+                        : "/storage/emulated/0/Android/data/com.taobao.idlefish/files";
+                java.io.File dirF = new java.io.File(dir);
+                if (!dirF.exists()) dirF.mkdirs();
+                java.io.File f = new java.io.File(dirF, "zhushou_" + day + ".log");
+                java.io.FileOutputStream fos = new java.io.FileOutputStream(f, true);
+                String line = day + " "
+                        + new java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(new java.util.Date(now))
+                        + " " + v + "\n";
+                fos.write(line.getBytes("UTF-8"));
+                fos.close();
+                coinLogLastVal = v;
+                coinLogLastAt = now;
+                coinLogLastDay = day;
+                log("[coinlog] " + line.trim());
+                if (!day.equals(coinLogCleanedDay)) {   // 每天首次写盘时清理 3 天前旧文件
+                    coinLogCleanedDay = day;
+                    cleanOldCoinLogs(dirF, df);
+                }
+            }
+        } catch (Throwable t) {
+            log("[coinlog] record error: " + t);
+        }
+    }
+
+    /** 保留今天/昨天/前天，删除更早的 zhushou_*.log（自己 cache 目录，File.delete 免 root） */
+    private static void cleanOldCoinLogs(java.io.File dirF, java.text.SimpleDateFormat df) {
+        try {
+            java.io.File[] fs = dirF.listFiles();
+            if (fs == null) return;
+            String keepDay = df.format(new java.util.Date(System.currentTimeMillis() - 2 * 86400000L));
+            java.util.Date kd = df.parse(keepDay);
+            for (java.io.File f : fs) {
+                String n = f.getName();
+                if (!n.startsWith("zhushou_") || !n.endsWith(".log")) continue;
+                try {
+                    java.util.Date fd = df.parse(n.substring(8, n.length() - 4));
+                    if (fd != null && fd.before(kd)) f.delete();
+                } catch (Throwable ignored) {
+                }
+            }
+        } catch (Throwable t) {
+            log("[coinlog] clean error: " + t);
+        }
+    }
+
+    /** 宽松解析余额（服务端字符串/数值不定型，如 "54510" / 54510 / 54510.0） */
+    public static long parseCoinNum(String s) {
+        if (s == null) return -1;
+        try {
+            String t = s.trim().replace("\"", "");
+            if (t.length() == 0) return -1;
+            int dot = t.indexOf('.');
+            if (dot >= 0) t = t.substring(0, dot);
+            t = t.replaceAll("[^0-9]", "");
+            if (t.length() == 0) return -1;
+            return Long.parseLong(t);
+        } catch (Throwable tt) {
+            return -1;
+        }
+    }
+
+
+    /**
+     * 圈数挑战自动掷骰前进（10-17 抓包接入）：
+     * 1. map.init v1.0 {fishAdCode,gps,version:4} → data.userInfo.location / data.remainStep / mapResource[0].mapVersion
+     * 2. 循环 map.roll v1.0 {diceType:"FORWARD_STEP",fishAdCode,gps,locationBefore,mapVersion,outId:当前毫秒戳,version:3}
+     *    沿途 contentList 收币、落格 settleList 结算均由服务端自动完成，无需额外领取
+     * 3. 步数耗尽 / isNeedRefresh / 异常即停；上限 60 次防死循环
+     */
+    private void doMapRoll() {
+        try {
+            org.json.JSONObject init = callApi(MAP_INIT_API, "1.0",
+                    "{\"fishAdCode\":\"" + FISH_AD_CODE + "\",\"gps\":\"" + DEFAULT_GPS + "\",\"version\":4}",
+                    "地图状态");
+            org.json.JSONObject d = init == null ? null : init.optJSONObject("data");
+            org.json.JSONObject ui = d == null ? null : d.optJSONObject("userInfo");
+            if (ui == null) {
+                report.append("[前进钓鱼] 地图状态获取失败，跳过\n");
+                return;
+            }
+            long location = parseNum(ui.optString("location", "0"));
+            // 步数位置：init 响应在 data.userInfo.remainStep（服务端字符串/数值不定型，parseNum 宽松解），
+            // roll 响应在 data 顶层——读取统一走 stepOf 兜底两种结构
+            int remain = parseNum(ui.optString("remainStep", "0"));
+            String mapVersion = "11";
+            org.json.JSONArray mr = d.optJSONArray("mapResource");
+            if (mr != null && mr.length() > 0) {
+                mapVersion = mr.optJSONObject(0).optString("mapVersion", "11");
+            }
+            if (remain <= 0) {
+                report.append("[前进钓鱼] 无剩余步数，跳过\n");
+                return;
+            }
+
+            int rolls = 0, steps = 0, coins = 0, reInits = 0;
+            String lastErr = null;
+            while (remain > 0 && rolls < 60) {
+                String data = "{\"diceType\":\"FORWARD_STEP\",\"fishAdCode\":\"" + FISH_AD_CODE
+                        + "\",\"gps\":\"" + DEFAULT_GPS + "\",\"locationBefore\":" + location
+                        + ",\"mapVersion\":\"" + mapVersion + "\",\"outId\":" + System.currentTimeMillis()
+                        + ",\"version\":3}";
+                org.json.JSONObject r = callApi(MAP_ROLL_API, "1.0", data, "前进掷骰");
+                String ret = firstRet(r);
+                if (ret == null || !ret.contains("SUCCESS")) {
+                    lastErr = ret == null ? "无响应" : ret;
+                    break;
+                }
+                rolls++;
+                org.json.JSONObject rd = r.optJSONObject("data");
+                if (rd == null) {
+                    lastErr = "响应无 data";
+                    break;
+                }
+                steps += parseNum(rd.optString("diceResult", "0"));
+                // 收益统计：沿途 coin + 落格结算 treasureMapPoint
+                org.json.JSONArray cl = rd.optJSONArray("contentList");
+                if (cl != null) {
+                    for (int i = 0; i < cl.length(); i++) {
+                        org.json.JSONObject c = cl.optJSONObject(i);
+                        if (c != null && "coin".equals(c.optString("contentType"))) {
+                            coins += parseNum(c.optString("rewardNum", "0"));
+                        }
+                    }
+                }
+                org.json.JSONArray sl = rd.optJSONArray("settleList");
+                if (sl != null) {
+                    for (int i = 0; i < sl.length(); i++) {
+                        org.json.JSONObject s = sl.optJSONObject(i);
+                        if (s != null && "treasureMapPoint".equals(s.optString("contentType"))) {
+                            coins += parseNum(s.optString("rewardNum", "0"));
+                        }
+                    }
+                }
+                long newLoc = rd.optJSONObject("userInfo") == null
+                        ? location : parseNum(rd.optJSONObject("userInfo").optString("location", String.valueOf(location)));
+                remain = stepOf(rd);
+                // isNeedRefresh 布尔/字符串不定型，optString 统一比对
+                boolean needRefresh = "true".equalsIgnoreCase(rd.optString("isNeedRefresh", "false"));
+                if (newLoc == location && remain > 0) {
+                    // 服务端处于待刷新/风控态时 roll SUCCESS 但不推进位置：re-init 后重试（上限 5 次）
+                    if (reInits >= 5) {
+                        lastErr = "位置未推进";
+                        break;
+                    }
+                    reInits++;
+                    org.json.JSONObject ir = callApi(MAP_INIT_API, "1.0",
+                            "{\"fishAdCode\":\"" + FISH_AD_CODE + "\",\"gps\":\"" + DEFAULT_GPS + "\",\"version\":4}",
+                            "地图重试");
+                    org.json.JSONObject dr = ir == null ? null : ir.optJSONObject("data");
+                    org.json.JSONObject ur = dr == null ? null : dr.optJSONObject("userInfo");
+                    if (ur == null) {
+                        lastErr = "重试初始化失败";
+                        break;
+                    }
+                    location = parseNum(ur.optString("location", String.valueOf(location)));
+                    remain = stepOf(ir);
+                    continue;
+                }
+                location = newLoc;
+                if (!needRefresh) continue;
+                // 跨屏掷骰后服务端要求重拉地图：就地 re-init 更新位置/步数/版本，继续掷（上限 5 次防死循环）
+                if (reInits >= 5) {
+                    lastErr = "刷新超限";
+                    break;
+                }
+                reInits++;
+                org.json.JSONObject i2 = callApi(MAP_INIT_API, "1.0",
+                        "{\"fishAdCode\":\"" + FISH_AD_CODE + "\",\"gps\":\"" + DEFAULT_GPS + "\",\"version\":4}",
+                        "地图刷新");
+                org.json.JSONObject d2 = i2 == null ? null : i2.optJSONObject("data");
+                org.json.JSONObject u2 = d2 == null ? null : d2.optJSONObject("userInfo");
+                if (u2 == null) {
+                    lastErr = "刷新地图失败";
+                    break;
+                }
+                location = parseNum(u2.optString("location", String.valueOf(location)));
+                remain = stepOf(i2);
+                org.json.JSONArray mr2 = d2.optJSONArray("mapResource");
+                if (mr2 != null && mr2.length() > 0) {
+                    mapVersion = mr2.optJSONObject(0).optString("mapVersion", mapVersion);
+                }
+            }
+
+            if (rolls == 0) {
+                report.append("[前进钓鱼] ").append(lastErr == null ? "掷骰失败" : lastErr).append('\n');
+            } else {
+                report.append("[前进钓鱼] 掷骰 ").append(rolls).append(" 次 · 前进 ").append(steps)
+                        .append(" 步 · 收币 ").append(coins)
+                        .append(" · 剩余步数 ").append(remain)
+                        .append(lastErr != null ? "（中断:" + lastErr + "）" : "").append('\n');
+                toast("✓ 前进钓鱼 +" + coins + "币");
+                log("[map-roll] rolls=" + rolls + " steps=" + steps + " coins=" + coins + " remain=" + remain);
+            }
+        } catch (Throwable t) {
+            report.append("[前进钓鱼] 异常 ").append(t).append('\n');
+        }
+    }
+
+    /** 步数读取兜底：roll 响应在 data 顶层，init 响应在 data.userInfo；字段字符串/数值不定型，parseNum 宽松解 */
+    private static int stepOf(org.json.JSONObject data) {
+        int top = parseNum(data.optString("remainStep", ""));
+        if (top > 0) return top;
+        org.json.JSONObject ui = data.optJSONObject("userInfo");
+        return ui == null ? 0 : parseNum(ui.optString("remainStep", "0"));
+    }
+
+    /** 宽松数值解析："16" / "1,000" / "3.5枚" → int（取连续数字段拼接失败则 0） */
+    private static int parseNum(String s) {
+        if (s == null) return 0;
+        try {
+            StringBuilder sb = new StringBuilder();
+            for (char ch : s.toCharArray()) {
+                if (ch >= '0' && ch <= '9') sb.append(ch);
+            }
+            return sb.length() == 0 ? 0 : Integer.parseInt(sb.toString());
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
     /**
      * 擦亮全流程（猪手同款）：
      * 1. 每日一次标记（猪手存 polish_<userId>=日期，这里存 rh_pref.json 的 polish_date）
@@ -1092,6 +1518,9 @@ public final class FishTaskAuto {
     /* ============================ 收尾 ============================ */
 
     private void finish(long t0) {
+        // 收尾补掷：主流程前段的掷骰覆盖不到浏览/游戏任务执行期间新入账的步数
+        //（10-17 实测：开头掷到 remain=0，跑完任务后步数池又剩 13），收口处再掷一次
+        doMapRoll();
         report.append("耗时 ").append((System.currentTimeMillis() - t0) / 1000).append("s\n");
         String out = report.toString();
         writeFile(cacheDir + "/rh_tasks_result.txt", out);
@@ -1103,11 +1532,11 @@ public final class FishTaskAuto {
             if (line.startsWith("领取成功")) done = parseCount(line);
             else if (line.startsWith("领取失败")) failed = parseCount(line);
         }
-        toast("跑批完成 · 成功 " + done + (failed > 0 ? " · 失败 " + failed : "")
+        toast("钓鱼完成 · 成功 " + done + (failed > 0 ? " · 失败 " + failed : "")
                 + " · 用时 " + (System.currentTimeMillis() - t0) / 1000 + "s");
     }
 
-    /** 跑批结果通知栏推送（免连电脑可见） */
+    /** 钓鱼结果通知栏推送（免连电脑可见） */
     private void notifyDone(String out) {
         try {
             android.content.Context c = appCtx;
@@ -1127,7 +1556,7 @@ public final class FishTaskAuto {
             }
             String summary = done > 0 || failed > 0
                     ? "领取 " + done + " 笔" + (failed > 0 ? "，失败 " + failed + " 笔" : "")
-                    : "跑批完成（无领取动作）";
+                    : "钓鱼完成（无领取动作）";
             android.app.Notification.Builder b = android.os.Build.VERSION.SDK_INT >= 26
                     ? new android.app.Notification.Builder(c, channelId)
                     : new android.app.Notification.Builder(c);
@@ -1165,5 +1594,6 @@ public final class FishTaskAuto {
 
     private static void log(String msg) {
         XposedBridge.log("[RewardHook] " + msg);
+        RhFileLog.write(msg);
     }
 }

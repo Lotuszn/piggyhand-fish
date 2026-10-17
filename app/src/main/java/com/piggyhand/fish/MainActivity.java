@@ -28,12 +28,15 @@ import android.widget.Toast;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Locale;
 
 /**
  * 模块主界面（液态玻璃亮色版）：
  * - 三页横滑（主页 / 日志 / 关于）+ 果冻 pill Tab + 贝塞尔缓动视差
- * - 主页：头卡 / 状态脉冲 / 立即跑批 / 四开关（LiquidSwitch）/ 间隔滑块（LiquidSlider）
- * - 日志：三通道读跑批报告（直读 / socket / su，全失败时逐通道诊断），跑批触发走 socket RUN
+ * - 主页：头卡 / 状态脉冲 / 开始钓鱼 / 四开关（LiquidSwitch）/ 间隔滑块（LiquidSlider）
+ * - 日志：三通道读钓鱼报告（直读 / socket / su，全失败时逐通道诊断），钓鱼触发走 socket RUN
  * - 关于：GitHub 更新检查（有新版本红点 + 副标题，无则隐藏副标题自动居中）
  * - 配置即改即存（SharedPreferences），重启闲鱼生效
  */
@@ -61,13 +64,17 @@ public class MainActivity extends Activity {
     private boolean pillReady = false;
 
     /* 控件 */
-    private TextView tvVersion, tvStatus, tvStatusMeta, tvReport, tvGhSub, tvGhVal, tvHoursNum, tvRootWarn;
+    private TextView tvVersion, tvStatus, tvStatusMeta, tvReport, tvGhSub, tvGhVal, tvHoursNum, tvLspState, tvRootState, tvCoinToday;
+    /** 头卡同步循环：前台每 10s 重读差分日志（引擎采集 60s 周期，显示滞后 ≤10s），onPause 停 */
+    private Handler coinUiHandler;
+    private Runnable coinUiLoop;
+    private volatile boolean coinRefreshing = false;
     private View dotNew, dotOk, pulseHalo, scoutArgs, rowUpdate, rowCoolapk;
     private View linkPicker; // 下载渠道选择弹层（非空 = 正在显示）
-    private LiquidSwitch swAutoRun, swMtop, swAds, swScout, swPolish;
+    private LiquidSwitch swAutoRun, swMtop, swAds, swScout, swPolish, swToast;
     private LiquidSlider sliderHours;
     private EditText etPattern, etMax;
-    private Button btnRun, btnRefresh;
+    private Button btnRun, btnRefresh, btnExportLog;
 
     private boolean dirty = false;
     private boolean logLoaded = false;
@@ -79,7 +86,7 @@ public class MainActivity extends Activity {
             String report = intent.getStringExtra("report");
             if (tvReport == null) return;
             tvReport.setText(report == null || report.trim().isEmpty()
-                    ? "暂无跑批记录（先跑一轮）" : report);
+                    ? "暂无钓鱼记录（先跑一轮）" : report);
         }
     };
 
@@ -110,7 +117,9 @@ public class MainActivity extends Activity {
         tvReport = findViewById(R.id.tvReport);
         tvGhSub = findViewById(R.id.tvGhSub);
         tvGhVal = findViewById(R.id.tvGhVal);
-        tvRootWarn = findViewById(R.id.tvRootWarn);
+        tvLspState = findViewById(R.id.tvLspState);
+        tvRootState = findViewById(R.id.tvRootState);
+        tvCoinToday = findViewById(R.id.tvCoinToday);
         tvHoursNum = findViewById(R.id.tvHoursNum);
         dotNew = findViewById(R.id.dotNew);
         dotOk = findViewById(R.id.dotOk);
@@ -123,11 +132,13 @@ public class MainActivity extends Activity {
         swAds = findViewById(R.id.swAds);
         swScout = findViewById(R.id.swScout);
         swPolish = findViewById(R.id.swPolish);
+        swToast = findViewById(R.id.swToast);
         sliderHours = findViewById(R.id.sliderHours);
         etPattern = findViewById(R.id.etPattern);
         etMax = findViewById(R.id.etMax);
         btnRun = findViewById(R.id.btnRun);
         btnRefresh = findViewById(R.id.btnRefresh);
+        btnExportLog = findViewById(R.id.btnExportLog);
 
         // 版本号
         String ver = UpdateChecker.currentVersion(this);
@@ -149,6 +160,7 @@ public class MainActivity extends Activity {
         swAds.setOnSilent(cfg.optBoolean("adSdkPresets", true));
         swScout.setOnSilent(cfg.optBoolean("scout", true));
         swPolish.setOnSilent(cfg.optBoolean("polish", true));
+        swToast.setOnSilent(cfg.optBoolean("toastNotify", true));
         scoutArgs.setVisibility(swScout.isOn() ? View.VISIBLE : View.GONE);
         etPattern.setText(cfg.optString("scoutPattern", "reward|bonus|coin"));
         etMax.setText(String.valueOf(cfg.optInt("maxScoutMethods", 400)));
@@ -175,6 +187,9 @@ public class MainActivity extends Activity {
         swPolish.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
             @Override public void onToggle(boolean on) { put("polish", on); }
         });
+        swToast.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+            @Override public void onToggle(boolean on) { put("toastNotify", on); }
+        });
 
         // ===== 滑块监听：拖动刷新显示，松手落定持久化 =====
         sliderHours.setOnValueChangeListener(new LiquidSlider.OnValueChangeListener() {
@@ -186,7 +201,7 @@ public class MainActivity extends Activity {
             }
         });
 
-        // ===== 立即跑批：socket 直触发引擎（MIUI 拦跨 App 广播，旧广播通道已废弃）=====
+        // ===== 开始钓鱼：socket 直触发引擎（MIUI 拦跨 App 广播，旧广播通道已废弃）=====
         btnRun.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -201,8 +216,8 @@ public class MainActivity extends Activity {
                                 boolean ok = resp != null && resp.contains("OK");
                                 btnRun.setText(ok ? "已触发 · 闲鱼内执行中…" : "未连通 · 打开闲鱼后重试");
                                 Toast.makeText(MainActivity.this,
-                                        ok ? "引擎已启动，跑批进行中，完成后通知栏推送"
-                                                : "socket 未连通：请先打开闲鱼（引擎随进程加载），再点立即跑批",
+                                        ok ? "引擎已启动，钓鱼进行中，完成后通知栏推送"
+                                                : "socket 未连通：请先打开闲鱼（引擎随进程加载），再点开始钓鱼",
                                         Toast.LENGTH_LONG).show();
                                 if (!ok) {
                                     // 兜底：拉起闲鱼，进程起来引擎自动加载，稍后再点一次即可
@@ -215,7 +230,7 @@ public class MainActivity extends Activity {
                                 btnRun.postDelayed(new Runnable() {
                                     @Override
                                     public void run() {
-                                        btnRun.setText("立即跑批");
+                                        btnRun.setText("开始钓鱼");
                                     }
                                 }, 5000);
                             }
@@ -230,6 +245,13 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 refreshLog();
+            }
+        });
+        // 导出小猪手运行日志（B 类）：su cp 当天 files 运行日志到 sd 卡根目录 xiaozhushou日期.log
+        btnExportLog.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                exportRunLog();
             }
         });
 
@@ -305,19 +327,8 @@ public class MainActivity extends Activity {
             registerReceiver(resultReceiver, f);
         }
 
-        // Root 权限检测（异步防 ANR；未授权设备首次调用 su 可能触发管理器弹窗，5s 超时判失败）
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                final boolean ok = hasRootAccess();
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        tvRootWarn.setVisibility(ok ? View.GONE : View.VISIBLE);
-                    }
-                });
-            }
-        }, "rh-root-check").start();
+        // 模块状态检测（onResume 统一触发，此处不再重复启动）
+        startStateCheck();
 
         // 延迟检查更新（避免抢首帧渲染）
         new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
@@ -326,6 +337,232 @@ public class MainActivity extends Activity {
                 checkUpdate();
             }
         }, 700);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 每次回到前台重检模块状态（闲鱼可能在后台被启停，一次检测会过期误导）
+        startStateCheck();
+        startCoinUiLoop(); // 前台同步：每 10s 重算今日领取，引擎采集写入后最迟 10s 上屏
+    }
+
+    /**
+     * 模块状态检测（异步防 ANR，两线程并行；onCreate / onResume 都会触发）：
+     * - LSPosed 三级判定：① PING 引擎报告服务（最真实：引擎此刻在闲鱼里跑）；
+     *   ② 失败时 su 查 LSPosed 日志留痕（本开机周期模块被加载过 = 已启用，
+     *   覆盖"闲鱼没跑导致引擎不在"的误报——10-17 用户实锤）；③ 均无 = 未激活
+     * - Root = su 试跑（未授权设备首次调用可能触发管理器弹窗，5s 超时判失败）
+     */
+    private void startStateCheck() {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                boolean ok = socketCmd("PING") != null;
+                if (!ok) {
+                    // 闲鱼未运行时引擎必然不在——回查 LSPosed 模块日志留痕
+                    String out = suExec("grep -c piggyhand $(ls -t /data/adb/lspd/log/modules_*.log 2>/dev/null | head -1) 2>/dev/null");
+                    ok = parseIntSafe(out) > 0;
+                }
+                final boolean okF = ok;
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        tvLspState.setText(okF ? "LSPosed：已激活" : "LSPosed：未激活");
+                        tvLspState.setTextColor(okF ? 0xFF0DB85A : 0xFFD32F2F);
+                    }
+                });
+            }
+        }, "rh-lsp-check").start();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final boolean ok = hasRootAccess();
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        tvRootState.setText(ok ? "Root权限：已激活" : "Root权限：未激活");
+                        tvRootState.setTextColor(ok ? 0xFF0DB85A : 0xFFD32F2F);
+                    }
+                });
+            }
+        }, "rh-root-check").start();
+    }
+
+    /** 前台同步循环：进前台立即刷一轮，之后每 10s 一轮；与引擎 60s 采集周期错频，读到新行即上屏 */
+    private void startCoinUiLoop() {
+        if (coinUiHandler == null) coinUiHandler = new Handler(Looper.getMainLooper());
+        if (coinUiLoop == null) {
+            coinUiLoop = new Runnable() {
+                @Override
+                public void run() {
+                    refreshCoinToday();
+                    coinUiHandler.postDelayed(this, 10000L);
+                }
+            };
+        }
+        coinUiHandler.removeCallbacks(coinUiLoop);
+        refreshCoinToday();
+        coinUiHandler.postDelayed(coinUiLoop, 10000L);
+    }
+
+    private void stopCoinUiLoop() {
+        if (coinUiHandler != null && coinUiLoop != null) coinUiHandler.removeCallbacks(coinUiLoop);
+    }
+
+    /**
+     * 读差分日志重算今日领取并上屏（重入保护：su cat 约 1s，10s 周期不会堆积）。
+     * 一次 su 读「昨日最后一行 + 今日全文」，相邻行差分：涨了累加、跌了（兑换支出）跳过。
+     * 拿不到值不改 UI（保留上次显示），不存在假 0。
+     */
+    private void refreshCoinToday() {
+        if (coinRefreshing) return;
+        coinRefreshing = true;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                long gain = -1;
+                try {
+                    java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("yyyy.MM.dd", Locale.US);
+                    String today = df.format(new java.util.Date());
+                    String yest = df.format(new java.util.Date(System.currentTimeMillis() - 86400000L));
+                    String dir = "/storage/emulated/0/Android/data/com.taobao.idlefish/files";
+                    String out = suExec("tail -1 '" + dir + "/zhushou_" + yest
+                            + ".log' 2>/dev/null; echo '---RHSEP---'; cat '"
+                            + dir + "/zhushou_" + today + ".log' 2>/dev/null");
+                    if (out != null && out.contains("---RHSEP---")) {
+                        String[] parts = out.split("---RHSEP---", 2);
+                        java.text.SimpleDateFormat tf =
+                                new java.text.SimpleDateFormat("yyyy.MM.dd HH:mm:ss", Locale.US);
+                        ArrayList<long[]> rows = new ArrayList<long[]>();
+                        collectCoinRows(parts[0], tf, rows);
+                        collectCoinRows(parts[1], tf, rows);
+                        java.util.Collections.sort(rows, new Comparator<long[]>() {
+                            @Override
+                            public int compare(long[] a, long[] b) {
+                                return a[0] < b[0] ? -1 : (a[0] > b[0] ? 1 : 0);
+                            }
+                        });
+                        int startIdx = -1;
+                        for (int i = 0; i < rows.size(); i++) {
+                            if (today.equals(df.format(new java.util.Date(rows.get(i)[0])))) {
+                                startIdx = i;
+                                break;
+                            }
+                        }
+                        if (startIdx >= 0) {
+                            gain = 0;
+                            // 基准=今日首行的上一行（即昨日最后一行，跨天衔接）；首日无昨日文件则基准=首行自身
+                            long prev = startIdx > 0 ? rows.get(startIdx - 1)[1] : rows.get(startIdx)[1];
+                            for (int i = startIdx; i < rows.size(); i++) {
+                                long v = rows.get(i)[1];
+                                if (v > prev) gain += v - prev; // 只记增加的，不记支出
+                                prev = v;
+                            }
+                        }
+                    }
+                } catch (Throwable t) {
+                    gain = -1;
+                }
+                final long g = gain;
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (g >= 0) {
+                            tvCoinToday.setText("今日领取：" + g);
+                            tvCoinToday.setTextColor(0xFF0DB85A);
+                        }
+                        // g < 0：不改 UI——保留上次成功值或初始「--」占位，10s 后下轮重试
+                    }
+                });
+                coinRefreshing = false;
+            }
+        }, "rh-coin-check").start();
+    }
+
+    /**
+     * 导出小猪手运行日志（B 类，10-17）：su cp 当天 files 运行日志到 sd 卡根目录。
+     * 文件名 xiaozhushouYYYY.MM.DD.log；cp 一步到位不经 App 内存（日志可达数百 KB）。
+     */
+    private void exportRunLog() {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("yyyy.MM.dd", Locale.US);
+                String day = df.format(new java.util.Date());
+                String src = "/storage/emulated/0/Android/data/com.taobao.idlefish/files/zhushou_run_" + day + ".log";
+                String dst = "/storage/emulated/0/xiaozhushou" + day + ".log";
+                String probe = suExec("ls -la '" + src + "' 2>/dev/null");
+                final String msg;
+                if (probe == null || probe.trim().isEmpty()) {
+                    msg = "今天还没有运行日志（引擎运行后自动产生）";
+                } else {
+                    String r = suExec("cp -f '" + src + "' '" + dst + "' 2>&1; chmod 644 '" + dst + "' 2>/dev/null");
+                    boolean ok = r != null && !r.contains("No such") && !r.contains("denied") && !r.contains("Permission");
+                    msg = ok ? "已导出到 sd 卡根目录：xiaozhushou" + day + ".log" : "导出失败：" + r;
+                }
+                final String m = msg;
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        Toast.makeText(MainActivity.this, m, Toast.LENGTH_LONG).show();
+                    }
+                });
+            }
+        }, "rh-export").start();
+    }
+
+    /** su 执行任意命令（5s 超时）。返回 stdout（可能为空串），失败/超时返回 null */
+    private static String suExec(String cmd) {
+        Process p = null;
+        try {
+            p = Runtime.getRuntime().exec(new String[]{"su", "-c", cmd});
+            boolean done = p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+            if (!done) {
+                p.destroy();
+                return null;
+            }
+            return readAll(p.getInputStream());
+        } catch (Throwable t) {
+            try {
+                if (p != null) p.destroy();
+            } catch (Throwable ignored) {
+            }
+            return null;
+        }
+    }
+
+    /** 宽松解析首个整数（"12\n" → 12），失败返回 -1 */
+    private static int parseIntSafe(String s) {
+        if (s == null) return -1;
+        try {
+            StringBuilder sb = new StringBuilder();
+            for (char ch : s.trim().toCharArray()) {
+                if (ch >= '0' && ch <= '9') sb.append(ch);
+                else if (sb.length() > 0) break;
+            }
+            return sb.length() == 0 ? -1 : Integer.parseInt(sb.toString());
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    /** 解析余额日志行「yyyy.MM.dd HH:mm:ss val」进 rows（容错跳过残行/空行/CRLF） */
+    private static void collectCoinRows(String text, java.text.SimpleDateFormat tf, ArrayList<long[]> rows) {
+        if (text == null) return;
+        String[] lines = text.split("\n");
+        for (String ln : lines) {
+            String s = ln.trim();
+            if (s.length() == 0) continue;
+            String[] tk = s.split("[ \\t]+");
+            if (tk.length < 3) continue;
+            try {
+                long ts = tf.parse(tk[0] + " " + tk[1]).getTime();
+                long v = Long.parseLong(tk[2].trim());
+                if (v >= 0) rows.add(new long[]{ts, v});
+            } catch (Throwable ignored) {
+            }
+        }
     }
 
     /* ============================ 导航：三页横滑 + 果冻 pill ============================ */
@@ -673,6 +910,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
+        stopCoinUiLoop(); // 退后台停轮询，零后台开销
         if (dirty) {
             dirty = false;
             Toast.makeText(this, "配置已保存 · 重启闲鱼生效", Toast.LENGTH_SHORT).show();
@@ -720,7 +958,7 @@ public class MainActivity extends Activity {
                     + "1. root 授权：打开 Magisk / APatch → 超级用户 → 允许「咸鱼小猪手」，回本页点「刷新报告」\n"
                     + "2. MIUI 联网放行：安全中心 → 应用管理 → 咸鱼小猪手 → 联网控制 → 允许 WLAN 与数据\n"
                     + "3. 保持闲鱼在后台运行（报告服务随闲鱼进程启动，端口 27715）\n"
-                    + "4. 最近一次跑批结果也会推送在通知栏";
+                    + "4. 最近一次钓鱼结果也会推送在通知栏";
 
     /** 四通道读报告结果：text=报告全文 / via=成功通道 / diag=全失败诊断 */
     private static class ReadResult {
@@ -736,7 +974,7 @@ public class MainActivity extends Activity {
     private static ReadResult tryReadReport() {
         String path = "/storage/emulated/0/Android/data/com.taobao.idlefish/cache/rh_tasks_result.txt";
         ReadResult r = new ReadResult();
-        StringBuilder diag = new StringBuilder("无法读取跑批报告\n\n逐通道诊断：\n");
+        StringBuilder diag = new StringBuilder("无法读取钓鱼报告\n\n逐通道诊断：\n");
         String[] p = readPlain(path);
         if (p[0] != null) { r.text = p[0]; r.via = "直读文件"; return r; }
         diag.append("· 直读：").append(p[1]).append('\n');
@@ -783,7 +1021,7 @@ public class MainActivity extends Activity {
             os.flush();
             String body = readAll(s.getInputStream());
             return body.length() > 0 ? new String[]{body, null}
-                    : new String[]{null, "服务返回空（跑批报告尚未生成）"};
+                    : new String[]{null, "服务返回空（钓鱼报告尚未生成）"};
         } catch (java.net.SocketTimeoutException e) {
             return new String[]{null, "连接超时（闲鱼进程可能被杀，或 MIUI 联网管控拦截了本机回环）"};
         } catch (java.net.ConnectException e) {

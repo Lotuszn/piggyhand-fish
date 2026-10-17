@@ -1,6 +1,6 @@
 {
-  "latest": "1.0.6",
+  "latest": "1.0.7",
   "url": "https://github.com/Lotuszn/piggyhand-fish/releases/latest",
   "cnUrl": "https://gitee.com/lotuszn/piggyhand-fish/releases",
-  "notes": "v1.0.6 · 主页 banner 版本号三态显示（最新版绿色/有新版红色提醒）；新增 Root 权限检测，未授权时红字提示授予"
+  "notes": "v1.0.7 · 全新「今日领取」闲鱼币差分账本（前台实时显示今日收益，只记收入）；新增运行日志一键导出（适配排查）；圈数挑战自动掷骰；LSPosed 检测修复；UI 文案统一钓鱼主题"
 }

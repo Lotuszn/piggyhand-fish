@@ -103,5 +103,6 @@ public final class ApiDirect {
 
     private static void log(String msg) {
         XposedBridge.log("[RewardHook] " + msg);
+        RhFileLog.write(msg);
     }
 }

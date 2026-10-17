@@ -105,10 +105,19 @@
                                     android:id="@+id/tvVersion"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="v1.0.6 · LSPosed"
+                                    android:text="v1.0.7 · LSPosed"
                                     android:textColor="@color/brand_deep"
                                     android:textSize="10sp"
                                     android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvCoinToday"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="2dp"
+                                    android:text="今日领取：--"
+                                    android:textColor="@color/text_sub"
+                                    android:textSize="10sp" />
 
                                 <TextView
                                     android:layout_width="wrap_content"
@@ -120,68 +129,97 @@
                             </LinearLayout>
                         </LinearLayout>
 
-                        <!-- Root 权限提醒（检测到 su 不可用时显示） -->
-                        <TextView
-                            android:id="@+id/tvRootWarn"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp"
-                            android:gravity="center"
-                            android:text="请授予小猪手 Root 权限"
-                            android:textColor="#D32F2F"
-                            android:textSize="10.5sp"
-                            android:textStyle="bold"
-                            android:visibility="gone" />
-
-                        <!-- 状态卡 -->
+                        <!-- 状态卡：引擎运行状态 + 模块状态（LSPosed/Root）合并 -->
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="9dp"
                             android:background="@drawable/bg_glass"
-                            android:gravity="center_vertical"
-                            android:orientation="horizontal"
+                            android:orientation="vertical"
                             android:paddingLeft="14dp"
                             android:paddingRight="14dp"
                             android:paddingTop="9dp"
                             android:paddingBottom="9dp">
 
-                            <FrameLayout
-                                android:layout_width="22dp"
-                                android:layout_height="22dp">
-
-                                <View
-                                    android:id="@+id/pulseHalo"
-                                    android:layout_width="9dp"
-                                    android:layout_height="9dp"
-                                    android:layout_gravity="center"
-                                    android:background="@drawable/dot_ok" />
-
-                                <View
-                                    android:layout_width="9dp"
-                                    android:layout_height="9dp"
-                                    android:layout_gravity="center"
-                                    android:background="@drawable/dot_ok" />
-                            </FrameLayout>
-
-                            <TextView
-                                android:id="@+id/tvStatus"
-                                android:layout_width="0dp"
+                            <LinearLayout
+                                android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:layout_marginStart="8dp"
-                                android:layout_weight="1"
-                                android:text="引擎运行中"
-                                android:textColor="@color/text_main"
-                                android:textSize="12.5sp"
-                                android:textStyle="bold" />
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal">
 
-                            <TextView
-                                android:id="@+id/tvStatusMeta"
-                                android:layout_width="wrap_content"
+                                <FrameLayout
+                                    android:layout_width="22dp"
+                                    android:layout_height="22dp">
+
+                                    <View
+                                        android:id="@+id/pulseHalo"
+                                        android:layout_width="9dp"
+                                        android:layout_height="9dp"
+                                        android:layout_gravity="center"
+                                        android:background="@drawable/dot_ok" />
+
+                                    <View
+                                        android:layout_width="9dp"
+                                        android:layout_height="9dp"
+                                        android:layout_gravity="center"
+                                        android:background="@drawable/dot_ok" />
+                                </FrameLayout>
+
+                                <TextView
+                                    android:id="@+id/tvStatus"
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="8dp"
+                                    android:layout_weight="1"
+                                    android:text="引擎运行中"
+                                    android:textColor="@color/text_main"
+                                    android:textSize="12.5sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvStatusMeta"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="自动间隔 4 小时"
+                                    android:textColor="@color/text_sub"
+                                    android:textSize="10.5sp" />
+                            </LinearLayout>
+
+                            <View
+                                android:layout_width="match_parent"
+                                android:layout_height="1dp"
+                                android:layout_marginTop="8dp"
+                                android:background="#0F17181C" />
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:text="自动间隔 4 小时"
-                                android:textColor="@color/text_sub"
-                                android:textSize="10.5sp" />
+                                android:layout_marginTop="7dp"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal">
+
+                                <TextView
+                                    android:id="@+id/tvLspState"
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:gravity="center"
+                                    android:text="LSPosed：检测中…"
+                                    android:textColor="@color/text_sub"
+                                    android:textSize="11sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvRootState"
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:gravity="center"
+                                    android:text="Root权限：检测中…"
+                                    android:textColor="@color/text_sub"
+                                    android:textSize="11sp"
+                                    android:textStyle="bold" />
+                            </LinearLayout>
                         </LinearLayout>
 
                         <!-- 主按钮 -->
@@ -192,10 +230,19 @@
                             android:layout_marginTop="10dp"
                             android:background="@drawable/bg_btn_run"
                             android:letterSpacing="0.14"
-                            android:text="立即跑批"
+                            android:text="开始钓鱼"
                             android:textColor="@color/btn_text"
                             android:textSize="14sp"
                             android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="center_horizontal"
+                            android:layout_marginTop="6dp"
+                            android:text="钓鱼由引擎按设定间隔自动执行，一般无需手动点击"
+                            android:textColor="@color/text_sub"
+                            android:textSize="9.5sp" />
 
                         <!-- 功能开关 -->
                         <TextView
@@ -252,7 +299,7 @@
                                     <TextView
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="自动跑批"
+                                        android:text="自动钓鱼"
                                         android:textColor="@color/text_main"
                                         android:textSize="12.5sp"
                                         android:textStyle="bold" />
@@ -499,6 +546,63 @@
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content" />
                             </LinearLayout>
+
+                            <View
+                                android:layout_width="match_parent"
+                                android:layout_height="1dp"
+                                android:background="#0F17181C" />
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingTop="9dp"
+                                android:paddingBottom="9dp">
+
+                                <FrameLayout
+                                    android:layout_width="27dp"
+                                    android:layout_height="27dp"
+                                    android:background="@drawable/bg_icon_g">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_gravity="center"
+                                        android:includeFontPadding="false"
+                                        android:text="🔔"
+                                        android:textSize="13sp" />
+                                </FrameLayout>
+
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="10dp"
+                                    android:layout_weight="1"
+                                    android:orientation="vertical">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="Toast 提示"
+                                        android:textColor="@color/text_main"
+                                        android:textSize="12.5sp"
+                                        android:textStyle="bold" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="任务完成逐项气泡提醒"
+                                        android:textColor="@color/text_sub"
+                                        android:textSize="9.5sp" />
+                                </LinearLayout>
+
+                                <com.piggyhand.fish.LiquidSwitch
+                                    android:id="@+id/swToast"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content" />
+                            </LinearLayout>
                         </LinearLayout>
 
                         <!-- 侦察模式子参数（开关打开时显示） -->
@@ -550,7 +654,7 @@
                                 android:textSize="10sp" />
                         </LinearLayout>
 
-                        <!-- 跑批间隔滑块 -->
+                        <!-- 钓鱼间隔滑块 -->
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
@@ -572,7 +676,7 @@
                                     android:layout_width="0dp"
                                     android:layout_height="wrap_content"
                                     android:layout_weight="1"
-                                    android:text="跑批间隔"
+                                    android:text="钓鱼间隔"
                                     android:textColor="@color/text_main"
                                     android:textSize="12sp"
                                     android:textStyle="bold" />
@@ -652,7 +756,7 @@
                         android:layout_marginLeft="3dp"
                         android:layout_marginBottom="6dp"
                         android:letterSpacing="0.2"
-                        android:text="跑批报告"
+                        android:text="钓鱼报告"
                         android:textColor="#6617181C"
                         android:textSize="10.5sp"
                         android:textStyle="bold" />
@@ -678,7 +782,7 @@
                                 android:fontFamily="monospace"
                                 android:lineSpacingExtra="4dp"
                                 android:padding="4dp"
-                                android:text="暂无跑批记录（先跑一轮）"
+                                android:text="暂无钓鱼记录（先跑一轮）"
                                 android:textColor="#3C3F45"
                                 android:textSize="10sp" />
                         </ScrollView>
@@ -691,6 +795,17 @@
                         android:layout_marginTop="10dp"
                         android:background="@drawable/bg_btn_refresh"
                         android:text="刷新报告"
+                        android:textColor="@color/text_main"
+                        android:textSize="12.5sp"
+                        android:textStyle="bold" />
+
+                    <Button
+                        android:id="@+id/btnExportLog"
+                        android:layout_width="match_parent"
+                        android:layout_height="44dp"
+                        android:layout_marginTop="8dp"
+                        android:background="@drawable/bg_btn_refresh"
+                        android:text="导出小猪手运行日志"
                         android:textColor="@color/text_main"
                         android:textSize="12.5sp"
                         android:textStyle="bold" />
@@ -985,7 +1100,7 @@
                                     android:id="@+id/tvGhVal"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="v1.0.6 ›"
+                                    android:text="v1.0.7 ›"
                                     android:textColor="@color/text_sub"
                                     android:textSize="11sp" />
                             </LinearLayout>
