@@ -59,7 +59,10 @@ public final class FishMtopHook {
             Reflect.hookAllMethods(reqCls, "setData", new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
-                    log("[mtop-req] data = " + param.args[0]);
+                    // B 类日志体量控制：data 全量可达数 KB（feeds 等高频接口一天几十 MB），截断 300 字符保诊断线索
+                    String d = String.valueOf(param.args[0]);
+                    if (d.length() > 300) d = d.substring(0, 300) + "...(len=" + d.length() + ")";
+                    log("[mtop-req] data = " + d);
                 }
             });
             log("mtop request spy armed");
@@ -151,6 +154,23 @@ public final class FishMtopHook {
                                 && !la.contains("bubble.show")) {
                             writeTaskResp(a, respBody(resp, -1));
                             log("[task-resp] captured " + a);
+                            // 闲鱼币余额白送字段（差分日志）：signin→data.idleCoinAmount / map.init→coinNum
+                            if (la.equals("mtop.taobao.idle.coin.signin")
+                                    || la.equals("mtop.taobao.idle.treasure.hunt.map.init")) {
+                                try {
+                                    org.json.JSONObject rj = new org.json.JSONObject(respBody(resp, -1));
+                                    org.json.JSONObject d2 = rj.optJSONObject("data");
+                                    String cv = d2 != null ? d2.optString("idleCoinAmount", "") : "";
+                                    if (cv.length() == 0 && d2 != null) cv = d2.optString("coinNum", "");
+                                    if (cv.length() == 0 && d2 != null) {
+                                        org.json.JSONObject ui = d2.optJSONObject("userInfo");
+                                        if (ui != null) cv = ui.optString("coinNum", "");
+                                    }
+                                    long lv = FishTaskAuto.parseCoinNum(cv);
+                                    if (lv > 0 && appCtx != null) FishTaskAuto.recordCoinBalance(appCtx, lv);
+                                } catch (Throwable ignored) {
+                                }
+                            }
                         }
                     } catch (Throwable ignored) {
                     }
@@ -197,6 +217,7 @@ public final class FishMtopHook {
     private static void registerInvoker(final Context ctx) {
         try {
             appCtx = ctx.getApplicationContext() != null ? ctx.getApplicationContext() : ctx;
+            RhFileLog.init(appCtx); // B 类运行日志就绪（Application 上下文最早可用点）
             BroadcastReceiver receiver = new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context c, Intent intent) {
@@ -215,7 +236,7 @@ public final class FishMtopHook {
                         log("[tasks] engine launched via broadcast");
                         return;
                     }
-                    // 报告回传：把上次跑批结果经广播发回模块 UI（免跨 App 存储权限）
+                    // 报告回传：把上次钓鱼结果经广播发回模块 UI（免跨 App 存储权限）
                     if ("__GET_RESULT__".equals(api)) {
                         final String rep = readCacheFile("rh_tasks_result.txt");
                         new Thread(new Runnable() {
@@ -278,7 +299,9 @@ public final class FishMtopHook {
             log("mtop invoker armed: am broadcast -a " + ACTION_MTOP_CALL + " --es api <api> [--es data <json> 或 push rh_data.json]");
             // 每日自动跑（免电脑值守）：主进程 Application 就绪后检查日期标记，当日未跑则延迟触发
             FishTaskAuto.autoRunDaily(appCtx);
-            // 报告 Socket 服务（仅主进程）：模块 UI 经 127.0.0.1:27715 免权限读取跑批报告，
+            // 闲鱼币余额日志（差分法今日领取）：每分钟取值写 zhushou_*.log，仅主进程
+            FishTaskAuto.startCoinBalanceLogger(appCtx);
+            // 报告 Socket 服务（仅主进程）：模块 UI 经 127.0.0.1:27715 免权限读取钓鱼报告，
             // 绕过 MIUI 跨 App 广播拦截与 scoped storage
             startReportServer();
         } catch (Throwable t) {
@@ -288,7 +311,7 @@ public final class FishMtopHook {
 
     /* ---------------- 报告 Socket 服务 ---------------- */
 
-    /** 本机回环端口服务：accept → 收到含 REPORT 的请求 → 回写跑批报告全文 */
+    /** 本机回环端口服务：accept → 收到含 REPORT 的请求 → 回写钓鱼报告全文 */
     private static void startReportServer() {
         String proc = null;
         try {
@@ -504,5 +527,6 @@ public final class FishMtopHook {
 
     private static void log(String msg) {
         XposedBridge.log("[" + TAG + "] " + msg);
+        RhFileLog.write(msg);
     }
 }
