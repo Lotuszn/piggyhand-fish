@@ -214,5 +214,6 @@ public class MainHook implements IXposedHookLoadPackage {
     private static void log(String msg) {
         XposedBridge.log("[" + TAG + "] " + msg);
         Log.i(TAG, msg);
+        RhFileLog.write(msg);
     }
 }
