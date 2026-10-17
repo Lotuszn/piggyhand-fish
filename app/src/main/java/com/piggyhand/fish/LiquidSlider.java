@@ -11,7 +11,7 @@ import android.view.View;
 
 /**
  * 液态玻璃滑块：5dp 圆角轨道 + 橙金填充 + 20dp 白球拇指。
- * 取值范围 1..12（跑批间隔小时数）。
+ * 取值范围 1..12（钓鱼间隔小时数）。
  */
 public class LiquidSlider extends View {
 
