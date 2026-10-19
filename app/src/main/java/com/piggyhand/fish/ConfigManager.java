@@ -18,7 +18,7 @@ public class ConfigManager {
     public static final String DEFAULT_JSON = "{\n" +
             "  \"enabled\": true,\n" +
             "  \"autoRun\": true,\n" +
-            "  \"autoRunIntervalHours\": 4,\n" +
+            "  \"autoRunIntervalMin\": 240,\n" +
             "  \"targets\": [\"com.taobao.idlefish\"],\n" +
             "  \"mtopHook\": true,\n" +
             "  \"toastNotify\": true,\n" +
@@ -39,12 +39,22 @@ public class ConfigManager {
 
     public boolean enabled = true;
     public boolean autoRun = true;
-    public int autoRunIntervalHours = 4;
+    /** 自动跑批兜底间隔（分钟）。0 = 不限（探测节拍内能跑就跑）；上限 1440（24h）。 */
+    public int autoRunIntervalMin = 240;
     public boolean scout = true;
     public boolean adSdkPresets = true;
     public boolean mtopHook = true;
     public boolean toastNotify = true;
     public boolean polish = true;
+    /** 🎣 无水印保存（RhFishFloat 悬浮钮+媒体下载）总开关，模块 UI「强化功能」抽屉可切 */
+    public boolean fishMedia = true;
+    /** 🐟 鱼塘任务：打开闲鱼自动跑一次（AWARD 收割+签到气泡）；手动 POND 触发不受此开关限制 */
+    public boolean pond = true;
+    /** 💬 禁用聊天页左滑进对方主页手势（RhChatHook 双层拦截：容器触摸+主页跳转） */
+    public boolean noChatSwipe = false;
+    /** 🐟 鱼塘任务引擎参数：城市区号 + 定位（RhPondTask 用） */
+    public String pondFishAdCode = "500107";
+    public String pondGps = "29.524374,106.471423";
     public String scoutPattern = "reward|bonus|coin";
     public int maxScoutMethods = 400;
 
@@ -61,8 +71,27 @@ public class ConfigManager {
         public Object[] args;
     }
 
-    /** 配置读取优先级：模块 App 保存的 SharedPreferences -> /sdcard/RewardHook/config.json -> 代码内置默认 */
+    /** 引擎覆盖配置文件（闲鱼外部私有目录 files/ 下，闲鱼进程必可读；su 双写落这里） */
+    public static final String OVERRIDE_PATH =
+            "/sdcard/Android/data/com.taobao.idlefish/files/rh_config.json";
+
+    /** 配置读取优先级（2026-10-19 调整）：闲鱼私有覆盖文件（模块 App su 双写，实时最新） -> 模块 App SharedPreferences(XSharedPreferences，LSPosed 快照可能滞后) -> 代码内置默认。sdcard 公共区被闲鱼 Scoped Storage 拦（canRead=false 实测），弃用 */
     public static ConfigManager load() {
+        // 1) 覆盖文件通道：模块 App persistSilent 时经 su 双写，实时最新
+        try {
+            File f = new File(OVERRIDE_PATH);
+            if (f.exists() && f.canRead() && f.length() > 0) {
+                StringBuilder sb = new StringBuilder();
+                BufferedReader br = new BufferedReader(new FileReader(f));
+                String line;
+                while ((line = br.readLine()) != null) sb.append(line);
+                br.close();
+                return parse(sb.toString(), OVERRIDE_PATH);
+            }
+        } catch (Throwable ignored) {
+        }
+
+        // 2) XSharedPreferences（LSPosed 快照，可能滞后）
         try {
             XSharedPreferences sp = new XSharedPreferences("com.piggyhand.fish", "config");
             sp.reload();
@@ -78,19 +107,6 @@ public class ConfigManager {
             }
         }
 
-        try {
-            File f = new File("/sdcard/RewardHook/config.json");
-            if (f.exists() && f.canRead()) {
-                StringBuilder sb = new StringBuilder();
-                BufferedReader br = new BufferedReader(new FileReader(f));
-                String line;
-                while ((line = br.readLine()) != null) sb.append(line);
-                br.close();
-                return parse(sb.toString(), "/sdcard/RewardHook/config.json");
-            }
-        } catch (Throwable ignored) {
-        }
-
         return parse(DEFAULT_JSON, "builtin");
     }
 
@@ -100,11 +116,20 @@ public class ConfigManager {
             JSONObject o = new JSONObject(json);
             c.enabled = o.optBoolean("enabled", true);
             c.autoRun = o.optBoolean("autoRun", true);
-            c.autoRunIntervalHours = Math.max(1, o.optInt("autoRunIntervalHours", 4));
+            // 间隔分钟制（2026-10-19 v1.0.8 UI 改版）：新键 autoRunIntervalMin；
+            // 旧配置只有 autoRunIntervalHours 时按小时*60 兼容换算
+            int min = o.optInt("autoRunIntervalMin", -1);
+            if (min < 0) min = Math.max(1, o.optInt("autoRunIntervalHours", 4)) * 60;
+            c.autoRunIntervalMin = Math.min(1440, Math.max(0, min));
             c.scout = o.optBoolean("scout", true);
             c.adSdkPresets = o.optBoolean("adSdkPresets", true);
             c.mtopHook = o.optBoolean("mtopHook", true);
             c.toastNotify = o.optBoolean("toastNotify", true);
+            c.fishMedia = o.optBoolean("fishMedia", true);
+            c.pond = o.optBoolean("pond", true);
+            c.noChatSwipe = o.optBoolean("noChatSwipe", false);
+            c.pondFishAdCode = o.optString("pondFishAdCode", "500107");
+            c.pondGps = o.optString("pondGps", "29.524374,106.471423");
         c.polish = o.optBoolean("polish", true);
             c.scoutPattern = o.optString("scoutPattern", "reward|bonus|coin");
             c.maxScoutMethods = o.optInt("maxScoutMethods", 400);
