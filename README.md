@@ -88,3 +88,7 @@ app/src/main/java/com/piggyhand/fish/
 ## 免责声明
 
 本项目仅供学习研究 Android 逆向工程与 Xposed 框架机制，请勿用于任何商业用途或违反平台服务条款的场景。使用本模块产生的一切后果由使用者自行承担。项目与闲鱼/阿里巴巴无任何关联。
+
+## 开源协议
+
+本项目以 **GNU Affero General Public License v3.0（AGPL-3.0）** 开源。你可以自由使用、修改、分发本项目，但任何基于本项目的二次分发（包括网络服务形式提供）必须同样以 AGPL-3.0 开源并保留版权声明。完整协议文本见 [LICENSE](LICENSE)。

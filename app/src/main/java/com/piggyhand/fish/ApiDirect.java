@@ -7,14 +7,14 @@ import java.util.Map;
 import de.robv.android.xposed.XposedBridge;
 
 /**
- * 猪手同款直调通道：不走 mtopsdk 借壳，直接调闲鱼自己的高层协议栈
+ * 闲鱼自有高层协议栈直调通道：不走 mtopsdk 借壳，直接调闲鱼自己的高层协议栈
  *   XModuleCenter.moduleForProtocol(PApiContext) -> sender
  *   ApiProtocol.newInstance().apiNameAndVersion(api, ver).paramMap(map)
  *   sender.send(request, null)
  * 登录态/签名/wua 全部由闲鱼自己的协议栈处理。
  * 响应复用全局 MtopFinishEvent 监听落盘（rh_resp_<api>.json）。
  *
- * 调用链逆向自 com.skyhand.hookhand（闲鱼猪手 1.3.9）c.ub.ۥ()。
+ * 调用链定位自闲鱼 7.25.31 dex 静态分析。
  */
 public final class ApiDirect {
 
@@ -48,8 +48,8 @@ public final class ApiDirect {
             }
 
             /* 3. req.paramMap(params)（链式，返回值可能是新对象）
-             *    猪手 c_ub：p8==null 时整段跳过不调 paramMap（请求不带 data）。
-             *    实测 coin.fishing.sold 带 data={} 会 FAIL_SYS_API_NOT_FOUNDED，无参则正常——对齐猪手。 */
+             *    实测 coin.fishing.sold 带 data={} 会 FAIL_SYS_API_NOT_FOUNDED，
+             *    无参则正常——因此参数为空时整段跳过不调 paramMap（请求不带 data）。 */
             Map<String, Object> params = toMap(jsonParams);
             if (!params.isEmpty()) {
                 try {
@@ -66,11 +66,13 @@ public final class ApiDirect {
                 }
             }
 
-            /* 4. sender.send(req, null) —— 猪手也允许 callback 为 null */
+            /* 4. sender.send(req, null) —— callback 传 null 合法 */
             for (Method m : sender.getClass().getMethods()) {
                 if ("send".equals(m.getName()) && m.getParameterTypes().length == 2) {
                     m.invoke(sender, req, null);
                     log("[direct] sent: " + api + " v" + version + " via " + sender.getClass().getName());
+                    // 兼容版自检：4s 内未进入 mtop 构建层则告警（send 静默失败个案）
+                    FishMtopHook.noteDirectSent(api);
                     return true;
                 }
             }

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 圆角按压涟漪：mask 限定在 18dp 圆角内（对齐 bg_glass），色为淡灰蓝防暗块 -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="#26909AA8">
+    <item android:id="@android:id/mask">
+        <shape android:shape="rectangle">
+            <corners android:radius="18dp" />
+            <solid android:color="#FFFFFF" />
+        </shape>
+    </item>
+</ripple>

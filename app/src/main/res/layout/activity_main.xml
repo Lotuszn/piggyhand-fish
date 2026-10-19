@@ -105,7 +105,7 @@
                                     android:id="@+id/tvVersion"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="v1.0.7 · LSPosed"
+                                    android:text="v1.1.0 · LSPosed"
                                     android:textColor="@color/brand_deep"
                                     android:textSize="10sp"
                                     android:textStyle="bold" />
@@ -180,7 +180,14 @@
                                     android:id="@+id/tvStatusMeta"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="自动间隔 4 小时"
+                                    android:background="@drawable/ripple_round"
+                                    android:clickable="true"
+                                    android:focusable="true"
+                                    android:paddingLeft="6dp"
+                                    android:paddingTop="3dp"
+                                    android:paddingRight="6dp"
+                                    android:paddingBottom="3dp"
+                                    android:text="自动间隔 240 分钟 ▾"
                                     android:textColor="@color/text_sub"
                                     android:textSize="10.5sp" />
                             </LinearLayout>
@@ -244,28 +251,87 @@
                             android:textColor="@color/text_sub"
                             android:textSize="9.5sp" />
 
-                        <!-- 功能开关 -->
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginLeft="3dp"
-                            android:layout_marginTop="11dp"
-                            android:layout_marginBottom="6dp"
-                            android:letterSpacing="0.2"
-                            android:text="功能开关"
-                            android:textColor="#6617181C"
-                            android:textSize="10.5sp"
-                            android:textStyle="bold" />
-
+                        <!-- 功能开关折叠面板：头部与内容同一张卡，点头部下方展开（连体 Accordion） -->
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
+                            android:layout_marginTop="11dp"
                             android:background="@drawable/bg_glass"
-                            android:orientation="vertical"
-                            android:paddingLeft="13dp"
-                            android:paddingRight="13dp"
-                            android:paddingTop="2dp"
-                            android:paddingBottom="2dp">
+                            android:orientation="vertical">
+
+                            <LinearLayout
+                                android:id="@+id/drawerHead"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:baselineAligned="false"
+                                android:clickable="true"
+                                android:focusable="true"
+                                android:foreground="@drawable/ripple_round"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingLeft="14dp"
+                                android:paddingRight="14dp"
+                                android:paddingTop="11dp"
+                                android:paddingBottom="11dp">
+
+                                <FrameLayout
+                                    android:layout_width="27dp"
+                                    android:layout_height="27dp"
+                                    android:background="@drawable/bg_icon_o">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_gravity="center"
+                                        android:includeFontPadding="false"
+                                        android:text="⚡"
+                                        android:textSize="13sp" />
+                                </FrameLayout>
+
+                                <TextView
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="10dp"
+                                    android:layout_weight="1"
+                                    android:text="常用功能"
+                                    android:textColor="@color/text_main"
+                                    android:textSize="13.5sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvDrawerArrow"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginRight="14dp"
+                                    android:rotation="-90"
+                                    android:text="▼"
+                                    android:textColor="@color/text_sub"
+                                    android:textSize="8.5sp" />
+                            </LinearLayout>
+
+                            <!-- 抽屉内容：与头部同卡同宽，顶部分隔线区隔（默认收起） -->
+                            <LinearLayout
+                                android:id="@+id/drawerContent"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:visibility="gone">
+
+                                <View
+                                    android:layout_width="match_parent"
+                                    android:layout_height="1dp"
+                                    android:layout_marginLeft="14dp"
+                                    android:layout_marginRight="14dp"
+                                    android:background="#0F17181C" />
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:paddingLeft="13dp"
+                                android:paddingRight="13dp"
+                                android:paddingTop="2dp"
+                                android:paddingBottom="2dp">
 
                             <LinearLayout
                                 android:layout_width="match_parent"
@@ -436,15 +502,18 @@
                             <View
                                 android:layout_width="match_parent"
                                 android:layout_height="1dp"
-                                android:background="#0F17181C" />
+                                android:background="#0F17181C"
+                                android:visibility="gone" />
 
+                            <!-- 侦察模式 UI 已隐藏（功能保持默认开启，正则用内置默认值） -->
                             <LinearLayout
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:gravity="center_vertical"
                                 android:orientation="horizontal"
                                 android:paddingTop="9dp"
-                                android:paddingBottom="9dp">
+                                android:paddingBottom="9dp"
+                                android:visibility="gone">
 
                                 <FrameLayout
                                     android:layout_width="27dp"
@@ -603,6 +672,257 @@
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content" />
                             </LinearLayout>
+
+                            <View
+                                android:layout_width="match_parent"
+                                android:layout_height="1dp"
+                                android:background="#0F17181C" />
+
+                            <LinearLayout
+                                android:id="@+id/rowPondTask"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:background="@drawable/ripple_round"
+                                android:clickable="true"
+                                android:focusable="true"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingTop="9dp"
+                                android:paddingBottom="9dp">
+
+                                <FrameLayout
+                                    android:layout_width="27dp"
+                                    android:layout_height="27dp"
+                                    android:background="@drawable/bg_icon_g">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_gravity="center"
+                                        android:includeFontPadding="false"
+                                        android:text="🐟"
+                                        android:textSize="13sp" />
+                                </FrameLayout>
+
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="10dp"
+                                    android:layout_weight="1"
+                                    android:orientation="vertical">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="鱼塘任务"
+                                        android:textColor="@color/text_main"
+                                        android:textSize="12.5sp"
+                                        android:textStyle="bold" />
+
+                                    <TextView
+                                        android:id="@+id/tvPondWarn"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="未完善，谨慎开启 · 自动领取赚饲料奖励+签到气泡，需闲鱼在前台"
+                                        android:textColor="@color/text_sub"
+                                        android:textSize="9.5sp" />
+                                </LinearLayout>
+
+                                <com.piggyhand.fish.LiquidSwitch
+                                    android:id="@+id/swPondTask"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content" />
+                            </LinearLayout>
+                        </LinearLayout>
+                        </LinearLayout>
+                        </LinearLayout>
+
+                        <!-- 强化功能折叠面板（连体 Accordion，同常用功能结构） -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:background="@drawable/bg_glass"
+                            android:orientation="vertical">
+
+                            <LinearLayout
+                                android:id="@+id/drawerHead2"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:baselineAligned="false"
+                                android:clickable="true"
+                                android:focusable="true"
+                                android:foreground="@drawable/ripple_round"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingLeft="14dp"
+                                android:paddingRight="14dp"
+                                android:paddingTop="11dp"
+                                android:paddingBottom="11dp">
+
+                                <FrameLayout
+                                    android:layout_width="27dp"
+                                    android:layout_height="27dp"
+                                    android:background="@drawable/bg_icon_b">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_gravity="center"
+                                        android:includeFontPadding="false"
+                                        android:text="🔥"
+                                        android:textSize="13sp" />
+                                </FrameLayout>
+
+                                <TextView
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="10dp"
+                                    android:layout_weight="1"
+                                    android:text="强化功能"
+                                    android:textColor="@color/text_main"
+                                    android:textSize="13.5sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvDrawerArrow2"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginRight="14dp"
+                                    android:rotation="-90"
+                                    android:text="▼"
+                                    android:textColor="@color/text_sub"
+                                    android:textSize="8.5sp" />
+                            </LinearLayout>
+
+                            <LinearLayout
+                                android:id="@+id/drawerContent2"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:visibility="gone">
+
+                                <View
+                                    android:layout_width="match_parent"
+                                    android:layout_height="1dp"
+                                    android:layout_marginLeft="14dp"
+                                    android:layout_marginRight="14dp"
+                                    android:background="#0F17181C" />
+
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:gravity="center_vertical"
+                                    android:orientation="horizontal"
+                                    android:paddingLeft="13dp"
+                                    android:paddingRight="13dp"
+                                    android:paddingTop="9dp"
+                                    android:paddingBottom="9dp">
+
+                                    <FrameLayout
+                                        android:layout_width="27dp"
+                                        android:layout_height="27dp"
+                                        android:background="@drawable/bg_icon_g">
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:layout_gravity="center"
+                                            android:includeFontPadding="false"
+                                            android:text="💧"
+                                            android:textSize="13sp" />
+                                    </FrameLayout>
+
+                                    <LinearLayout
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="10dp"
+                                        android:layout_weight="1"
+                                        android:orientation="vertical">
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="无水印保存"
+                                            android:textColor="@color/text_main"
+                                            android:textSize="12.5sp"
+                                            android:textStyle="bold" />
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:layout_marginTop="2dp"
+                                            android:text="商品大图/视频页右下角🎣保存原图，改后重启闲鱼生效"
+                                            android:textColor="@color/text_sub"
+                                            android:textSize="9.5sp" />
+                                    </LinearLayout>
+
+                                    <com.piggyhand.fish.LiquidSwitch
+                                        android:id="@+id/swFishMedia"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content" />
+                                </LinearLayout>
+
+                                <View
+                                    android:layout_width="match_parent"
+                                    android:layout_height="1dp"
+                                    android:background="#0F17181C" />
+
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:gravity="center_vertical"
+                                    android:orientation="horizontal"
+                                    android:paddingLeft="13dp"
+                                    android:paddingRight="13dp"
+                                    android:paddingTop="9dp"
+                                    android:paddingBottom="9dp">
+
+                                    <FrameLayout
+                                        android:layout_width="27dp"
+                                        android:layout_height="27dp"
+                                        android:background="@drawable/bg_icon_g">
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:layout_gravity="center"
+                                            android:includeFontPadding="false"
+                                            android:text="💬"
+                                            android:textSize="13sp" />
+                                    </FrameLayout>
+
+                                    <LinearLayout
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="10dp"
+                                        android:layout_weight="1"
+                                        android:orientation="vertical">
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="禁止聊天左滑"
+                                            android:textColor="@color/text_main"
+                                            android:textSize="12.5sp"
+                                            android:textStyle="bold" />
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:layout_marginTop="2dp"
+                                            android:text="禁用聊天页左滑进入对方主页手势，防误触"
+                                            android:textColor="@color/text_sub"
+                                            android:textSize="9.5sp" />
+                                    </LinearLayout>
+
+                                    <com.piggyhand.fish.LiquidSwitch
+                                        android:id="@+id/swNoChatSwipe"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content" />
+                                </LinearLayout>
+                            </LinearLayout>
                         </LinearLayout>
 
                         <!-- 侦察模式子参数（开关打开时显示） -->
@@ -654,89 +974,6 @@
                                 android:textSize="10sp" />
                         </LinearLayout>
 
-                        <!-- 钓鱼间隔滑块 -->
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
-                            android:background="@drawable/bg_glass"
-                            android:orientation="vertical"
-                            android:paddingLeft="15dp"
-                            android:paddingRight="15dp"
-                            android:paddingTop="12dp"
-                            android:paddingBottom="10dp">
-
-                            <LinearLayout
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:gravity="bottom"
-                                android:orientation="horizontal">
-
-                                <TextView
-                                    android:layout_width="0dp"
-                                    android:layout_height="wrap_content"
-                                    android:layout_weight="1"
-                                    android:text="钓鱼间隔"
-                                    android:textColor="@color/text_main"
-                                    android:textSize="12sp"
-                                    android:textStyle="bold" />
-
-                                <TextView
-                                    android:id="@+id/tvHoursNum"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:text="4"
-                                    android:textColor="@color/accent"
-                                    android:textSize="15sp"
-                                    android:textStyle="bold" />
-
-                                <TextView
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginStart="2dp"
-                                    android:text="小时"
-                                    android:textColor="@color/text_sub"
-                                    android:textSize="9.5sp" />
-                            </LinearLayout>
-
-                            <com.piggyhand.fish.LiquidSlider
-                                android:id="@+id/sliderHours"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="6dp" />
-
-                            <LinearLayout
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:orientation="horizontal">
-
-                                <TextView
-                                    android:layout_width="0dp"
-                                    android:layout_height="wrap_content"
-                                    android:layout_weight="1"
-                                    android:text="1h"
-                                    android:textColor="@color/text_faint"
-                                    android:textSize="9sp" />
-
-                                <TextView
-                                    android:layout_width="0dp"
-                                    android:layout_height="wrap_content"
-                                    android:layout_weight="1"
-                                    android:gravity="center"
-                                    android:text="6h"
-                                    android:textColor="@color/text_faint"
-                                    android:textSize="9sp" />
-
-                                <TextView
-                                    android:layout_width="0dp"
-                                    android:layout_height="wrap_content"
-                                    android:layout_weight="1"
-                                    android:gravity="end"
-                                    android:text="12h"
-                                    android:textColor="@color/text_faint"
-                                    android:textSize="9sp" />
-                            </LinearLayout>
-                        </LinearLayout>
                     </LinearLayout>
                 </ScrollView>
 
@@ -1100,7 +1337,7 @@
                                     android:id="@+id/tvGhVal"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="v1.0.7 ›"
+                                    android:text="v1.1.0 ›"
                                     android:textColor="@color/text_sub"
                                     android:textSize="11sp" />
                             </LinearLayout>

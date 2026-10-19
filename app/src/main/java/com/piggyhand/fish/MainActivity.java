@@ -35,7 +35,7 @@ import java.util.Locale;
 /**
  * 模块主界面（液态玻璃亮色版）：
  * - 三页横滑（主页 / 日志 / 关于）+ 果冻 pill Tab + 贝塞尔缓动视差
- * - 主页：头卡 / 状态脉冲 / 开始钓鱼 / 四开关（LiquidSwitch）/ 间隔滑块（LiquidSlider）
+ * - 主页：头卡 / 状态脉冲 / 开始钓鱼 / 功能开关抽屉（LiquidSwitch）/ 间隔分钟制点击填写
  * - 日志：三通道读钓鱼报告（直读 / socket / su，全失败时逐通道诊断），钓鱼触发走 socket RUN
  * - 关于：GitHub 更新检查（有新版本红点 + 副标题，无则隐藏副标题自动居中）
  * - 配置即改即存（SharedPreferences），重启闲鱼生效
@@ -64,15 +64,23 @@ public class MainActivity extends Activity {
     private boolean pillReady = false;
 
     /* 控件 */
-    private TextView tvVersion, tvStatus, tvStatusMeta, tvReport, tvGhSub, tvGhVal, tvHoursNum, tvLspState, tvRootState, tvCoinToday;
+    private TextView tvVersion, tvStatus, tvStatusMeta, tvReport, tvGhSub, tvGhVal, tvLspState, tvRootState, tvCoinToday;
     /** 头卡同步循环：前台每 10s 重读差分日志（引擎采集 60s 周期，显示滞后 ≤10s），onPause 停 */
     private Handler coinUiHandler;
     private Runnable coinUiLoop;
     private volatile boolean coinRefreshing = false;
     private View dotNew, dotOk, pulseHalo, scoutArgs, rowUpdate, rowCoolapk;
+    private View drawerHead, drawerContent;
+    private TextView tvDrawerArrow;
+    private boolean drawerOpen = false;
+    private View drawerHead2, drawerContent2;
+    private TextView tvDrawerArrow2;
+    private boolean drawerOpen2 = false;
+    /** 抽屉动画互斥标记（true=动画进行中忽略点击） */
+    private final java.util.concurrent.atomic.AtomicBoolean drawerBusy = new java.util.concurrent.atomic.AtomicBoolean(false);
+    private final java.util.concurrent.atomic.AtomicBoolean drawerBusy2 = new java.util.concurrent.atomic.AtomicBoolean(false);
     private View linkPicker; // 下载渠道选择弹层（非空 = 正在显示）
-    private LiquidSwitch swAutoRun, swMtop, swAds, swScout, swPolish, swToast;
-    private LiquidSlider sliderHours;
+    private LiquidSwitch swAutoRun, swMtop, swAds, swScout, swPolish, swToast, swFishMedia, swPondTask, swNoChatSwipe;
     private EditText etPattern, etMax;
     private Button btnRun, btnRefresh, btnExportLog;
 
@@ -120,7 +128,6 @@ public class MainActivity extends Activity {
         tvLspState = findViewById(R.id.tvLspState);
         tvRootState = findViewById(R.id.tvRootState);
         tvCoinToday = findViewById(R.id.tvCoinToday);
-        tvHoursNum = findViewById(R.id.tvHoursNum);
         dotNew = findViewById(R.id.dotNew);
         dotOk = findViewById(R.id.dotOk);
         pulseHalo = findViewById(R.id.pulseHalo);
@@ -133,7 +140,25 @@ public class MainActivity extends Activity {
         swScout = findViewById(R.id.swScout);
         swPolish = findViewById(R.id.swPolish);
         swToast = findViewById(R.id.swToast);
-        sliderHours = findViewById(R.id.sliderHours);
+        drawerHead = findViewById(R.id.drawerHead);
+        drawerContent = findViewById(R.id.drawerContent);
+        tvDrawerArrow = findViewById(R.id.tvDrawerArrow);
+        drawerHead2 = findViewById(R.id.drawerHead2);
+        drawerContent2 = findViewById(R.id.drawerContent2);
+        tvDrawerArrow2 = findViewById(R.id.tvDrawerArrow2);
+        swFishMedia = findViewById(R.id.swFishMedia);
+        swPondTask = findViewById(R.id.swPondTask);
+        swNoChatSwipe = findViewById(R.id.swNoChatSwipe);
+        // 鱼塘任务副标题：「未完善，谨慎开启」染红（8 字符，span 前后含逗号）
+        android.widget.TextView tvPondWarn = findViewById(R.id.tvPondWarn);
+        String pw = tvPondWarn.getText().toString();
+        android.text.SpannableString pwSs = new android.text.SpannableString(pw);
+        int pwIdx = pw.indexOf("未完善，谨慎开启");
+        if (pwIdx >= 0) {
+            pwSs.setSpan(new android.text.style.ForegroundColorSpan(0xFFE53935),
+                    pwIdx, pwIdx + 8, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            tvPondWarn.setText(pwSs);
+        }
         etPattern = findViewById(R.id.etPattern);
         etMax = findViewById(R.id.etMax);
         btnRun = findViewById(R.id.btnRun);
@@ -151,21 +176,21 @@ public class MainActivity extends Activity {
         boolean enabled = cfg.optBoolean("enabled", true);
         tvStatus.setText(enabled ? "引擎运行中" : "模块未启用 · 请在 LSPosed 中启用");
         tvStatus.setTextColor(enabled ? 0xFF17181C : 0xFFB35F00);
-        int hours = cfg.optInt("autoRunIntervalHours", 4);
-        tvStatusMeta.setText("自动间隔 " + hours + " 小时");
+        // 间隔分钟制（2026-10-19 UI 改版）：新键 autoRunIntervalMin，旧键 autoRunIntervalHours 兼容换算
+        int mins = cfg.optInt("autoRunIntervalMin", -1);
+        if (mins < 0) mins = cfg.optInt("autoRunIntervalHours", 4) * 60;
+        mins = Math.min(1440, Math.max(0, mins));
+        tvStatusMeta.setText("自动间隔 " + mins + " 分钟 ▾");
 
         // ===== 开关初始态（静默，不触发持久化） =====
         swAutoRun.setOnSilent(cfg.optBoolean("autoRun", true));
         swMtop.setOnSilent(cfg.optBoolean("mtopHook", true));
         swAds.setOnSilent(cfg.optBoolean("adSdkPresets", true));
-        swScout.setOnSilent(cfg.optBoolean("scout", true));
+        swScout.setOnSilent(true); // 侦察模式 UI 已隐藏：功能保持默认开启
         swPolish.setOnSilent(cfg.optBoolean("polish", true));
         swToast.setOnSilent(cfg.optBoolean("toastNotify", true));
-        scoutArgs.setVisibility(swScout.isOn() ? View.VISIBLE : View.GONE);
-        etPattern.setText(cfg.optString("scoutPattern", "reward|bonus|coin"));
-        etMax.setText(String.valueOf(cfg.optInt("maxScoutMethods", 400)));
-        sliderHours.setValueSilent(hours);
-        tvHoursNum.setText(String.valueOf(hours));
+        scoutArgs.setVisibility(View.GONE); // 恒隐藏
+        etMax.setText("400");
 
         // ===== 开关监听：即改即存 =====
         swAutoRun.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
@@ -180,8 +205,9 @@ public class MainActivity extends Activity {
         swScout.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
             @Override
             public void onToggle(boolean on) {
-                put("scout", on);
-                scoutArgs.setVisibility(on ? View.VISIBLE : View.GONE);
+                // 侦察模式 UI 已隐藏：开关不再可操作，保持恒开（此监听为视图隐藏后的死代码，兜底恒写 true）
+                put("scout", true);
+                scoutArgs.setVisibility(View.GONE);
             }
         });
         swPolish.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
@@ -190,14 +216,87 @@ public class MainActivity extends Activity {
         swToast.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
             @Override public void onToggle(boolean on) { put("toastNotify", on); }
         });
-
-        // ===== 滑块监听：拖动刷新显示，松手落定持久化 =====
-        sliderHours.setOnValueChangeListener(new LiquidSlider.OnValueChangeListener() {
+        // 🎣 无水印保存总开关（强化功能抽屉；RhFishFloat.hook 时读 fishMedia）
+        swFishMedia.setOnSilent(cfg.optBoolean("fishMedia", true));
+        swFishMedia.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+            @Override public void onToggle(boolean on) { put("fishMedia", on); }
+        });
+        // 🐟 鱼塘任务开关：开启=打开闲鱼自动跑一次（RhPondTask.autoRunDaily 读 pond）
+        swPondTask.setOnSilent(cfg.optBoolean("pond", true));
+        swPondTask.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+            @Override public void onToggle(boolean on) { put("pond", on); }
+        });
+        // 💬 禁止聊天左滑：禁用聊天页左滑进对方主页手势（RhChatHook 60s 热读 noChatSwipe）
+        swNoChatSwipe.setOnSilent(cfg.optBoolean("noChatSwipe", false));
+        swNoChatSwipe.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+            @Override public void onToggle(boolean on) { put("noChatSwipe", on); }
+        });
+        // 🐟 鱼塘任务：触发闲鱼进程内 RhPondTask（AWARD 批量领+签到气泡），报告弹窗
+        findViewById(R.id.rowPondTask).setOnClickListener(new View.OnClickListener() {
             @Override
-            public void onChanged(int value, boolean fromUser) {
-                tvHoursNum.setText(String.valueOf(value));
-                tvStatusMeta.setText("自动间隔 " + value + " 小时");
-                if (fromUser) put("autoRunIntervalHours", value);
+            public void onClick(View v) {
+                Toast.makeText(MainActivity.this, "🐟 已触发鱼塘任务引擎…", Toast.LENGTH_SHORT).show();
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        final String kick = socketCmd("POND");
+                        if (kick == null || kick.length() == 0) {
+                            runUi(new Runnable() {
+                                @Override public void run() {
+                                    Toast.makeText(MainActivity.this,
+                                            "触发失败：闲鱼未运行或 socket 不通", Toast.LENGTH_LONG).show();
+                                }
+                            });
+                            return;
+                        }
+                        // 引擎后台跑（列表+逐个领奖），轮询等报告生成（最多 40s）
+                        String report = null;
+                        for (int i = 0; i < 20; i++) {
+                            try { Thread.sleep(2000); } catch (InterruptedException ignored) { }
+                            String r = socketCmd("POND_REPORT");
+                            if (r != null && r.contains("鱼塘任务报告")) { report = r; break; }
+                        }
+                        final String rep = report;
+                        runUi(new Runnable() {
+                            @Override public void run() {
+                                showPondReport(rep);
+                            }
+                        });
+                    }
+                }, "rh-pond-ui").start();
+            }
+        });
+
+        // ===== 功能开关抽屉：点击展开/收起（高度+透明度动画） =====
+        drawerHead.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (drawerBusy.get()) return; // 动画中忽略连点
+                drawerOpen = !drawerOpen;
+                // 实心三角 ▼：收起 -90°（指向右），展开 0°（指向下），与抽屉动画同步
+                tvDrawerArrow.animate().rotation(drawerOpen ? 0f : -90f)
+                        .setDuration(drawerOpen ? 260 : 200).start();
+                animateDrawer((ViewGroup) drawerContent, drawerOpen, drawerBusy);
+            }
+        });
+
+        // ===== 强化功能抽屉：同款连体折叠 =====
+        drawerHead2.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (drawerBusy2.get()) return;
+                drawerOpen2 = !drawerOpen2;
+                tvDrawerArrow2.animate().rotation(drawerOpen2 ? 0f : -90f)
+                        .setDuration(drawerOpen2 ? 260 : 200).start();
+                animateDrawer((ViewGroup) drawerContent2, drawerOpen2, drawerBusy2);
+            }
+        });
+
+        // ===== 自动间隔：点击弹输入卡（分钟制 0-1440） =====
+        tvStatusMeta.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                askInterval();
             }
         });
 
@@ -860,7 +959,12 @@ public class MainActivity extends Activity {
     private JSONObject currentConfig() {
         try {
             SharedPreferences sp = getSharedPreferences("config", Context.MODE_PRIVATE);
-            return new JSONObject(sp.getString("config_json", ConfigManager.DEFAULT_JSON));
+            JSONObject o = new JSONObject(sp.getString("config_json", ConfigManager.DEFAULT_JSON));
+            // 侦察模式已固化为默认（UI 隐藏）：历史配置里的自定义值一律校正回默认
+            o.put("scout", true);
+            o.put("scoutPattern", "reward|bonus|coin");
+            o.put("maxScoutMethods", 400);
+            return o;
         } catch (Throwable t) {
             try {
                 return new JSONObject(ConfigManager.DEFAULT_JSON);
@@ -868,6 +972,261 @@ public class MainActivity extends Activity {
                 return new JSONObject();
             }
         }
+    }
+
+    /** 抽屉展开/收起动画：高度 0↔满 + alpha 同步（展开 260ms 减速 / 收起 200ms 加速）；busy 为所属抽屉的动画互斥标记 */
+    private void animateDrawer(final ViewGroup v, final boolean expand, final java.util.concurrent.atomic.AtomicBoolean busy) {
+        drawerBusySet(busy, true);
+        if (expand) {
+            v.setVisibility(View.VISIBLE);
+            v.setAlpha(0f);
+            // post 等 layout 完成，拿到真实满高
+            v.post(new Runnable() {
+                @Override
+                public void run() {
+                    final int full = v.getHeight();
+                    if (full == 0) { // 兜底：量不到直接显示
+                        v.setAlpha(1f);
+                        drawerBusySet(busy, false);
+                        return;
+                    }
+                    ValueAnimator va = ValueAnimator.ofFloat(0f, 1f);
+                    va.setDuration(260);
+                    va.setInterpolator(new android.view.animation.DecelerateInterpolator(1.4f));
+                    va.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                        @Override
+                        public void onAnimationUpdate(ValueAnimator a) {
+                            float t = (Float) a.getAnimatedValue();
+                            ViewGroup.LayoutParams lp = v.getLayoutParams();
+                            lp.height = (int) (full * t);
+                            v.setLayoutParams(lp);
+                            v.setAlpha(t);
+                        }
+                    });
+                    va.addListener(new android.animation.AnimatorListenerAdapter() {
+                        @Override
+                        public void onAnimationEnd(android.animation.Animator a) {
+                            ViewGroup.LayoutParams lp = v.getLayoutParams();
+                            lp.height = ViewGroup.LayoutParams.WRAP_CONTENT; // 归还自适应高
+                            v.setLayoutParams(lp);
+                            v.setAlpha(1f);
+                            drawerBusySet(busy, false);
+                        }
+                    });
+                    va.start();
+                }
+            });
+        } else {
+            final int full = v.getHeight();
+            ValueAnimator va = ValueAnimator.ofFloat(0f, 1f);
+            va.setDuration(200);
+            va.setInterpolator(new android.view.animation.AccelerateInterpolator(1.2f));
+            va.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                @Override
+                public void onAnimationUpdate(ValueAnimator a) {
+                    float t = (Float) a.getAnimatedValue();
+                    ViewGroup.LayoutParams lp = v.getLayoutParams();
+                    lp.height = (int) (full * (1 - t));
+                    v.setLayoutParams(lp);
+                    v.setAlpha(1 - t);
+                }
+            });
+            va.addListener(new android.animation.AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(android.animation.Animator a) {
+                    v.setVisibility(View.GONE);
+                    v.setAlpha(1f);
+                    ViewGroup.LayoutParams lp = v.getLayoutParams();
+                    lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+                    v.setLayoutParams(lp);
+                    drawerBusySet(busy, false);
+                }
+            });
+            va.start();
+        }
+    }
+
+    private void drawerBusySet(java.util.concurrent.atomic.AtomicBoolean busy, boolean val) {
+        busy.set(val);
+    }
+
+    /** 自动间隔填写卡：分钟制 0-1440（默认 240），确定即存（自绘圆角卡，风格对齐主界面） */
+    /** 主线程执行 */
+    private void runUi(Runnable r) {
+        runOnUiThread(r);
+    }
+
+    /** 🐟 鱼塘任务报告弹窗（等宽字体滚动查看） */
+    private void showPondReport(String rep) {
+        try {
+            final android.app.Dialog dlg = new android.app.Dialog(this);
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+            bg.setCornerRadius(dp(24));
+            bg.setColor(0xFFFFFFFF);
+            card.setBackground(bg);
+
+            TextView title = new TextView(this);
+            title.setText("🐟 鱼塘任务报告");
+            title.setTextSize(15);
+            title.setTypeface(Typeface.DEFAULT_BOLD);
+            title.setTextColor(0xFF17181C);
+            title.setPadding(dp(24), dp(22), dp(24), dp(8));
+            card.addView(title);
+
+            TextView close = new TextView(this);
+            close.setText("关闭");
+            close.setTextSize(14);
+            close.setTypeface(Typeface.DEFAULT_BOLD);
+            close.setTextColor(0xFF0A7AFF);
+            close.setGravity(Gravity.CENTER);
+            close.setPadding(0, dp(12), 0, dp(14));
+            close.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { dlg.dismiss(); }
+            });
+
+            android.widget.ScrollView sv = new android.widget.ScrollView(this);
+            TextView body = new TextView(this);
+            body.setText(rep == null || rep.length() == 0
+                    ? "报告尚未生成（闲鱼进程可能未运行，或引擎仍在执行）\n\n稍后重新点击「鱼塘任务」查看。" : rep);
+            body.setTextSize(11);
+            body.setTypeface(Typeface.MONOSPACE);
+            body.setTextColor(0xFF2A2E35);
+            body.setPadding(dp(24), dp(4), dp(24), dp(16));
+            sv.addView(body);
+            LinearLayout.LayoutParams svlp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(420));
+            sv.setLayoutParams(svlp);
+            card.addView(sv);
+            card.addView(close);
+
+            dlg.setContentView(card);
+            android.view.Window w = dlg.getWindow();
+            if (w != null) {
+                w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(
+                        android.graphics.Color.TRANSPARENT));
+                android.view.WindowManager.LayoutParams lp = w.getAttributes();
+                lp.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.88f);
+                w.setAttributes(lp);
+            }
+            dlg.show();
+        } catch (Throwable t) {
+            Toast.makeText(this, "报告展示失败: " + t, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void askInterval() {
+        try {
+            JSONObject cfg = currentConfig();
+            int cur = cfg.optInt("autoRunIntervalMin", -1);
+            if (cur < 0) cur = cfg.optInt("autoRunIntervalHours", 4) * 60;
+
+            final android.app.Dialog dlg = new android.app.Dialog(this);
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+            bg.setCornerRadius(dp(24));
+            bg.setColor(0xFFFFFFFF);
+            card.setBackground(bg);
+
+            TextView title = new TextView(this);
+            title.setText("自动间隔（分钟）");
+            title.setTextSize(15);
+            title.setTypeface(Typeface.DEFAULT_BOLD);
+            title.setTextColor(0xFF17181C);
+            title.setPadding(dp(24), dp(22), dp(24), dp(2));
+            card.addView(title);
+
+            TextView sub = new TextView(this);
+            sub.setText("0 = 打开闲鱼即跑 · 最大 1440（24 小时）");
+            sub.setTextSize(10.5f);
+            sub.setTextColor(0xFF8A8F99);
+            sub.setPadding(dp(24), 0, dp(24), dp(10));
+            card.addView(sub);
+
+            final EditText et = new EditText(this);
+            et.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+            et.setHint("0 - 1440");
+            et.setText(String.valueOf(cur));
+            et.setSelection(et.getText().length());
+            et.setTextSize(15);
+            et.setTextColor(0xFF17181C);
+            et.setHintTextColor(0xFFB9BEC7);
+            et.setBackground(getDrawable(R.drawable.bg_input));
+            et.setPadding(dp(14), dp(11), dp(14), dp(11));
+            LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            elp.setMargins(dp(24), 0, dp(24), dp(6));
+            et.setLayoutParams(elp);
+            card.addView(et);
+
+            // 按钮行
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setPadding(0, dp(6), 0, 0);
+            TextView cancel = new TextView(this);
+            cancel.setText("取消");
+            cancel.setTextSize(14);
+            cancel.setTextColor(0xFF8A8F99);
+            cancel.setGravity(Gravity.CENTER);
+            cancel.setPadding(0, dp(14), 0, dp(14));
+            cancel.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { dlg.dismiss(); }
+            });
+            TextView ok = new TextView(this);
+            ok.setText("确定");
+            ok.setTextSize(14);
+            ok.setTypeface(Typeface.DEFAULT_BOLD);
+            ok.setTextColor(0xFF0A7AFF);
+            ok.setGravity(Gravity.CENTER);
+            ok.setPadding(0, dp(14), 0, dp(14));
+            ok.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    try {
+                        int v2 = Integer.parseInt(et.getText().toString().trim());
+                        v2 = Math.min(1440, Math.max(0, v2));
+                        put("autoRunIntervalMin", v2);
+                        tvStatusMeta.setText("自动间隔 " + v2 + " 分钟 ▾");
+                        Toast.makeText(MainActivity.this, "已保存：自动间隔 " + v2 + " 分钟（重启闲鱼生效）", Toast.LENGTH_SHORT).show();
+                        dlg.dismiss();
+                    } catch (Throwable t) {
+                        Toast.makeText(MainActivity.this, "请输入 0-1440 的数字", Toast.LENGTH_SHORT).show();
+                    }
+                }
+            });
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            cancel.setLayoutParams(clp);
+            LinearLayout.LayoutParams olp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            ok.setLayoutParams(olp);
+            row.addView(cancel);
+            View divider = new View(this);
+            divider.setBackgroundColor(0x1417181C);
+            row.addView(divider, new LinearLayout.LayoutParams(dp(1), ViewGroup.LayoutParams.MATCH_PARENT));
+            row.addView(ok);
+            card.addView(row);
+
+            dlg.setContentView(card);
+            android.view.Window w = dlg.getWindow();
+            if (w != null) {
+                w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0));
+                w.setDimAmount(0.35f);
+                android.view.WindowManager.LayoutParams lp = w.getAttributes();
+                lp.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.82);
+                lp.gravity = Gravity.CENTER;
+                w.setAttributes(lp);
+            }
+            dlg.setCancelable(true);
+            dlg.setCanceledOnTouchOutside(true);
+            dlg.show();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private int dp(float v) {
+        return (int) (TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v,
+                getResources().getDisplayMetrics()) + 0.5f);
     }
 
     private void put(String key, Object val) {
@@ -893,7 +1252,36 @@ public class MainActivity extends Activity {
         SharedPreferences sp = getSharedPreferences("config", Context.MODE_PRIVATE);
         sp.edit().putString("config_json", o.toString()).apply();
         openPrefsPerm();
+        syncSdcardConfig(o); // su 双写 /sdcard/RewardHook/config.json（引擎 sdcard 通道优先读，绕开 LSPosed 快照滞后）
         dirty = true;
+    }
+
+    /** 异步 su 双写配置到闲鱼外部私有 files/（目标进程必可读；失败静默，仍走 XSharedPreferences 兜底） */
+    private void syncSdcardConfig(final JSONObject o) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                int exit = -1;
+                try {
+                    java.lang.Process p = Runtime.getRuntime().exec(new String[]{
+                            "su", "-c", "mkdir -p /sdcard/Android/data/com.taobao.idlefish/files"
+                                    + " && cat > " + ConfigManager.OVERRIDE_PATH});
+                    java.io.OutputStream os = p.getOutputStream();
+                    os.write(o.toString().getBytes("UTF-8"));
+                    os.flush();
+                    os.close();
+                    exit = p.waitFor();
+                    java.io.InputStream es = p.getErrorStream();
+                    byte[] err = new byte[es.available()];
+                    int n = es.read(err);
+                    android.util.Log.i("RhSync", "override config written, exit=" + exit
+                            + (n > 0 ? " err=" + new String(err, 0, n) : ""));
+                    p.destroy();
+                } catch (Throwable t) {
+                    android.util.Log.e("RhSync", "su write fail", t);
+                }
+            }
+        }, "rh-cfg-sync").start();
     }
 
     /** 放开文件权限，让 LSPosed 的 XSharedPreferences 能在目标进程读到 */

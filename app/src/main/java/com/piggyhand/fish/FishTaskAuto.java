@@ -10,7 +10,7 @@ import java.util.Set;
 import de.robv.android.xposed.XposedBridge;
 
 /**
- * 闲鱼币任务全自动引擎（逆向自闲鱼猪手 1.3.9 c.dr/c.x3/c.jb/c.tk 状态机）。
+ * 闲鱼币任务全自动引擎（接口链路定位自闲鱼 7.25.31 dex 静态分析）。
  * 进程内串行执行：direct 发请求 → 轮询响应分文件 → 解析 → 下一步。
  *
  * 流程：
@@ -244,7 +244,7 @@ public final class FishTaskAuto {
             if (proc != null && proc.contains(":")) return;
 
             // 配置开关：enabled / autoRun 关闭则不自动跑（模块 UI 可切）
-            int intervalHours = 4;
+            int intervalMin = 240;
             try {
                 ConfigManager cfg = ConfigManager.load();
                 if (cfg == null || !cfg.enabled || !cfg.autoRun) {
@@ -253,12 +253,12 @@ public final class FishTaskAuto {
                             + (cfg != null && cfg.autoRun) + "), skip");
                     return;
                 }
-                intervalHours = Math.max(1, cfg.autoRunIntervalHours);
+                intervalMin = cfg.autoRunIntervalMin;
             } catch (Throwable t) {
                 log("[auto-run] config check fail, continue: " + t);
             }
 
-            // 时间戳标记：距上次自动跑 >= intervalHours 小时才触发。
+            // 时间戳标记：距上次自动跑 >= autoRunIntervalMin 分钟才触发。
             // 标记存 internal files（external cache 会被闲鱼清理导致标记丢失——10-16 实测）。
             long now = System.currentTimeMillis();
             java.io.File mark;
@@ -291,8 +291,8 @@ public final class FishTaskAuto {
                 }
             }
             long gapMs = now - last;
-            final int interval = Math.max(1, intervalHours);
-            final long intervalMs = interval * 3600_000L;
+            // 分钟制：0 = 不限间隔（探测节拍内能跑就跑），上限 1440min
+            final long intervalMs = Math.max(0, intervalMin) * 60_000L;
             // 打开闲鱼即探测（用户语义 10-17）：45s 等 mtop 通道热 → 首探 → 有货就跑、没货静默。
             // intervalMs 仅作兜底 force 周期（防统计漏判），不再做启动节流
             long wait = 45000L;
@@ -302,7 +302,7 @@ public final class FishTaskAuto {
             final long lastLaunch0 = last == 0 ? now : last;
             // 常驻探测循环（B+C 方案）：每 15min 轻量拉任务列表（1 次只读请求），
             // 有可跑任务才触发完整钓鱼；钓鱼后 3 次加密探测（5min，紧跟服务端补发节奏）；
-            // 探测失败 3min 退避重试；另有 intervalHours 兜底强制跑（防统计漏判）。
+            // 探测失败 3min 退避重试；另有 autoRunIntervalMin 兜底强制跑（防统计漏判）。
             // 进程死线程亡，下次启动 autoRunDaily 重新拉起——链路自愈
             new Thread(new Runnable() {
                 @Override
@@ -392,7 +392,7 @@ public final class FishTaskAuto {
             }
             if (opt(extras, "mapRoll", true)) doMapRoll(); // 圈数挑战自动掷骰前进（10-17 抓包接入，默认开）
             if (doPolish) runPolish();
-            if (doSold) report.append("[卖鱼] 跳过：钓场玩法在闲鱼 7.25.31 已移除（APK 内无 fishing 接口，猪手旧功能）\n");
+            if (doSold) report.append("[卖鱼] 跳过：钓场玩法在闲鱼 7.25.31 已移除（APK 内无 fishing 接口，旧版玩法已下线）\n");
             if (doShop) {
                 org.json.JSONObject shp = callApi(SHOP_BENEFIT_API, "1.0", "{}", "小店日福利");
                 String shret = firstRet(shp);
@@ -933,7 +933,7 @@ public final class FishTaskAuto {
         }
     }
 
-    /* ============================ 擦亮（参考猪手 c_tk/c_nb/c_sk） ============================ */
+    /* ============================ 擦亮（接口链路定位自闲鱼 dex 静态分析） ============================ */
 
     /* ==================== 闲鱼币余额日志（差分法「今日领取」，10-17 定稿） ====================
      * 思路：总余额是白送字段（map.init → coinNum；coin.signin → data.idleCoinAmount，10-17 抓包实锤 54510）。
@@ -1229,12 +1229,12 @@ public final class FishTaskAuto {
     }
 
     /**
-     * 擦亮全流程（猪手同款）：
-     * 1. 每日一次标记（猪手存 polish_<userId>=日期，这里存 rh_pref.json 的 polish_date）
+     * 擦亮全流程：
+     * 1. 每日一次标记（存 rh_pref.json 的 polish_date，防每日重复调用）
      * 2. 一次调用 mtop.taobao.idle.item.polish v2.0 {"type":"originaljson"}，
      *    服务端自动擦亮全部在售宝贝，响应 data.exposureItems 返回擦亮的宝贝列表
      * 3. 失败码：FAIL_BIZ_IDLE_USER_POLISH_AGAIN（今日已擦过）/
-     *    FAIL_BIZ_ITEM_POLISH_FAILED3（今日次数用完）→ 猪手同款也写日期标记防反复重试
+     *    FAIL_BIZ_ITEM_POLISH_FAILED3（今日次数用完）→ 命中失败码也写日期标记防反复重试
      */
     private void runPolish() {
         String today = new java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
@@ -1254,8 +1254,8 @@ public final class FishTaskAuto {
             if (ei != null) n = ei.length();
         }
         if (ret != null && ret.contains("SUCCESS")) {
-            // 成功即写标记（含 n=0：服务端受理但无 exposureItems——当日已擦过/无可擦宝贝）。
-            // 猪手原版 onSuccess 不写标记、靠服务端判重兜底，这里改进为成功即记，省每日重复调用
+            // 成功即写标记（含 n=0：服务端受理但无 exposureItems——当日已擦过/无可擦宝贝），
+            // 不依赖服务端判重兜底，省每日重复调用
             report.append(n > 0 ? "[擦亮] SUCCESS：已擦亮 " + n + " 个宝贝\n"
                     : "[擦亮] SUCCESS：服务端受理（今日已擦过或无可擦宝贝）\n");
             if (n > 0) toast("✓ 擦亮 " + n + " 个宝贝");
@@ -1272,7 +1272,7 @@ public final class FishTaskAuto {
         }
     }
 
-    /** 写每日擦亮标记（猪手同款：成功与"已擦过"都写，防反复重试） */
+    /** 写每日擦亮标记（成功与"已擦过"都写，防反复重试） */
     private void markPolished(String prefPath, org.json.JSONObject pref, String today) {
         try {
             pref.put("polish_date", today);
@@ -1327,7 +1327,7 @@ public final class FishTaskAuto {
                     claimOne(deliveryId, "浏览任务", done, fail);
                     return;
                 }
-                idx = times > idx ? times : idx + 1; // 猪手：以服务端 times 为下一索引
+                idx = times > idx ? times : idx + 1; // 以服务端 times 为下一索引
                 gap = BROWSE_GAP_MS;                  // 成功后恢复基础间隔
             } else if (ret != null && ret.contains("ILLEGAL")) {
                 illegalRun++;
