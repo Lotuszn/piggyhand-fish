@@ -32,7 +32,11 @@ public class MainHook implements IXposedHookLoadPackage {
         if (cfg.mtopHook) {
             // 淘系 mtop 侦察 + 广播直调入口（闲鱼专用，其他 App 无此 SDK 时自动跳过）
             FishMtopHook.hook(lpp.classLoader);
+            // v1.0.8 🎣 悬浮工具钮（详情页原图/视频保存，Flutter 容器注入）
+            RhFishFloat.hook(lpp.classLoader);
         }
+        // v1.0.9 💬 聊天页左滑禁用（常驻注册，RhChatHook 回调内热读 noChatSwipe 开关）
+        RhChatHook.hook(lpp.classLoader);
         applyRules(lpp);
         if (cfg.adSdkPresets) hookAdSdkPresets(lpp);
         if (cfg.scout) scout(lpp);
