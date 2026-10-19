@@ -1,6 +1,6 @@
 {
-  "latest": "1.0.7",
+  "latest": "1.1.0",
   "url": "https://github.com/Lotuszn/piggyhand-fish/releases/latest",
   "cnUrl": "https://gitee.com/lotuszn/piggyhand-fish/releases",
-  "notes": "v1.0.7 · 全新「今日领取」闲鱼币差分账本（前台实时显示今日收益，只记收入）；新增运行日志一键导出（适配排查）；圈数挑战自动掷骰；LSPosed 检测修复；UI 文案统一钓鱼主题"
+  "notes": "v1.1.0 · 新增💬禁止聊天左滑开关（常用功能抽屉：聊天页左滑连「左滑看TA的闲鱼号」预览都不会出现，事件级吞除不误伤点头像/滚动）；鱼塘任务移入常用功能抽屉并加红色「未完善，谨慎开启」警示；无水印保存/流量配对/每日擦亮等沿用 v1.0.9"
 }
