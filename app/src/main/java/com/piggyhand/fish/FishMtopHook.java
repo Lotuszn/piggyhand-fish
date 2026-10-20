@@ -36,7 +36,7 @@ public final class FishMtopHook {
     /** 待发送请求 {api, version, data}，下一次 App 请求时借壳发出 */
     private static volatile String[] pendingInvoke;
     /** 模块运行所在 App 的 context（读写缓存文件用） */
-    private static volatile Context appCtx;
+    static volatile Context appCtx; // 包级可见（RhLocationContext 落盘需要）
     /** 宿主 classLoader（兼容版 fallback hook 用） */
     private static volatile ClassLoader hostCl;
 
@@ -77,8 +77,14 @@ public final class FishMtopHook {
             Reflect.hookAllMethods(reqCls, "setData", new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
+                    String raw = String.valueOf(param.args[0]);
+                    // 1.1.2 位置上下文捕获（截断前喂原始体，快扫无命中零开销）
+                    try {
+                        RhLocationContext.capture(raw);
+                    } catch (Throwable ignored) {
+                    }
                     // B 类日志体量控制：data 全量可达数 KB（feeds 等高频接口一天几十 MB），截断 300 字符保诊断线索
-                    String d = String.valueOf(param.args[0]);
+                    String d = raw;
                     if (d.length() > 300) d = d.substring(0, 300) + "...(len=" + d.length() + ")";
                     log("[mtop-req] data = " + d);
                 }
