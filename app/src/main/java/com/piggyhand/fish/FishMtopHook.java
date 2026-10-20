@@ -176,14 +176,35 @@ public final class FishMtopHook {
 
         /* ---------- 2.5 全局响应监听：App 自己的任务列表/领奖响应直接落盘 ---------- */
         try {
-            final Class<?> finishEvtCls = Reflect.findClass("mtopsdk.mtop.common.MtopFinishEvent", cl);
+            final Class<?> finishEvtCls = Reflect.findClassIfExists("mtopsdk.mtop.common.MtopFinishEvent", cl);
+            if (finishEvtCls == null) {
+                log("finish event class not found, ctor hook skipped（响应靠 fallback 兜底）");
+                return;
+            }
             Reflect.hookAllConstructors(finishEvtCls, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
                     ctorHits++;
                     try {
-                        if (param.args == null || param.args.length == 0 || param.args[0] == null) return;
-                        handleMtopFinishEvent(finishEvtCls, param.args[0]);
+                        boolean fed = false;
+                        if (param.args != null) {
+                            // 7.28.60 构造签名不再保证 args[0]=MtopResponse：遍历全部参数，
+                            // handleMtopFinishEvent 内部有 isMtopResp 校验自动忽略非响应参数
+                            for (Object a : param.args) {
+                                if (a == null) continue;
+                                handleMtopFinishEvent(finishEvtCls, a);
+                                fed = true;
+                            }
+                        }
+                        if (!fed) {
+                            // 无参构造变体：响应经 setter 后填，构造点从对象字段捞一次
+                            Object inner = null;
+                            try {
+                                inner = Reflect.callMethod(param.thisObject, "getMtopResponse");
+                            } catch (Throwable ignored) {
+                            }
+                            if (inner != null) handleMtopFinishEvent(finishEvtCls, inner);
+                        }
                     } catch (Throwable t) {
                         logLimit("task-resp hook error: " + t);
                     }
@@ -418,14 +439,20 @@ public final class FishMtopHook {
                                             final String tail = cApi.lastIndexOf('.') >= 0
                                                     ? cApi.substring(cApi.lastIndexOf('.') + 1) : cApi;
                                             final long t0 = System.currentTimeMillis();
+                                            // 先删旧响应文件再轮询 exists()：部分 ROM（Android 10 sdcardfs）
+                                            // lastModified 有缓存延迟，mtime 判断会漏掉新响应（MIX3 实测）
+                                            try {
+                                                java.io.File f0 = cacheFile("rh_resp_" + tail + ".json");
+                                                if (f0 != null && f0.exists()) f0.delete();
+                                            } catch (Throwable ignored) {
+                                            }
                                             boolean ok = ApiDirect.send(appCtx.getClassLoader(), cApi, cVer, cData);
                                             if (ok) {
                                                 body = "NO_RESP";
                                                 for (int i = 0; i < 16; i++) {
                                                     Thread.sleep(250);
                                                     java.io.File f = cacheFile("rh_resp_" + tail + ".json");
-                                                    if (f != null && f.exists()
-                                                            && f.lastModified() >= t0) {
+                                                    if (f != null && f.exists()) {
                                                         body = readCacheFile("rh_resp_" + tail + ".json");
                                                         break;
                                                     }
@@ -469,26 +496,42 @@ public final class FishMtopHook {
     /**
      * MtopFinishEvent 统一处理：构造 hook 与方法级 fallback 共用。
      * 从事件对象取 MtopResponse（args[0]），按 api 域名过滤后落盘+联动。
+     * @return true = 本次调用实际落盘（respHook 依赖它做去重登记）
      */
-    private static void handleMtopFinishEvent(Class<?> finishEvtCls, Object resp) throws Throwable {
+    private static boolean handleMtopFinishEvent(Class<?> finishEvtCls, Object resp) throws Throwable {
         // 确认 resp 是 MtopResponse（fireEvent 分发时参数可能混入其他事件类型）
-        if (resp == null) return;
+        // 7.28.60 起类从 mtopsdk.mtop.common 迁到 mtopsdk.mtop.domain：按类名尾匹配
+        if (resp == null) {
+            logLimit("[resp-diag] handleMtopFinishEvent got null resp (getMtopResponse 反射失败或未填充)");
+            return false;
+        }
         Class<?> respCls = resp.getClass();
         boolean isMtopResp = false;
         for (Class<?> k = respCls; k != null && k != Object.class; k = k.getSuperclass()) {
-            if ("mtopsdk.mtop.common.MtopResponse".equals(k.getName())) {
+            String kn = k.getName();
+            if (kn.endsWith(".MtopResponse")) {
                 isMtopResp = true;
                 break;
             }
         }
-        if (!isMtopResp) return;
+        if (!isMtopResp) {
+            logLimit("[resp-diag] finishEvent arg not MtopResponse: " + respCls.getName());
+            return false;
+        }
 
         Object api = Reflect.callMethod(resp, "getApi");
-        if (api == null) return;
+        // v1.0.8 🎣 详情媒体提取（不依赖接口名：含 imageInfos 键才真正解析）
+        // v1.0.8 🎣 详情媒体提取（不依赖接口名：含 imageInfos 键才真正解析）
+        if (api == null) {
+            // 静默黑洞诊断：getApi 反射失败（方法被混淆改名）时响应将被整条丢弃
+            logLimit("[resp-diag] getApi null on " + respCls.getName() + "（方法名混淆？响应丢弃）");
+            return false;
+        }
         String a = String.valueOf(api);
         String la = a.toLowerCase();
-        // v1.0.8 🎣 详情媒体提取（不依赖接口名：含 imageInfos 键才真正解析）
         try {
+        // v1.0.8 🎣 详情媒体提取（不依赖接口名：含 imageInfos 键才真正解析）
+        // v1.0.8 🎣 详情媒体提取（不依赖接口名：含 imageInfos 键才真正解析）
             RhFishMedia.parseResponse(respBody(resp, 200000));
         } catch (Throwable ignored) {
         }
@@ -502,13 +545,15 @@ public final class FishMtopHook {
                 && !la.contains("item.recommend")
                 && !la.contains("bubble.show")) {
             String body = respBody(resp, -1);
-            writeTaskResp(a, body);
-            log("[task-resp] captured " + a);
-            // v1.0.8 流量配对：请求-响应闭环 + elapsed + 状态
-            String pairLine = RhTrafficPair.onResponse(a, body);
-            if (pairLine != null) log(pairLine);
-            // v1.0.8 token 捞取（响应体扫风控字段）
-            RhTokenVault.scanResponse(a, body);
+            boolean written = writeTaskResp(a, body);
+            if (written) {
+                log("[task-resp] captured " + a);
+                // v1.0.8 流量配对：请求-响应闭环 + elapsed + 状态
+                String pairLine = RhTrafficPair.onResponse(a, body);
+                if (pairLine != null) log(pairLine);
+                // v1.0.8 token 捞取（响应体扫风控字段）
+                RhTokenVault.scanResponse(a, body);
+            }
             // 闲鱼币余额白送字段（差分日志）：signin→data.idleCoinAmount / map.init→coinNum
             if (la.equals("mtop.taobao.idle.coin.signin")
                     || la.equals("mtop.taobao.idle.treasure.hunt.map.init")) {
@@ -526,59 +571,124 @@ public final class FishMtopHook {
                 } catch (Throwable ignored) {
                 }
             }
+            return written;
         }
+        return false;
     }
 
     /**
-     * 方法级 fallback：构造 hook 失效的 ROM（Android 17 个案）上，从事件总线的
-     * 分发方法兜住响应。遍历 mtopsdk.mtop.infra.EventCenter 全部方法，凡参数表
-     * 含 MtopFinishEvent 的全部 hook，after 里扫描参数调 handleMtopFinishEvent。
-     * 纯方法 hook —— 与用户机器上已验证存活的 setApiName/build 同一机制。
+     * 方法级 fallback：构造 hook 失效的 ROM 上从消费端兜住响应。
+     * 路径 A（原）：遍历 mtopsdk.mtop.infra.EventCenter 全部方法，凡参数表含
+     *   MtopFinishEvent 的全部 hook，after 里扫描参数调 handleMtopFinishEvent。
+     * 路径 B（7.28.60+，EventCenter 类名被混淆移除后新增）：直接 hook
+     *   MtopResponse 的消费端方法（isApiSuccess/getBytedata/getStringData/
+     *   getDataJsonObject/getRetCode）——业务解析响应必调其一，方法级 hook 与
+     *   setApi/build 同机制已验证存活；after 里以 thisObject 喂
+     *   handleMtopFinishEvent（WeakHashMap 引用级 3s 去重防同响应重复落盘）。
      */
     private static void armFallbackRespHook() {
         try {
-            final Class<?> finishEvtCls = Reflect.findClass("mtopsdk.mtop.common.MtopFinishEvent", hostCl);
-            Class<?> ecCls = Reflect.findClass("mtopsdk.mtop.infra.EventCenter", hostCl);
-            if (finishEvtCls == null || ecCls == null) {
-                log("[compat] fallback target not found (EventCenter/MtopFinishEvent), give up");
+            // findClass 是 Class.forName 直抛 CNFE（Reflect.java:19），EventCenter 在 7.28.60
+            // 被混淆移除时曾把整个 fallback 炸进外层 catch、路径 B 永远挂不上（外部用户
+            // OnePlus/Android17 实证）——统一改 findClassIfExists，各段独立 try 不互相阻断
+            final Class<?> finishEvtCls = Reflect.findClassIfExists("mtopsdk.mtop.common.MtopFinishEvent", hostCl);
+            if (finishEvtCls == null) {
+                log("[compat] fallback target not found (MtopFinishEvent), give up");
                 return;
             }
             int armed = 0;
-            for (final Method m : ecCls.getDeclaredMethods()) {
-                boolean touches = false;
-                for (Class<?> p : m.getParameterTypes()) {
-                    if (p == finishEvtCls) {
-                        touches = true;
-                        break;
-                    }
-                }
-                if (!touches) continue;
-                Reflect.hookAllMethods(ecCls, m.getName(), new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) {
-                        try {
-                            if (param.args == null) return;
-                            for (Object arg : param.args) {
-                                if (arg != null && finishEvtCls.isInstance(arg)) {
-                                    Object inner = null;
-                                    try {
-                                        inner = Reflect.callMethod(arg, "getMtopResponse");
-                                    } catch (Throwable ignored) {
+            try {
+                Class<?> ecCls = Reflect.findClassIfExists("mtopsdk.mtop.infra.EventCenter", hostCl);
+                if (ecCls != null) {
+                    for (final Method m : ecCls.getDeclaredMethods()) {
+                        boolean touches = false;
+                        for (Class<?> p : m.getParameterTypes()) {
+                            if (p == finishEvtCls) {
+                                touches = true;
+                                break;
+                            }
+                        }
+                        if (!touches) continue;
+                        Reflect.hookAllMethods(ecCls, m.getName(), new XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                try {
+                                    if (param.args == null) return;
+                                    for (Object arg : param.args) {
+                                        if (arg != null && finishEvtCls.isInstance(arg)) {
+                                            Object inner = null;
+                                            try {
+                                                inner = Reflect.callMethod(arg, "getMtopResponse");
+                                            } catch (Throwable ignored) {
+                                            }
+                                            if (inner == null) continue;
+                                            handleMtopFinishEvent(finishEvtCls, inner);
+                                            break;
+                                        }
                                     }
-                                    if (inner == null) continue;
-                                    handleMtopFinishEvent(finishEvtCls, inner);
-                                    break;
+                                } catch (Throwable t) {
+                                    logLimit("fallback hook error: " + t);
                                 }
                             }
-                        } catch (Throwable t) {
-                            logLimit("fallback hook error: " + t);
-                        }
+                        });
+                        armed++;
                     }
-                });
-                armed++;
+                }
+            } catch (Throwable ec) {
+                logLimit("[compat] EventCenter fallback arm skipped: " + ec);
             }
             fallbackArmed = true;
             log("[compat] fallback armed on EventCenter: " + armed + " method(s) hooked");
+            // 路径 B：MtopResponse 消费端方法级钩子（无论 EventCenter 是否存在都补挂，
+            // 双保险；7.28.60 类迁包 common→domain，新旧包名双尝试）
+            try {
+                Class<?> respCls = null;
+                for (String cn : new String[]{"mtopsdk.mtop.common.MtopResponse",
+                        "mtopsdk.mtop.domain.MtopResponse"}) {
+                    respCls = Reflect.findClassIfExists(cn, hostCl);
+                    if (respCls != null) {
+                        log("[compat] MtopResponse fallback target: " + cn);
+                        break;
+                    }
+                }
+                if (respCls != null) {
+                    final java.util.Map<Object, Long> seen =
+                            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Object, Long>());
+                    XC_MethodHook respHook = new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            try {
+                                Object resp = param.thisObject;
+                                if (resp == null) return;
+                                long now = android.os.SystemClock.uptimeMillis();
+                                Long last = seen.get(resp);
+                                if (last != null && now - last < 3000) return;
+                                // 去重只在成功落盘后登记：响应生命周期早期消费端方法
+                                // （isApiSuccess 等）被调时 bytedata 可能尚未填充，若此时
+                                // 占坑会把响应对象钉死在坏状态（外部用户 parse fail 根因）
+                                boolean written = handleMtopFinishEvent(finishEvtCls, resp);
+                                if (written) seen.put(resp, now);
+                            } catch (Throwable t) {
+                                logLimit("resp-fallback error: " + t);
+                            }
+                        }
+                    };
+                    int mArmed = 0;
+                    for (String mn : new String[]{"isApiSuccess", "getBytedata", "getStringData",
+                            "getDataJsonObject", "getRetCode"}) {
+                        try {
+                            Reflect.hookAllMethods(respCls, mn, respHook);
+                            mArmed++;
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                    log("[compat] fallback armed on MtopResponse: " + mArmed + " method(s) hooked");
+                } else {
+                    log("[compat] MtopResponse fallback: class not found in both packages");
+                }
+            } catch (Throwable t) {
+                log("[compat] MtopResponse fallback arm FAILED: " + t);
+            }
         } catch (Throwable t) {
             log("[compat] fallback arm FAILED: " + t);
         }
@@ -620,13 +730,23 @@ public final class FishMtopHook {
 
     /* ---------------- 文件通道 ---------------- */
 
-    /** 任务响应落盘：rh_resp.json 总线 + rh_resp_<api尾段>.json 分文件（避免 PC 端清空竞争） */
-    private static void writeTaskResp(String api, String body) {
-        writeCacheFile("rh_resp.json", body == null ? "" : body);
+    /** 任务响应落盘：rh_resp.json 总线 + rh_resp_<api尾段>.json 分文件（避免 PC 端清空竞争）
+     *  内容校验：非 { [ 开头（对象 toString/空串等坏内容）一律丢弃不落盘——
+     *  坏文件被 callApi 读到会 parse fail 报「无响应」，宁缺勿坏让轮询等好内容。
+     *  @return true = 实际落盘 */
+    private static boolean writeTaskResp(String api, String body) {
+        if (body == null || body.isEmpty()
+                || (body.charAt(0) != '{' && body.charAt(0) != '[')) {
+            logLimit("[task-resp] discard non-json body for " + api
+                    + " (len=" + (body == null ? -1 : body.length()) + ")");
+            return false;
+        }
+        writeCacheFile("rh_resp.json", body);
         String last = api == null ? "unknown" : api;
         int dot = last.lastIndexOf('.');
         if (dot >= 0) last = last.substring(dot + 1);
-        writeCacheFile("rh_resp_" + last + ".json", body == null ? "" : body);
+        writeCacheFile("rh_resp_" + last + ".json", body);
+        return true;
     }
 
     private static java.io.File cacheFile(String name) {

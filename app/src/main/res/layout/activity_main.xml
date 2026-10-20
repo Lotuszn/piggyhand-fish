@@ -105,7 +105,7 @@
                                     android:id="@+id/tvVersion"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="v1.1.0 · LSPosed"
+                                    android:text="v1.1.1 · LSPosed"
                                     android:textColor="@color/brand_deep"
                                     android:textSize="10sp"
                                     android:textStyle="bold" />
@@ -922,6 +922,451 @@
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content" />
                                 </LinearLayout>
+
+                            </LinearLayout>
+                        </LinearLayout>
+
+                        <!-- 🎒 背包功能折叠面板（第三个连体 Accordion，同强化功能结构） -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:background="@drawable/bg_glass"
+                            android:orientation="vertical">
+
+                            <LinearLayout
+                                android:id="@+id/drawerHead3"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:baselineAligned="false"
+                                android:clickable="true"
+                                android:focusable="true"
+                                android:foreground="@drawable/ripple_round"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingLeft="14dp"
+                                android:paddingRight="14dp"
+                                android:paddingTop="11dp"
+                                android:paddingBottom="11dp">
+
+                                <FrameLayout
+                                    android:layout_width="27dp"
+                                    android:layout_height="27dp"
+                                    android:background="@drawable/bg_icon_g">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_gravity="center"
+                                        android:includeFontPadding="false"
+                                        android:text="🎒"
+                                        android:textSize="13sp" />
+                                </FrameLayout>
+
+                                <TextView
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="10dp"
+                                    android:layout_weight="1"
+                                    android:text="背包功能"
+                                    android:textColor="@color/text_main"
+                                    android:textSize="13.5sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvDrawerArrow3"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginRight="14dp"
+                                    android:rotation="-90"
+                                    android:text="▼"
+                                    android:textColor="@color/text_sub"
+                                    android:textSize="8.5sp" />
+                            </LinearLayout>
+
+                            <LinearLayout
+                                android:id="@+id/drawerContent3"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:visibility="gone">
+
+                                <View
+                                    android:layout_width="match_parent"
+                                    android:layout_height="1dp"
+                                    android:layout_marginLeft="14dp"
+                                    android:layout_marginRight="14dp"
+                                    android:background="#0F17181C" />
+
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="vertical"
+                                    android:paddingLeft="13dp"
+                                    android:paddingRight="13dp"
+                                    android:paddingTop="9dp"
+                                    android:paddingBottom="9dp">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="背包自动使用"
+                                        android:textColor="@color/text_main"
+                                        android:textSize="12.5sp"
+                                        android:textStyle="bold" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="开关常开：每次打开闲鱼时自动执行；数量 -1 = 用到 0，0 = 不使用"
+                                        android:textColor="@color/text_sub"
+                                        android:textSize="9.5sp" />
+                                </LinearLayout>
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:gravity="center_vertical"
+                                    android:orientation="horizontal"
+                                    android:paddingLeft="13dp"
+                                    android:paddingRight="13dp"
+                                    android:paddingTop="9dp"
+                                    android:paddingBottom="9dp">
+
+                                    <LinearLayout
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="10dp"
+                                        android:layout_weight="1"
+                                        android:orientation="vertical">
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="好运骰"
+                                            android:textColor="@color/text_main"
+                                            android:textSize="12.5sp"
+                                            android:textStyle="bold" />
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:layout_marginTop="2dp"
+                                            android:text="1/6 点 · 地图掷骰前进收币"
+                                            android:textColor="@color/text_sub"
+                                            android:textSize="9.5sp" />
+                                    </LinearLayout>
+
+                                    <EditText
+                                        android:id="@+id/etBagLuck"
+                                        android:layout_width="52dp"
+                                        android:layout_height="wrap_content"
+                                        android:background="@drawable/bg_input"
+                                        android:gravity="center"
+                                        android:hint="数量"
+                                        android:inputType="numberSigned"
+                                        android:maxLines="1"
+                                        android:maxLength="4"
+                                        android:paddingLeft="4dp"
+                                        android:paddingRight="4dp"
+                                        android:textSize="11sp" />
+
+                                    <com.piggyhand.fish.LiquidSwitch
+                                        android:id="@+id/swBagLuck"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="8dp" />
+                                </LinearLayout>
+                                <View
+                                    android:layout_width="match_parent"
+                                    android:layout_height="1dp"
+                                    android:background="#0F17181C" />
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:gravity="center_vertical"
+                                    android:orientation="horizontal"
+                                    android:paddingLeft="13dp"
+                                    android:paddingRight="13dp"
+                                    android:paddingTop="9dp"
+                                    android:paddingBottom="9dp">
+
+                                    <LinearLayout
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="10dp"
+                                        android:layout_weight="1"
+                                        android:orientation="vertical">
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="八面骰"
+                                            android:textColor="@color/text_main"
+                                            android:textSize="12.5sp"
+                                            android:textStyle="bold" />
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:layout_marginTop="2dp"
+                                            android:text="1-8 点 · 地图掷骰前进收币"
+                                            android:textColor="@color/text_sub"
+                                            android:textSize="9.5sp" />
+                                    </LinearLayout>
+
+                                    <EditText
+                                        android:id="@+id/etBag8"
+                                        android:layout_width="52dp"
+                                        android:layout_height="wrap_content"
+                                        android:background="@drawable/bg_input"
+                                        android:gravity="center"
+                                        android:hint="数量"
+                                        android:inputType="numberSigned"
+                                        android:maxLines="1"
+                                        android:maxLength="4"
+                                        android:paddingLeft="4dp"
+                                        android:paddingRight="4dp"
+                                        android:textSize="11sp" />
+
+                                    <com.piggyhand.fish.LiquidSwitch
+                                        android:id="@+id/swBag8"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="8dp" />
+                                </LinearLayout>
+                                <View
+                                    android:layout_width="match_parent"
+                                    android:layout_height="1dp"
+                                    android:background="#0F17181C" />
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:gravity="center_vertical"
+                                    android:orientation="horizontal"
+                                    android:paddingLeft="13dp"
+                                    android:paddingRight="13dp"
+                                    android:paddingTop="9dp"
+                                    android:paddingBottom="9dp">
+
+                                    <LinearLayout
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="10dp"
+                                        android:layout_weight="1"
+                                        android:orientation="vertical">
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="十二面骰"
+                                            android:textColor="@color/text_main"
+                                            android:textSize="12.5sp"
+                                            android:textStyle="bold" />
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:layout_marginTop="2dp"
+                                            android:text="1-12 点 · 地图掷骰前进收币"
+                                            android:textColor="@color/text_sub"
+                                            android:textSize="9.5sp" />
+                                    </LinearLayout>
+
+                                    <EditText
+                                        android:id="@+id/etBag12"
+                                        android:layout_width="52dp"
+                                        android:layout_height="wrap_content"
+                                        android:background="@drawable/bg_input"
+                                        android:gravity="center"
+                                        android:hint="数量"
+                                        android:inputType="numberSigned"
+                                        android:maxLines="1"
+                                        android:maxLength="4"
+                                        android:paddingLeft="4dp"
+                                        android:paddingRight="4dp"
+                                        android:textSize="11sp" />
+
+                                    <com.piggyhand.fish.LiquidSwitch
+                                        android:id="@+id/swBag12"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="8dp" />
+                                </LinearLayout>
+                                <View
+                                    android:layout_width="match_parent"
+                                    android:layout_height="1dp"
+                                    android:background="#0F17181C" />
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:gravity="center_vertical"
+                                    android:orientation="horizontal"
+                                    android:paddingLeft="13dp"
+                                    android:paddingRight="13dp"
+                                    android:paddingTop="9dp"
+                                    android:paddingBottom="9dp">
+
+                                    <LinearLayout
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="10dp"
+                                        android:layout_weight="1"
+                                        android:orientation="vertical">
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="火箭骰子"
+                                            android:textColor="@color/text_main"
+                                            android:textSize="12.5sp"
+                                            android:textStyle="bold" />
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:layout_marginTop="2dp"
+                                            android:text="固定 10 点 · 地图掷骰前进收币"
+                                            android:textColor="@color/text_sub"
+                                            android:textSize="9.5sp" />
+                                    </LinearLayout>
+
+                                    <EditText
+                                        android:id="@+id/etBagRocket"
+                                        android:layout_width="52dp"
+                                        android:layout_height="wrap_content"
+                                        android:background="@drawable/bg_input"
+                                        android:gravity="center"
+                                        android:hint="数量"
+                                        android:inputType="numberSigned"
+                                        android:maxLines="1"
+                                        android:maxLength="4"
+                                        android:paddingLeft="4dp"
+                                        android:paddingRight="4dp"
+                                        android:textSize="11sp" />
+
+                                    <com.piggyhand.fish.LiquidSwitch
+                                        android:id="@+id/swBagRocket"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="8dp" />
+                                </LinearLayout>
+                                <View
+                                    android:layout_width="match_parent"
+                                    android:layout_height="1dp"
+                                    android:background="#0F17181C" />
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:gravity="center_vertical"
+                                    android:orientation="horizontal"
+                                    android:paddingLeft="13dp"
+                                    android:paddingRight="13dp"
+                                    android:paddingTop="9dp"
+                                    android:paddingBottom="9dp">
+
+                                    <LinearLayout
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="10dp"
+                                        android:layout_weight="1"
+                                        android:orientation="vertical">
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="双倍骰子"
+                                            android:textColor="@color/text_main"
+                                            android:textSize="12.5sp"
+                                            android:textStyle="bold" />
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:layout_marginTop="2dp"
+                                            android:text="2-12 点 · 地图掷骰前进收币"
+                                            android:textColor="@color/text_sub"
+                                            android:textSize="9.5sp" />
+                                    </LinearLayout>
+
+                                    <EditText
+                                        android:id="@+id/etBagDouble"
+                                        android:layout_width="52dp"
+                                        android:layout_height="wrap_content"
+                                        android:background="@drawable/bg_input"
+                                        android:gravity="center"
+                                        android:hint="数量"
+                                        android:inputType="numberSigned"
+                                        android:maxLines="1"
+                                        android:maxLength="4"
+                                        android:paddingLeft="4dp"
+                                        android:paddingRight="4dp"
+                                        android:textSize="11sp" />
+
+                                    <com.piggyhand.fish.LiquidSwitch
+                                        android:id="@+id/swBagDouble"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="8dp" />
+                                </LinearLayout>
+                                <View
+                                    android:layout_width="match_parent"
+                                    android:layout_height="1dp"
+                                    android:background="#0F17181C" />
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:gravity="center_vertical"
+                                    android:orientation="horizontal"
+                                    android:paddingLeft="13dp"
+                                    android:paddingRight="13dp"
+                                    android:paddingTop="9dp"
+                                    android:paddingBottom="9dp">
+
+                                    <LinearLayout
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="10dp"
+                                        android:layout_weight="1"
+                                        android:orientation="vertical">
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="刮刮卡"
+                                            android:textColor="@color/text_main"
+                                            android:textSize="12.5sp"
+                                            android:textStyle="bold" />
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:layout_marginTop="2dp"
+                                            android:text="权益直兑 · 直接刮出闲鱼币等奖励"
+                                            android:textColor="@color/text_sub"
+                                            android:textSize="9.5sp" />
+                                    </LinearLayout>
+
+                                    <EditText
+                                        android:id="@+id/etBagGgk"
+                                        android:layout_width="52dp"
+                                        android:layout_height="wrap_content"
+                                        android:background="@drawable/bg_input"
+                                        android:gravity="center"
+                                        android:hint="数量"
+                                        android:inputType="numberSigned"
+                                        android:maxLines="1"
+                                        android:maxLength="4"
+                                        android:paddingLeft="4dp"
+                                        android:paddingRight="4dp"
+                                        android:textSize="11sp" />
+
+                                    <com.piggyhand.fish.LiquidSwitch
+                                        android:id="@+id/swBagGgk"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="8dp" />
+                                </LinearLayout>
                             </LinearLayout>
                         </LinearLayout>
 
@@ -1337,7 +1782,7 @@
                                     android:id="@+id/tvGhVal"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="v1.1.0 ›"
+                                    android:text="v1.1.1 ›"
                                     android:textColor="@color/text_sub"
                                     android:textSize="11sp" />
                             </LinearLayout>

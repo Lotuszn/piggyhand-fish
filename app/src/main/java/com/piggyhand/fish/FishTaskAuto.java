@@ -44,6 +44,9 @@ public final class FishTaskAuto {
     // 10-17 两次真实点击抓包：version=3 固定、outId=客户端毫秒时间戳、locationBefore=上次位置
     private static final String MAP_INIT_API = "mtop.taobao.idle.treasure.hunt.map.init";
     private static final String MAP_ROLL_API = "mtop.taobao.idle.treasure.hunt.map.roll";
+    // 背包道具（10-20 协议定案）：list 拉背包；use=权益类直兑（刮刮卡）；骰子用 map.roll 掷（diceId=configId）
+    private static final String PROP_LIST_API = "mtop.taobao.idle.play.prop.list";
+    private static final String PROP_USE_API = "mtop.taobao.idle.play.prop.use";
     private static final String POLISH_API = "mtop.taobao.idle.item.polish";
     private static final String SHOP_BENEFIT_API = "mtop.taobao.idle.startup.shop.daily.benefit";
     private static final String LOTTERY_FEEDS_API = "mtop.taobao.idle.coin.lottery.feeds";
@@ -391,6 +394,7 @@ public final class FishTaskAuto {
                 if (pok) toast("✓ 玩一玩签到");
             }
             if (opt(extras, "mapRoll", true)) doMapRoll(); // 圈数挑战自动掷骰前进（10-17 抓包接入，默认开）
+            if (opt(extras, "bagUse", true)) doBagUse(); // 🎒 背包自动使用（10-20 协议链路：骰子 map.roll / 刮刮卡 prop.use，配置全关时零开销）
             if (doPolish) runPolish();
             if (doSold) report.append("[卖鱼] 跳过：钓场玩法在闲鱼 7.25.31 已移除（APK 内无 fishing 接口，旧版玩法已下线）\n");
             if (doShop) {
@@ -1204,6 +1208,173 @@ public final class FishTaskAuto {
         } catch (Throwable t) {
             report.append("[前进钓鱼] 异常 ").append(t).append('\n');
         }
+    }
+
+    /**
+     * 🎒 背包自动使用（10-20 协议链路定案）：骰子类走 map.roll 地图掷骰（diceId=configId，
+     * 服务端一把梭：扣道具+按点数行进+沿途收币）；刮刮卡走 prop.use 权益直兑（benefitResult）。
+     * 数量 N=用 N 个，-1=用到 0。幂等设计：以背包当前 amount 与目标差值驱动，无需进度持久化——
+     * 每次跑批只看「还剩多少、还要用多少」，新获得的道具也会被 -1 配置持续清掉。
+     */
+    private void doBagUse() {
+        try {
+            ConfigManager cfg = ConfigManager.load();
+            if (cfg == null) return;
+            Object[][] plans = {
+                    {"LUCKY_DICE", cfg.bagLuckOn, cfg.bagLuckNum, "好运骰"},
+                    {"SURFACE8_DICE", cfg.bag8On, cfg.bag8Num, "八面骰"},
+                    {"SURFACE12_DICE", cfg.bag12On, cfg.bag12Num, "十二面骰"},
+                    {"ROCKET_DICE", cfg.bagRocketOn, cfg.bagRocketNum, "火箭骰子"},
+                    {"DOUBLE_DICE", cfg.bagDoubleOn, cfg.bagDoubleNum, "双倍骰子"},
+                    {"BENEFIT_GGK", cfg.bagGgkOn, cfg.bagGgkNum, "刮刮卡"},
+            };
+            boolean anyOn = false;
+            for (Object[] p : plans) if ((Boolean) p[1]) { anyOn = true; break; }
+            if (!anyOn) return;
+
+            // 1. 拉背包（同 propType 可能多条记录：骰子取首个 configId，刮刮卡取首个记录 id）
+            org.json.JSONObject list = callApi(PROP_LIST_API, "1.0",
+                    objJson("bizCode", "coinMap", "fishAdCode", FISH_AD_CODE, "gps", DEFAULT_GPS), "背包列表");
+            org.json.JSONObject ld = list == null ? null : list.optJSONObject("data");
+            org.json.JSONArray infos = ld == null ? null : ld.optJSONArray("propInfos");
+            if (infos == null) {
+                report.append("[背包] 列表获取失败，跳过\n");
+                return;
+            }
+
+            // 2. 地图状态（骰子掷骰需要 location/mapVersion；无地图响应时骰子跳过、刮刮卡不受影响）
+            long location = 0;
+            String mapVersion = "11";
+            boolean mapOk = false;
+            org.json.JSONObject mi = callApi(MAP_INIT_API, "1.0",
+                    "{\"fishAdCode\":\"" + FISH_AD_CODE + "\",\"gps\":\"" + DEFAULT_GPS + "\",\"version\":4}",
+                    "背包地图");
+            org.json.JSONObject md = mi == null ? null : mi.optJSONObject("data");
+            org.json.JSONObject mu = md == null ? null : md.optJSONObject("userInfo");
+            if (mu != null) {
+                location = parseNum(mu.optString("location", "0"));
+                mapOk = true;
+            }
+            org.json.JSONArray mres = md == null ? null : md.optJSONArray("mapResource");
+            if (mres != null && mres.length() > 0) {
+                mapVersion = mres.optJSONObject(0).optString("mapVersion", mapVersion);
+            }
+
+            // 3. 逐道具执行
+            for (Object[] p : plans) {
+                String type = (String) p[0];
+                boolean on = (Boolean) p[1];
+                int num = (Integer) p[2];
+                String name = (String) p[3];
+                if (!on) continue;
+                int amount = 0;
+                String configId = null;
+                String recId = null;
+                for (int i = 0; i < infos.length(); i++) {
+                    org.json.JSONObject it = infos.optJSONObject(i);
+                    if (it == null || !type.equals(it.optString("propType"))) continue;
+                    amount += parseNum(it.optString("amount", "0"));
+                    if (configId == null) configId = it.optString("configId", null);
+                    if (recId == null) recId = it.optString("id", null);
+                }
+                if (configId == null || amount <= 0) {
+                    report.append("[背包] ").append(name).append(" 背包无货，跳过\n");
+                    continue;
+                }
+                int target = (num < 0) ? 0 : Math.max(0, amount - num);
+                if (amount <= target) {
+                    report.append("[背包] ").append(name).append(" 已达目标（剩 ").append(amount).append("）\n");
+                    continue;
+                }
+                boolean isDice = !"BENEFIT_GGK".equals(type);
+                if (isDice && !mapOk) {
+                    report.append("[背包] ").append(name).append(" 地图状态不可用，跳过\n");
+                    continue;
+                }
+                int use = amount - target;
+                int used = 0, steps = 0, coins = 0;
+                String lastErr = null;
+                int guard = 0;
+                while (used < use && guard++ < 120) {
+                    org.json.JSONObject r;
+                    if (isDice) {
+                        r = callApi(MAP_ROLL_API, "1.0",
+                                "{\"diceId\":" + configId + ",\"diceType\":\"" + type
+                                        + "\",\"fishAdCode\":\"" + FISH_AD_CODE + "\",\"gps\":\"" + DEFAULT_GPS
+                                        + "\",\"locationBefore\":" + location
+                                        + ",\"mapVersion\":\"" + mapVersion
+                                        + "\",\"outId\":" + System.currentTimeMillis() + ",\"version\":3}",
+                                "背包掷骰");
+                        String ret = firstRet(r);
+                        if (ret == null || !ret.contains("SUCCESS")) {
+                            lastErr = ret == null ? "无响应" : ret;
+                            break;
+                        }
+                        org.json.JSONObject rd = r.optJSONObject("data");
+                        int dr = rd == null ? 0 : parseNum(rd.optString("diceResult", "0"));
+                        steps += dr;
+                        location += dr; // 服务端按点数推进（10-20 三掷实测 12059+6=12065 连续吻合）
+                        coins += rollCoins(rd);
+                    } else {
+                        r = callApi(PROP_USE_API, "1.0",
+                                objJson("id", recId, "bizCode", "coinMap", "configId", configId,
+                                        "outId", "rh" + System.currentTimeMillis(),
+                                        "fishAdCode", FISH_AD_CODE, "gps", DEFAULT_GPS),
+                                "背包刮卡");
+                        String ret = firstRet(r);
+                        if (ret == null || !ret.contains("SUCCESS")) {
+                            lastErr = ret == null ? "无响应" : ret;
+                            break;
+                        }
+                        coins += ggkReward(r.optJSONObject("data"));
+                        sleep(400);
+                    }
+                    used++;
+                    sleep(1200); // 防频控节流
+                }
+                StringBuilder sb = new StringBuilder("[背包] ").append(name).append(" 使用 ").append(used)
+                        .append("/").append(use);
+                if (isDice) sb.append(" · 前进 ").append(steps).append(" 步");
+                sb.append(" · 收益 ").append(coins);
+                if (lastErr != null) sb.append(" · 中断:").append(lastErr);
+                report.append(sb).append('\n');
+                if (used > 0) toast("✓ 背包 " + name + " 用 " + used + " 个");
+                log("[bag-use] " + name + " used=" + used + "/" + use
+                        + (isDice ? " steps=" + steps : "") + " coins=" + coins
+                        + (lastErr != null ? " err=" + lastErr : ""));
+            }
+        } catch (Throwable t) {
+            report.append("[背包] 异常 ").append(t).append('\n');
+        }
+    }
+
+    /** roll 响应沿途收币合计（contentList coin + settleList treasureMapPoint；宝箱类延迟项不计入实收） */
+    private static int rollCoins(org.json.JSONObject rd) {
+        if (rd == null) return 0;
+        int c = 0;
+        org.json.JSONArray cl = rd.optJSONArray("contentList");
+        if (cl != null) for (int i = 0; i < cl.length(); i++) {
+            org.json.JSONObject o = cl.optJSONObject(i);
+            if (o != null && "coin".equals(o.optString("contentType")))
+                c += parseNum(o.optString("rewardNum", "0"));
+        }
+        org.json.JSONArray sl = rd.optJSONArray("settleList");
+        if (sl != null) for (int i = 0; i < sl.length(); i++) {
+            org.json.JSONObject o = sl.optJSONObject(i);
+            if (o != null && "treasureMapPoint".equals(o.optString("contentType")))
+                c += parseNum(o.optString("rewardNum", "0"));
+        }
+        return c;
+    }
+
+    /** prop.use 刮刮卡收益（attributes.benefitResult.extraData.amount；无 benefitResult=0） */
+    private static int ggkReward(org.json.JSONObject rd) {
+        if (rd == null) return 0;
+        org.json.JSONObject at = rd.optJSONObject("attributes");
+        org.json.JSONObject br = at == null ? null : at.optJSONObject("benefitResult");
+        if (br == null) return 0;
+        org.json.JSONObject ex = br.optJSONObject("extraData");
+        return ex == null ? 0 : parseNum(ex.optString("amount", "0"));
     }
 
     /** 步数读取兜底：roll 响应在 data 顶层，init 响应在 data.userInfo；字段字符串/数值不定型，parseNum 宽松解 */

@@ -52,6 +52,13 @@ public class ConfigManager {
     public boolean pond = true;
     /** 💬 禁用聊天页左滑进对方主页手势（RhChatHook 双层拦截：容器触摸+主页跳转） */
     public boolean noChatSwipe = false;
+    /* 🎒 背包自动使用（FishTaskAuto.doBagUse）：骰子走 map.roll 地图掷骰，刮刮卡走 prop.use；数量 -1=用到 0 */
+    public boolean bagLuckOn = false;    public int bagLuckNum = 0;      // 好运骰 LUCKY_DICE
+    public boolean bag8On = false;       public int bag8Num = 0;         // 八面骰 SURFACE8_DICE
+    public boolean bag12On = false;      public int bag12Num = 0;        // 十二面骰 SURFACE12_DICE
+    public boolean bagRocketOn = false;  public int bagRocketNum = 0;    // 火箭骰 ROCKET_DICE
+    public boolean bagDoubleOn = false;  public int bagDoubleNum = 0;    // 双倍骰 DOUBLE_DICE
+    public boolean bagGgkOn = false;     public int bagGgkNum = 0;       // 刮刮卡 BENEFIT_GGK
     /** 🐟 鱼塘任务引擎参数：城市区号 + 定位（RhPondTask 用） */
     public String pondFishAdCode = "500107";
     public String pondGps = "29.524374,106.471423";
@@ -128,6 +135,12 @@ public class ConfigManager {
             c.fishMedia = o.optBoolean("fishMedia", true);
             c.pond = o.optBoolean("pond", true);
             c.noChatSwipe = o.optBoolean("noChatSwipe", false);
+            c.bagLuckOn = o.optBoolean("bagLuckOn", false);       c.bagLuckNum = o.optInt("bagLuckNum", 0);
+            c.bag8On = o.optBoolean("bag8On", false);             c.bag8Num = o.optInt("bag8Num", 0);
+            c.bag12On = o.optBoolean("bag12On", false);           c.bag12Num = o.optInt("bag12Num", 0);
+            c.bagRocketOn = o.optBoolean("bagRocketOn", false);   c.bagRocketNum = o.optInt("bagRocketNum", 0);
+            c.bagDoubleOn = o.optBoolean("bagDoubleOn", false);   c.bagDoubleNum = o.optInt("bagDoubleNum", 0);
+            c.bagGgkOn = o.optBoolean("bagGgkOn", false);         c.bagGgkNum = o.optInt("bagGgkNum", 0);
             c.pondFishAdCode = o.optString("pondFishAdCode", "500107");
             c.pondGps = o.optString("pondGps", "29.524374,106.471423");
         c.polish = o.optBoolean("polish", true);
