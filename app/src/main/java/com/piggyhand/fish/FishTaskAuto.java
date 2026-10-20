@@ -37,9 +37,8 @@ public final class FishTaskAuto {
     private static final String AD_EVENT_QUERY_API = "mtop.taobao.idle.play.ad.event.query";
     private static final String SIGNIN_API = "mtop.taobao.idle.coin.signin";
     // 玩一玩/圈数挑战面板的 7 天签到（与任务面板 coin.signin 是两个独立入口）。
-    // 10-17 抓包接入：参数全量复用真实点击抓包值（asac/gps/fishAdCode 复用有夺宝先例）
+    // 1.1.2：asac/fishAdCode/gps 全部动态取自本机捕获（RhLocationContext），缺则省略字段
     private static final String PLAY_SIGN_API = "mtop.taobao.idle.play.sign.in";
-    private static final String PLAY_SIGN_DATA = "{\"asac\":\"2A23B272CW28KVB60F0O51\",\"fishAdCode\":\"500107\",\"gps\":\"29.524192,106.471432\",\"playId\":4,\"usertoken\":\"\"}";
     // 圈数挑战寻宝地图：init 查状态（location/remainStep/mapVersion），roll 掷骰前进（沿途奖励自动结算）。
     // 10-17 两次真实点击抓包：version=3 固定、outId=客户端毫秒时间戳、locationBefore=上次位置
     private static final String MAP_INIT_API = "mtop.taobao.idle.treasure.hunt.map.init";
@@ -52,10 +51,15 @@ public final class FishTaskAuto {
     private static final String LOTTERY_FEEDS_API = "mtop.taobao.idle.coin.lottery.feeds";
     private static final String LOTTERY_BET_API = "mtop.taobao.idle.coin.lottery.bet";
 
-    // 夺宝页面环境参数（10-16 实测抓包值，服务端接受复用）
-    private static final String DEFAULT_GPS = "29.524192,106.471432";
-    private static final String FISH_AD_CODE = "500107";
-    private static final String DEFAULT_ASAC = "3A25C045163E7A9NHV1SCK";
+    /** 玩一玩签到请求体动态拼装（1.1.2）：asac/fishAdCode/gps 均为本机捕获值，缺则省略字段 */
+    private static String playSignData() {
+        StringBuilder sb = new StringBuilder("{");
+        String asac = RhLocationContext.asac();
+        if (asac != null) sb.append("\"asac\":\"").append(asac).append("\",");
+        sb.append(RhLocationContext.jsonPair());
+        sb.append("\"playId\":4,\"usertoken\":\"\"}");
+        return sb.toString();
+    }
 
     private static final int REQ_TIMEOUT_S = 30;
     private static final int BROWSE_MAX_STEPS = 60;   // 浏览任务单次最多上报次数保护
@@ -384,7 +388,7 @@ public final class FishTaskAuto {
             }
             if (doSignin) {
                 // 圈数挑战 7 天签到（独立入口，+50/80/100 递进奖励）
-                org.json.JSONObject psn = callApi(PLAY_SIGN_API, "1.0", PLAY_SIGN_DATA, "玩一玩签到");
+                org.json.JSONObject psn = callApi(PLAY_SIGN_API, "1.0", playSignData(), "玩一玩签到");
                 String pret = firstRet(psn);
                 boolean pok = pret != null && pret.contains("SUCCESS");
                 boolean awarded = psn != null && psn.optJSONObject("data") != null
@@ -887,7 +891,7 @@ public final class FishTaskAuto {
      */
     private void runTreasureBetTask(String deliveryId, String title, List<String> done, List<String> fail) {
         org.json.JSONObject feeds = callApi(LOTTERY_FEEDS_API, "1.0",
-                objJson("fishAdCode", FISH_AD_CODE, "gps", DEFAULT_GPS), "夺宝 feeds " + title);
+                objJson("fishAdCode", RhLocationContext.fishAdCode(), "gps", RhLocationContext.gps()), "夺宝 feeds " + title);
         String signUpId = null;
         String fRet = firstRet(feeds);
         if (feeds != null && fRet != null && fRet.contains("SUCCESS")) {
@@ -907,8 +911,8 @@ public final class FishTaskAuto {
         String betRet = null;
         for (int i = 0; i < 3 && !abort; i++) {
             org.json.JSONObject bet = callApi(LOTTERY_BET_API, "1.0",
-                    objJson("asac", DEFAULT_ASAC, "attentionSuc", "false", "betNumber", "1",
-                            "fishAdCode", FISH_AD_CODE, "gps", DEFAULT_GPS, "signUpId", signUpId),
+                    objJson("asac", RhLocationContext.asac(), "attentionSuc", "false", "betNumber", "1",
+                            "fishAdCode", RhLocationContext.fishAdCode(), "gps", RhLocationContext.gps(), "signUpId", signUpId),
                     "夺宝 bet " + title + (i > 0 ? "#" + (i + 1) : ""));
             betRet = firstRet(bet);
             if (betRet != null && betRet.contains("SUCCESS")) break;
@@ -984,7 +988,7 @@ public final class FishTaskAuto {
                     : "/storage/emulated/0/Android/data/com.taobao.idlefish/cache";
             FishTaskAuto inst = new FishTaskAuto(cl, dir);
             org.json.JSONObject r = inst.callApi(MAP_INIT_API, "1.0",
-                    "{\"fishAdCode\":\"" + FISH_AD_CODE + "\",\"gps\":\"" + DEFAULT_GPS + "\",\"version\":4}",
+                    "{" + RhLocationContext.jsonPair() + "\"version\":4}",
                     "币余额");
             org.json.JSONObject d = r == null ? null : r.optJSONObject("data");
             if (d == null) return;
@@ -1084,7 +1088,7 @@ public final class FishTaskAuto {
     private void doMapRoll() {
         try {
             org.json.JSONObject init = callApi(MAP_INIT_API, "1.0",
-                    "{\"fishAdCode\":\"" + FISH_AD_CODE + "\",\"gps\":\"" + DEFAULT_GPS + "\",\"version\":4}",
+                    "{" + RhLocationContext.jsonPair() + "\"version\":4}",
                     "地图状态");
             org.json.JSONObject d = init == null ? null : init.optJSONObject("data");
             org.json.JSONObject ui = d == null ? null : d.optJSONObject("userInfo");
@@ -1109,8 +1113,9 @@ public final class FishTaskAuto {
             int rolls = 0, steps = 0, coins = 0, reInits = 0;
             String lastErr = null;
             while (remain > 0 && rolls < 60) {
-                String data = "{\"diceType\":\"FORWARD_STEP\",\"fishAdCode\":\"" + FISH_AD_CODE
-                        + "\",\"gps\":\"" + DEFAULT_GPS + "\",\"locationBefore\":" + location
+                String data = "{\"diceType\":\"FORWARD_STEP\","
+                        + RhLocationContext.jsonPair()
+                        + "\"locationBefore\":" + location
                         + ",\"mapVersion\":\"" + mapVersion + "\",\"outId\":" + System.currentTimeMillis()
                         + ",\"version\":3}";
                 org.json.JSONObject r = callApi(MAP_ROLL_API, "1.0", data, "前进掷骰");
@@ -1158,7 +1163,7 @@ public final class FishTaskAuto {
                     }
                     reInits++;
                     org.json.JSONObject ir = callApi(MAP_INIT_API, "1.0",
-                            "{\"fishAdCode\":\"" + FISH_AD_CODE + "\",\"gps\":\"" + DEFAULT_GPS + "\",\"version\":4}",
+                            "{" + RhLocationContext.jsonPair() + "\"version\":4}",
                             "地图重试");
                     org.json.JSONObject dr = ir == null ? null : ir.optJSONObject("data");
                     org.json.JSONObject ur = dr == null ? null : dr.optJSONObject("userInfo");
@@ -1179,7 +1184,7 @@ public final class FishTaskAuto {
                 }
                 reInits++;
                 org.json.JSONObject i2 = callApi(MAP_INIT_API, "1.0",
-                        "{\"fishAdCode\":\"" + FISH_AD_CODE + "\",\"gps\":\"" + DEFAULT_GPS + "\",\"version\":4}",
+                        "{" + RhLocationContext.jsonPair() + "\"version\":4}",
                         "地图刷新");
                 org.json.JSONObject d2 = i2 == null ? null : i2.optJSONObject("data");
                 org.json.JSONObject u2 = d2 == null ? null : d2.optJSONObject("userInfo");
@@ -1234,7 +1239,7 @@ public final class FishTaskAuto {
 
             // 1. 拉背包（同 propType 可能多条记录：骰子取首个 configId，刮刮卡取首个记录 id）
             org.json.JSONObject list = callApi(PROP_LIST_API, "1.0",
-                    objJson("bizCode", "coinMap", "fishAdCode", FISH_AD_CODE, "gps", DEFAULT_GPS), "背包列表");
+                    objJson("bizCode", "coinMap", "fishAdCode", RhLocationContext.fishAdCode(), "gps", RhLocationContext.gps()), "背包列表");
             org.json.JSONObject ld = list == null ? null : list.optJSONObject("data");
             org.json.JSONArray infos = ld == null ? null : ld.optJSONArray("propInfos");
             if (infos == null) {
@@ -1247,7 +1252,7 @@ public final class FishTaskAuto {
             String mapVersion = "11";
             boolean mapOk = false;
             org.json.JSONObject mi = callApi(MAP_INIT_API, "1.0",
-                    "{\"fishAdCode\":\"" + FISH_AD_CODE + "\",\"gps\":\"" + DEFAULT_GPS + "\",\"version\":4}",
+                    "{" + RhLocationContext.jsonPair() + "\"version\":4}",
                     "背包地图");
             org.json.JSONObject md = mi == null ? null : mi.optJSONObject("data");
             org.json.JSONObject mu = md == null ? null : md.optJSONObject("userInfo");
@@ -1299,9 +1304,8 @@ public final class FishTaskAuto {
                     org.json.JSONObject r;
                     if (isDice) {
                         r = callApi(MAP_ROLL_API, "1.0",
-                                "{\"diceId\":" + configId + ",\"diceType\":\"" + type
-                                        + "\",\"fishAdCode\":\"" + FISH_AD_CODE + "\",\"gps\":\"" + DEFAULT_GPS
-                                        + "\",\"locationBefore\":" + location
+                                "{\"diceId\":" + configId + ",\"diceType\":\"" + type + "\","
+                                        + RhLocationContext.jsonPair() + "\"locationBefore\":" + location
                                         + ",\"mapVersion\":\"" + mapVersion
                                         + "\",\"outId\":" + System.currentTimeMillis() + ",\"version\":3}",
                                 "背包掷骰");
@@ -1319,7 +1323,7 @@ public final class FishTaskAuto {
                         r = callApi(PROP_USE_API, "1.0",
                                 objJson("id", recId, "bizCode", "coinMap", "configId", configId,
                                         "outId", "rh" + System.currentTimeMillis(),
-                                        "fishAdCode", FISH_AD_CODE, "gps", DEFAULT_GPS),
+                                        "fishAdCode", RhLocationContext.fishAdCode(), "gps", RhLocationContext.gps()),
                                 "背包刮卡");
                         String ret = firstRet(r);
                         if (ret == null || !ret.contains("SUCCESS")) {
@@ -1531,7 +1535,9 @@ public final class FishTaskAuto {
 
     private void claimOne(String deliveryId, String title, List<String> done, List<String> fail) {
         org.json.JSONObject resp = callApi(TASK_BENEFIT_API, "1.0",
-                objJson("sceneId", "496", "deliveryId", deliveryId), "领奖 " + title);
+                objJson("sceneId", "496", "deliveryId", deliveryId,
+                        "fishAdCode", RhLocationContext.fishAdCode(), "gps", RhLocationContext.gps()),
+                "领奖 " + title);
         String ret = firstRet(resp);
         String rewardDesc = "";
         if (resp != null) {
