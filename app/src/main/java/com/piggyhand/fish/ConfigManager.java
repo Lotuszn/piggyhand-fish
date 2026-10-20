@@ -59,9 +59,9 @@ public class ConfigManager {
     public boolean bagRocketOn = false;  public int bagRocketNum = 0;    // 火箭骰 ROCKET_DICE
     public boolean bagDoubleOn = false;  public int bagDoubleNum = 0;    // 双倍骰 DOUBLE_DICE
     public boolean bagGgkOn = false;     public int bagGgkNum = 0;       // 刮刮卡 BENEFIT_GGK
-    /** 🐟 鱼塘任务引擎参数：城市区号 + 定位（RhPondTask 用） */
-    public String pondFishAdCode = "500107";
-    public String pondGps = "29.524374,106.471423";
+    /** 🐟 鱼塘任务引擎参数：城市区号 + 定位（RhPondTask 用）。空串=不覆盖，走 RhLocationContext 动态捕获 */
+    public String pondFishAdCode = "";
+    public String pondGps = "";
     public String scoutPattern = "reward|bonus|coin";
     public int maxScoutMethods = 400;
 
@@ -141,8 +141,11 @@ public class ConfigManager {
             c.bagRocketOn = o.optBoolean("bagRocketOn", false);   c.bagRocketNum = o.optInt("bagRocketNum", 0);
             c.bagDoubleOn = o.optBoolean("bagDoubleOn", false);   c.bagDoubleNum = o.optInt("bagDoubleNum", 0);
             c.bagGgkOn = o.optBoolean("bagGgkOn", false);         c.bagGgkNum = o.optInt("bagGgkNum", 0);
-            c.pondFishAdCode = o.optString("pondFishAdCode", "500107");
-            c.pondGps = o.optString("pondGps", "29.524374,106.471423");
+            c.pondFishAdCode = o.optString("pondFishAdCode", "");
+            c.pondGps = o.optString("pondGps", "");
+            // 1.1.2 迁移：旧版内置默认值（重庆）视为未配置，改走动态定位
+            if ("500107".equals(c.pondFishAdCode)) c.pondFishAdCode = "";
+            if ("29.524374,106.471423".equals(c.pondGps)) c.pondGps = "";
         c.polish = o.optBoolean("polish", true);
             c.scoutPattern = o.optString("scoutPattern", "reward|bonus|coin");
             c.maxScoutMethods = o.optInt("maxScoutMethods", 400);

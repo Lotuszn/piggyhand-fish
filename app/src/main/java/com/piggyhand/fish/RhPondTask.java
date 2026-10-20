@@ -96,15 +96,13 @@ public final class RhPondTask {
         }
     }
 
-    /** 城市区号 + 定位（ConfigManager 可用 pondFishAdCode / pondGps 覆盖） */
-    private static final String DEF_FISH = "500107";
-    private static final String DEF_GPS = "29.524374,106.471423";
+    /** 城市区号 + 定位：默认走 RhLocationContext 动态捕获（ConfigManager pondFishAdCode/pondGps 可手动覆盖） */
 
     /** 后台线程调用；返回报告全文（同时写 rh_tasks_pond.txt） */
     public static String run(Context ctx) {
         long t0 = System.currentTimeMillis();
         StringBuilder sb = new StringBuilder();
-        String fish = DEF_FISH, gps = DEF_GPS;
+        String fish = RhLocationContext.fishAdCode(), gps = RhLocationContext.gps();
         try {
             ConfigManager cfg = ConfigManager.load();
             if (cfg != null) {
@@ -116,14 +114,14 @@ public final class RhPondTask {
         } catch (Throwable ignored) {
         }
         sb.append("🐟 鱼塘任务报告 ").append(now()).append('\n');
-        sb.append("fishAdCode=").append(fish).append(" gps=").append(gps).append('\n');
+        sb.append("fishAdCode=").append(fish == null ? "(动态缺省)" : fish)
+                .append(" gps=").append(gps == null ? "(动态缺省)" : gps).append('\n');
 
         /* ---------- 1. 任务列表 ---------- */
         String showBody = callAndWait(ctx,
                 "mtop.taobao.idle.oliver.show", "2.0",
-                "{\"activityId\":\"104042\",\"extend\":{},\"fishAdCode\":\"" + fish
-                        + "\",\"gps\":\"" + gps
-                        + "\",\"needBenefits\":true,\"needDetails\":true,\"needHadWin\":true,"
+                "{\"activityId\":\"104042\",\"extend\":{}," + RhLocationContext.jsonPair()
+                        + "\"needBenefits\":true,\"needDetails\":true,\"needHadWin\":true,"
                         + "\"showEmptyInventory\":false,\"withInventoryDetail\":false}",
                 "show", 6000);
         JSONObject showJson = parse(showBody);
@@ -255,9 +253,8 @@ public final class RhPondTask {
         /* ---------- 4. 复核 ---------- */
         String show2 = callAndWait(ctx,
                 "mtop.taobao.idle.oliver.show", "2.0",
-                "{\"activityId\":\"104042\",\"extend\":{},\"fishAdCode\":\"" + fish
-                        + "\",\"gps\":\"" + gps
-                        + "\",\"needBenefits\":true,\"needDetails\":true,\"needHadWin\":true,"
+                "{\"activityId\":\"104042\",\"extend\":{}," + RhLocationContext.jsonPair()
+                        + "\"needBenefits\":true,\"needDetails\":true,\"needHadWin\":true,"
                         + "\"showEmptyInventory\":false,\"withInventoryDetail\":false}",
                 "show", 6000);
         JSONObject sj2 = parse(show2);

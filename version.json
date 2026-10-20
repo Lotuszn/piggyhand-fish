@@ -1,6 +1,6 @@
 {
-  "latest": "1.1.1",
+  "latest": "1.1.2",
   "url": "https://github.com/Lotuszn/piggyhand-fish/releases/latest",
   "cnUrl": "https://gitee.com/lotuszn/piggyhand-fish/releases",
-  "notes": "v1.1.1 更新（v1.1.0 → v1.1.1）· 新增🎒背包功能：主页第三个功能面板，好运骰/八面骰/十二面骰/火箭骰/双倍骰/刮刮卡六种道具自定义数量+开关（-1=用到0为止，0=不使用），开关常开每次打开闲鱼自动执行，骰子走真实掷骰链路推进地图领闲鱼币；修复闲鱼7.28.60全部任务无响应（引擎级：响应捕获双通道重建+坏内容拦截+兜底自愈），老版本闲鱼7.21.x同类问题一并治愈。安装：覆盖安装重启闲鱼即可"
+  "notes": "v1.1.2 更新：凭空想象修复bug"
 }
