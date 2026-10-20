@@ -69,10 +69,11 @@ public final class ApiDirect {
             /* 4. sender.send(req, null) —— callback 传 null 合法 */
             for (Method m : sender.getClass().getMethods()) {
                 if ("send".equals(m.getName()) && m.getParameterTypes().length == 2) {
+                    // 兼容版自检：先标记再发送——setApiName 在 send 内部同步触发，
+                    // 若 send 之后才标记，清除逻辑永远追不上导致 WARN 恒误报（一加用户日志实证）
+                    FishMtopHook.noteDirectSent(api);
                     m.invoke(sender, req, null);
                     log("[direct] sent: " + api + " v" + version + " via " + sender.getClass().getName());
-                    // 兼容版自检：4s 内未进入 mtop 构建层则告警（send 静默失败个案）
-                    FishMtopHook.noteDirectSent(api);
                     return true;
                 }
             }
