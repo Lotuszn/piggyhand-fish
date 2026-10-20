@@ -105,7 +105,7 @@
                                     android:id="@+id/tvVersion"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="v1.1.1 · LSPosed"
+                                    android:text="v1.1.2 · LSPosed"
                                     android:textColor="@color/brand_deep"
                                     android:textSize="10sp"
                                     android:textStyle="bold" />
@@ -1782,7 +1782,7 @@
                                     android:id="@+id/tvGhVal"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="v1.1.1 ›"
+                                    android:text="v1.1.2 ›"
                                     android:textColor="@color/text_sub"
                                     android:textSize="11sp" />
                             </LinearLayout>
