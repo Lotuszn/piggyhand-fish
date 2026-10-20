@@ -76,11 +76,19 @@ public class MainActivity extends Activity {
     private View drawerHead2, drawerContent2;
     private TextView tvDrawerArrow2;
     private boolean drawerOpen2 = false;
+    private View drawerHead3, drawerContent3;
+    private TextView tvDrawerArrow3;
+    /** 🎒 背包功能第三个折叠面板状态 */
+    private boolean drawerOpen3 = false;
     /** 抽屉动画互斥标记（true=动画进行中忽略点击） */
     private final java.util.concurrent.atomic.AtomicBoolean drawerBusy = new java.util.concurrent.atomic.AtomicBoolean(false);
     private final java.util.concurrent.atomic.AtomicBoolean drawerBusy2 = new java.util.concurrent.atomic.AtomicBoolean(false);
+    private final java.util.concurrent.atomic.AtomicBoolean drawerBusy3 = new java.util.concurrent.atomic.AtomicBoolean(false);
     private View linkPicker; // 下载渠道选择弹层（非空 = 正在显示）
     private LiquidSwitch swAutoRun, swMtop, swAds, swScout, swPolish, swToast, swFishMedia, swPondTask, swNoChatSwipe;
+    // 🎒 背包自动使用：6 道具行（输入框+开关）
+    private android.widget.EditText etBagLuck, etBag8, etBag12, etBagRocket, etBagDouble, etBagGgk;
+    private LiquidSwitch swBagLuck, swBag8, swBag12, swBagRocket, swBagDouble, swBagGgk;
     private EditText etPattern, etMax;
     private Button btnRun, btnRefresh, btnExportLog;
 
@@ -146,9 +154,19 @@ public class MainActivity extends Activity {
         drawerHead2 = findViewById(R.id.drawerHead2);
         drawerContent2 = findViewById(R.id.drawerContent2);
         tvDrawerArrow2 = findViewById(R.id.tvDrawerArrow2);
+        drawerHead3 = findViewById(R.id.drawerHead3);
+        drawerContent3 = findViewById(R.id.drawerContent3);
+        tvDrawerArrow3 = findViewById(R.id.tvDrawerArrow3);
         swFishMedia = findViewById(R.id.swFishMedia);
         swPondTask = findViewById(R.id.swPondTask);
         swNoChatSwipe = findViewById(R.id.swNoChatSwipe);
+        // 🎒 背包功能控件
+        etBagLuck = findViewById(R.id.etBagLuck);       swBagLuck = findViewById(R.id.swBagLuck);
+        etBag8 = findViewById(R.id.etBag8);             swBag8 = findViewById(R.id.swBag8);
+        etBag12 = findViewById(R.id.etBag12);           swBag12 = findViewById(R.id.swBag12);
+        etBagRocket = findViewById(R.id.etBagRocket);   swBagRocket = findViewById(R.id.swBagRocket);
+        etBagDouble = findViewById(R.id.etBagDouble);   swBagDouble = findViewById(R.id.swBagDouble);
+        etBagGgk = findViewById(R.id.etBagGgk);         swBagGgk = findViewById(R.id.swBagGgk);
         // 鱼塘任务副标题：「未完善，谨慎开启」染红（8 字符，span 前后含逗号）
         android.widget.TextView tvPondWarn = findViewById(R.id.tvPondWarn);
         String pw = tvPondWarn.getText().toString();
@@ -231,6 +249,13 @@ public class MainActivity extends Activity {
         swNoChatSwipe.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
             @Override public void onToggle(boolean on) { put("noChatSwipe", on); }
         });
+        // 🎒 背包自动使用：初始态 + 绑定（数量 -1=用到0，留空/0=不用；开关打开立即执行一轮）
+        installBag(cfg, etBagLuck, swBagLuck, "bagLuckOn", "bagLuckNum", "好运骰");
+        installBag(cfg, etBag8, swBag8, "bag8On", "bag8Num", "八面骰");
+        installBag(cfg, etBag12, swBag12, "bag12On", "bag12Num", "十二面骰");
+        installBag(cfg, etBagRocket, swBagRocket, "bagRocketOn", "bagRocketNum", "火箭骰子");
+        installBag(cfg, etBagDouble, swBagDouble, "bagDoubleOn", "bagDoubleNum", "双倍骰子");
+        installBag(cfg, etBagGgk, swBagGgk, "bagGgkOn", "bagGgkNum", "刮刮卡");
         // 🐟 鱼塘任务：触发闲鱼进程内 RhPondTask（AWARD 批量领+签到气泡），报告弹窗
         findViewById(R.id.rowPondTask).setOnClickListener(new View.OnClickListener() {
             @Override
@@ -289,6 +314,18 @@ public class MainActivity extends Activity {
                 tvDrawerArrow2.animate().rotation(drawerOpen2 ? 0f : -90f)
                         .setDuration(drawerOpen2 ? 260 : 200).start();
                 animateDrawer((ViewGroup) drawerContent2, drawerOpen2, drawerBusy2);
+            }
+        });
+
+        // ===== 🎒 背包功能抽屉：第三个连体折叠 =====
+        drawerHead3.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (drawerBusy3.get()) return;
+                drawerOpen3 = !drawerOpen3;
+                tvDrawerArrow3.animate().rotation(drawerOpen3 ? 0f : -90f)
+                        .setDuration(drawerOpen3 ? 260 : 200).start();
+                animateDrawer((ViewGroup) drawerContent3, drawerOpen3, drawerBusy3);
             }
         });
 
@@ -1227,6 +1264,69 @@ public class MainActivity extends Activity {
     private int dp(float v) {
         return (int) (TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v,
                 getResources().getDisplayMetrics()) + 0.5f);
+    }
+
+    /* ============================ 🎒 背包自动使用 ============================ */
+
+    /** 背包行绑定：初始态回填、开关切换保存并立即执行一轮、输入框失焦保存 */
+    private void installBag(JSONObject cfg, final android.widget.EditText et, final LiquidSwitch sw,
+                            final String onKey, final String numKey, final String label) {
+        int num = cfg.optInt(numKey, 0);
+        et.setText(String.valueOf(num)); // 默认显示 0（0=不使用，-1=用到0）
+        sw.setOnSilent(cfg.optBoolean(onKey, false));
+        sw.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+            @Override public void onToggle(boolean on) {
+                put(onKey, on);
+                put(numKey, bagNumOf(et));
+                if (on) kickRun(label);
+            }
+        });
+        et.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override public void onFocusChange(View v, boolean hasFocus) {
+                if (!hasFocus) {
+                    int nv = bagNumOf(et);
+                    et.setText(String.valueOf(nv)); // 失焦校正显示（-2→-1、1000→999、空→0）
+                    put(numKey, nv);
+                }
+            }
+        });
+    }
+
+    /** 背包数量框解析：空=0（不使用）；合法区间 [-1, 999]，越界自动收敛（-2→-1、1000→999）；非法输入按 0 处理 */
+    private static int bagNumOf(android.widget.EditText et) {
+        try {
+            String s = et.getText().toString().trim();
+            if (s.isEmpty()) return 0;
+            int v;
+            try {
+                v = Integer.parseInt(s);
+            } catch (Throwable neg) {
+                return 0; // 纯"-"或残缺输入
+            }
+            if (v < -1) v = -1;   // 最小 -1（用到 0）
+            if (v > 999) v = 999; // 最大 999
+            return v;
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    /** 背包开关打开后立即执行一轮（socket RUN；闲鱼未运行则提示，下次打开闲鱼自动执行） */
+    private void kickRun(final String label) {
+        new Thread(new Runnable() {
+            @Override public void run() {
+                final String resp = socketCmd("RUN");
+                runUi(new Runnable() {
+                    @Override public void run() {
+                        boolean ok = resp != null && resp.contains("OK");
+                        Toast.makeText(MainActivity.this,
+                                ok ? "🎒 已开始执行，" + label + " 将自动使用"
+                                        : "暂未连通闲鱼（打开闲鱼后将自动执行）",
+                                Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+        }, "rh-bag-kick").start();
     }
 
     private void put(String key, Object val) {
