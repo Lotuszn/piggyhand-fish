@@ -59,6 +59,14 @@ public class ConfigManager {
     public boolean bagRocketOn = false;  public int bagRocketNum = 0;    // 火箭骰 ROCKET_DICE
     public boolean bagDoubleOn = false;  public int bagDoubleNum = 0;    // 双倍骰 DOUBLE_DICE
     public boolean bagGgkOn = false;     public int bagGgkNum = 0;       // 刮刮卡 BENEFIT_GGK
+    /** 🖼 显示更多商品：首页瀑布流列数覆盖（RhFeedCols 改 vlayout StaggeredGrid 列数）。
+     *  cols = 列数，2~4；2 = 原样（闲鱼默认双列） */
+    public boolean feedColsOn = false;
+    public int feedCols = 3;
+    /** 🖼 UI 比例：按应用覆盖显示密度（RhUiScale 改 Resources.updateConfiguration 的 densityDpi）。
+     *  percent = 界面缩放百分比，40~100；100 = 原样 */
+    public boolean uiScaleOn = false;
+    public int uiScalePercent = 80;
     /** 🐟 鱼塘任务引擎参数：城市区号 + 定位（RhPondTask 用）。空串=不覆盖，走 RhLocationContext 动态捕获 */
     public String pondFishAdCode = "";
     public String pondGps = "";
@@ -93,7 +101,18 @@ public class ConfigManager {
                 String line;
                 while ((line = br.readLine()) != null) sb.append(line);
                 br.close();
-                return parse(sb.toString(), OVERRIDE_PATH);
+                String json = sb.toString().trim();
+                ConfigManager c = parse(json, OVERRIDE_PATH);
+                if (c != null) return c;
+                // 容错（v1.1.4）：su 并发写入可能多出尾部残字（实测出现过结尾 "}}"），
+                // 导致 JSONObject 解析失败 → 依次回退到前一个 '}' 再试，最多退 3 次
+                for (int i = 0, cut = json.length(); i < 3; i++) {
+                    cut = json.lastIndexOf('}', cut - 1);
+                    if (cut <= 0) break;
+                    c = parse(json.substring(0, cut + 1), OVERRIDE_PATH + "#repair" + i);
+                    if (c != null) break;
+                }
+                if (c != null) return c;
             }
         } catch (Throwable ignored) {
         }
@@ -141,6 +160,10 @@ public class ConfigManager {
             c.bagRocketOn = o.optBoolean("bagRocketOn", false);   c.bagRocketNum = o.optInt("bagRocketNum", 0);
             c.bagDoubleOn = o.optBoolean("bagDoubleOn", false);   c.bagDoubleNum = o.optInt("bagDoubleNum", 0);
             c.bagGgkOn = o.optBoolean("bagGgkOn", false);         c.bagGgkNum = o.optInt("bagGgkNum", 0);
+            c.feedColsOn = o.optBoolean("feedColsOn", false);
+            c.feedCols = Math.max(2, Math.min(4, o.optInt("feedCols", 3)));
+            c.uiScaleOn = o.optBoolean("uiScaleOn", false);
+            c.uiScalePercent = Math.max(40, Math.min(100, o.optInt("uiScalePercent", 80)));
             c.pondFishAdCode = o.optString("pondFishAdCode", "");
             c.pondGps = o.optString("pondGps", "");
             // 1.1.2 迁移：旧版内置默认值（重庆）视为未配置，改走动态定位
