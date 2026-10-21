@@ -7,8 +7,8 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 SRC="$ROOT"
 # 版本号（改版本只动这里 + app/build.gradle + 布局占位 + version.json 四处）
 # 兼容版构建：VER="1.0.9-兼容版" bash build-apk.sh（环境变量可覆盖，产物名随之变化）
-VER="${VER:-1.1.2}"
-VERCODE="${VERCODE:-13}"
+VER="${VER:-1.1.4}"
+VERCODE="${VERCODE:-15}"
 # 交付产物命名（用户规则）：闲鱼小猪手-版本号.apk
 OUT_APK="闲鱼小猪手-$VER.apk"
 # SDK 三件套：android.jar + build-tools(含 aapt2/apksigner) + r8.jar（默认取 fish-work/sdk）
@@ -21,6 +21,19 @@ cd "$SRC"
 mkdir -p .keystore
 rm -rf build
 mkdir -p build/classes build/dex build/gen
+
+# 构建期版本注入（1.1.3）：BuildInfo 供任意进程（闲鱼/App）读取真实版本号
+mkdir -p build/gen/com/piggyhand/fish
+cat > build/gen/com/piggyhand/fish/BuildInfo.java <<BIEOF
+package com.piggyhand.fish;
+
+/** 构建期注入的版本信息（build-apk.sh 生成，勿手改） */
+public final class BuildInfo {
+    public static final String VERSION = "$VER";
+    public static final int CODE = $VERCODE;
+    private BuildInfo() {}
+}
+BIEOF
 
 echo "[1/8] aapt2 编译资源 + 生成 R.java"
 "$BT/aapt2.exe" compile --dir app/src/main/res -o build/res.zip
@@ -40,6 +53,7 @@ if ! javac -encoding UTF-8 -source 11 -target 11 -nowarn \
   stub/de/robv/android/xposed/*.java \
   stub/de/robv/android/xposed/callbacks/*.java \
   build/gen/com/piggyhand/fish/R.java \
+  build/gen/com/piggyhand/fish/BuildInfo.java \
   app/src/main/java/com/piggyhand/fish/*.java > build/javac.log 2>&1; then
   echo "javac FAILED:"; grep -v "bootstrap" build/javac.log; exit 1
 fi

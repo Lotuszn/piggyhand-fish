@@ -37,6 +37,10 @@ public class MainHook implements IXposedHookLoadPackage {
         }
         // v1.0.9 💬 聊天页左滑禁用（常驻注册，RhChatHook 回调内热读 noChatSwipe 开关）
         RhChatHook.hook(lpp.classLoader);
+        // v1.1.4 🖼 显示更多商品（常驻注册，RhFeedCols 回调内 3s 热读 feedColsOn/feedCols）
+        RhFeedCols.hook(lpp.classLoader);
+        // v1.1.4 🖼 UI 比例（常驻注册，RhUiScale 回调内 3s 热读 uiScaleOn/uiScalePercent）
+        RhUiScale.hook(lpp.classLoader);
         applyRules(lpp);
         if (cfg.adSdkPresets) hookAdSdkPresets(lpp);
         if (cfg.scout) scout(lpp);

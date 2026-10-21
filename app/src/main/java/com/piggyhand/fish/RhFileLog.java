@@ -56,7 +56,10 @@ public final class RhFileLog {
                 }
                 if (fos == null) fos = new java.io.FileOutputStream(f, true);
                 if (firstToday) {                   // 当天首行：环境头（适配排查第一现场）
-                    String head = "# ver=module model=" + Build.MODEL
+                    // pkgver = 当前进程宿主包版本（闲鱼进程=闲鱼版本 / App 进程=小猪手版本）
+                    String head = "# xiaozhushou=" + BuildInfo.VERSION
+                            + " pkgver=" + pkgVersion(ctx)
+                            + " model=" + Build.MODEL
                             + " brand=" + Build.BRAND
                             + " android=" + Build.VERSION.RELEASE + "(" + Build.VERSION.SDK_INT + ")"
                             + " pkg=" + ctx.getPackageName() + "\n";
@@ -80,6 +83,17 @@ public final class RhFileLog {
     public static void log(String msg) {
         XposedBridge.log(msg);
         write(msg);
+    }
+
+    /** 当前进程宿主包的 versionName（自己查自己，无可见性限制）；异常返回 "?" */
+    private static String pkgVersion(Context ctx) {
+        try {
+            String v = ctx.getPackageManager()
+                    .getPackageInfo(ctx.getPackageName(), 0).versionName;
+            return v == null ? "?" : v;
+        } catch (Throwable t) {
+            return "?";
+        }
     }
 
     /** 保留今天/昨天/前天，删除更早的 zhushou_run_*.log */
