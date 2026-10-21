@@ -89,6 +89,12 @@ public class MainActivity extends Activity {
     // 🎒 背包自动使用：6 道具行（输入框+开关）
     private android.widget.EditText etBagLuck, etBag8, etBag12, etBagRocket, etBagDouble, etBagGgk;
     private LiquidSwitch swBagLuck, swBag8, swBag12, swBagRocket, swBagDouble, swBagGgk;
+    // 🖼 显示更多商品：比例输入框 + 开关（Flutter 视口 dpr 缩放）
+    private EditText etFeedCols;
+    private LiquidSwitch swFeedCols;
+    // 🖼 UI 比例：比例输入框 + 开关（RhUiScale 按应用密度覆盖）
+    private EditText etUiScale;
+    private LiquidSwitch swUiScale;
     private EditText etPattern, etMax;
     private Button btnRun, btnRefresh, btnExportLog;
 
@@ -167,6 +173,9 @@ public class MainActivity extends Activity {
         etBagRocket = findViewById(R.id.etBagRocket);   swBagRocket = findViewById(R.id.swBagRocket);
         etBagDouble = findViewById(R.id.etBagDouble);   swBagDouble = findViewById(R.id.swBagDouble);
         etBagGgk = findViewById(R.id.etBagGgk);         swBagGgk = findViewById(R.id.swBagGgk);
+        // 🖼 显示更多商品控件
+        etFeedCols = findViewById(R.id.etFeedCols);     swFeedCols = findViewById(R.id.swFeedCols);
+        etUiScale = findViewById(R.id.etUiScale);       swUiScale = findViewById(R.id.swUiScale);
         // 鱼塘任务副标题：「未完善，谨慎开启」染红（8 字符，span 前后含逗号）
         android.widget.TextView tvPondWarn = findViewById(R.id.tvPondWarn);
         String pw = tvPondWarn.getText().toString();
@@ -256,6 +265,10 @@ public class MainActivity extends Activity {
         installBag(cfg, etBagRocket, swBagRocket, "bagRocketOn", "bagRocketNum", "火箭骰子");
         installBag(cfg, etBagDouble, swBagDouble, "bagDoubleOn", "bagDoubleNum", "双倍骰子");
         installBag(cfg, etBagGgk, swBagGgk, "bagGgkOn", "bagGgkNum", "刮刮卡");
+        // 🖼 显示更多商品：瀑布流列数 2~4（2=原样）；开关/列数即时落盘（RhFeedCols 3s 内热读）
+        installFeedCols(cfg);
+        // 🖼 UI 比例：40~100（100=原样）；开关/比例即时落盘（RhUiScale 3s 内热读）
+        installUiScale(cfg);
         // 🐟 鱼塘任务：触发闲鱼进程内 RhPondTask（AWARD 批量领+签到气泡），报告弹窗
         findViewById(R.id.rowPondTask).setOnClickListener(new View.OnClickListener() {
             @Override
@@ -617,8 +630,10 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 导出小猪手运行日志（B 类，10-17）：su cp 当天 files 运行日志到 sd 卡根目录。
-     * 文件名 xiaozhushouYYYY.MM.DD.log；cp 一步到位不经 App 内存（日志可达数百 KB）。
+     * 导出小猪手运行日志（B 类，10-17）：su 把当天 files 运行日志拷到 sd 卡根目录。
+     * 1.1.3：导出文件头补环境信息（小猪手版本/闲鱼版本/安卓版本/设备/导出时间），
+     * 旧日志文件也能带上完整头，不依赖引擎重新生成。
+     * 文件名 xiaozhushouYYYY.MM.DD.log；printf 头 + cat 源一步写入，大文件不经 App 内存。
      */
     private void exportRunLog() {
         new Thread(new Runnable() {
@@ -633,7 +648,19 @@ public class MainActivity extends Activity {
                 if (probe == null || probe.trim().isEmpty()) {
                     msg = "今天还没有运行日志（引擎运行后自动产生）";
                 } else {
-                    String r = suExec("cp -f '" + src + "' '" + dst + "' 2>&1; chmod 644 '" + dst + "' 2>/dev/null");
+                    String fishVer = queryFishVersion();
+                    String ts = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+                            .format(new java.util.Date());
+                    String head = "# 导出时间=" + ts
+                            + " 小猪手=" + BuildInfo.VERSION
+                            + " 闲鱼=" + fishVer
+                            + " 安卓=" + android.os.Build.VERSION.RELEASE
+                            + "(" + android.os.Build.VERSION.SDK_INT + ")"
+                            + " 设备=" + android.os.Build.BRAND + " " + android.os.Build.MODEL;
+                    // shell 安全：单引号/反引号/$ 一律剔除（机型名偶有特殊字符）
+                    head = head.replace("'", "").replace("`", "").replace("$", "");
+                    String r = suExec("{ printf '%s\\n' '" + head + "'; cat '" + src
+                            + "'; } > '" + dst + "' 2>&1; chmod 644 '" + dst + "' 2>/dev/null");
                     boolean ok = r != null && !r.contains("No such") && !r.contains("denied") && !r.contains("Permission");
                     msg = ok ? "已导出到 sd 卡根目录：xiaozhushou" + day + ".log" : "导出失败：" + r;
                 }
@@ -646,6 +673,19 @@ public class MainActivity extends Activity {
                 });
             }
         }, "rh-export").start();
+    }
+
+    /** 查已安装闲鱼的 versionName（su dumpsys；App 导出流程本就走 root 通道）。失败返回 "?" */
+    private String queryFishVersion() {
+        String out = suExec("dumpsys package com.taobao.idlefish 2>/dev/null | grep -m1 versionName");
+        if (out != null) {
+            int i = out.indexOf("versionName=");
+            if (i >= 0) {
+                String v = out.substring(i + "versionName=".length()).trim();
+                if (v.length() > 0) return v;
+            }
+        }
+        return "?";
     }
 
     /** su 执行任意命令（5s 超时）。返回 stdout（可能为空串），失败/超时返回 null */
@@ -1311,6 +1351,127 @@ public class MainActivity extends Activity {
         }
     }
 
+    /* ======================= 🖼 显示更多商品 ======================= */
+
+    /** 列数框绑定：初始态回填、开关切换落盘、输入框失焦校正（2~4 列，2=原样双列） */
+    private void installFeedCols(JSONObject cfg) {
+        etFeedCols.setText(String.valueOf(clampCols(cfg.optInt("feedCols", 3))));
+        swFeedCols.setOnSilent(cfg.optBoolean("feedColsOn", false));
+        swFeedCols.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+            @Override public void onToggle(boolean on) {
+                final int n = clampCols(parseCols(etFeedCols));
+                etFeedCols.setText(String.valueOf(n));
+                put("feedCols", n);
+                put("feedColsOn", on);
+                Toast.makeText(MainActivity.this,
+                        on ? "🖼 已开启，商品 " + n + " 列展示（重启闲鱼生效）"
+                                + (n >= 3 && clampPct(parsePct(etUiScale)) < 80
+                                        ? "｜3 列建议 UI 比例 80~100" : "")
+                           : "🖼 已关闭，恢复双列",
+                        Toast.LENGTH_SHORT).show();
+            }
+        });
+        etFeedCols.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override public void onFocusChange(View v, boolean hasFocus) {
+                if (!hasFocus) {
+                    int n = clampCols(parseCols(etFeedCols));
+                    etFeedCols.setText(String.valueOf(n)); // 失焦校正显示（空→3、9→4、1→2）
+                    put("feedCols", n);
+                }
+            }
+        });
+    }
+
+    /** 列数框解析：空/非法回落到 3 */
+    private static int parseCols(android.widget.EditText et) {
+        try {
+            String s = et.getText().toString().trim();
+            if (s.isEmpty()) return 3;
+            return Integer.parseInt(s);
+        } catch (Throwable t) {
+            return 3;
+        }
+    }
+
+    /** 列数夹取 2~4（2=闲鱼原始双列；3/4=每屏露出更多商品） */
+    private static int clampCols(int v) {
+        if (v < 2) v = 2;
+        if (v > 4) v = 4;
+        return v;
+    }
+
+    /* ======================= 🖼 UI 比例 ======================= */
+
+    /** 比例框绑定：初始态回填、开关切换落盘、输入框失焦校正（40~100，100=原样） */
+    private void installUiScale(JSONObject cfg) {
+        etUiScale.setText(String.valueOf(clampPct(cfg.optInt("uiScalePercent", 80))));
+        swUiScale.setOnSilent(cfg.optBoolean("uiScaleOn", false));
+        swUiScale.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+            @Override public void onToggle(boolean on) {
+                final int p = clampPct(parsePct(etUiScale));
+                etUiScale.setText(String.valueOf(p));
+                put("uiScalePercent", p);
+                put("uiScaleOn", on);
+                Toast.makeText(MainActivity.this,
+                        on ? "🖼 已开启，" + p + "% 缩放（重启闲鱼生效）"
+                                + (p < 80 ? "｜3 列建议 80~100" : "")
+                           : "🖼 已关闭，恢复原始显示",
+                        Toast.LENGTH_SHORT).show();
+            }
+        });
+        etUiScale.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override public void onFocusChange(View v, boolean hasFocus) {
+                if (!hasFocus) {
+                    int p = clampPct(parsePct(etUiScale));
+                    etUiScale.setText(String.valueOf(p)); // 失焦校正显示（空→80、200→100）
+                    put("uiScalePercent", p);
+                }
+            }
+        });
+    }
+
+    /** 比例框解析：空/非法回落到 80 */
+    private static int parsePct(android.widget.EditText et) {
+        try {
+            String s = et.getText().toString().trim();
+            if (s.isEmpty()) return 80;
+            return Integer.parseInt(s);
+        } catch (Throwable t) {
+            return 80;
+        }
+    }
+
+    /** 比例夹取 40~100（100=原样，40=界面缩到 40%） */
+    private static int clampPct(int v) {
+        if (v < 40) v = 40;
+        if (v > 100) v = 100;
+        return v;
+    }
+
+    /**
+     * v1.1.4 数字框兜底落盘：用户改完数字直接按返回/切后台时 EditText 不一定收到失焦事件
+     * （实测 input tap 转移焦点不触发 onFocusChange），不放这里改完就白改。
+     * 仅在与已存配置不同时写盘，避免每次 onPause 都 su 双写。
+     */
+    private void commitNumberInputs() {
+        try {
+            if (etFeedCols != null) {
+                int n = clampCols(parseCols(etFeedCols));
+                etFeedCols.setText(String.valueOf(n));
+                if (currentConfig().optInt("feedCols", 3) != n) put("feedCols", n);
+            }
+        } catch (Throwable ignored) {
+        }
+        try {
+            if (etUiScale != null) {
+                int p = clampPct(parsePct(etUiScale));
+                etUiScale.setText(String.valueOf(p));
+                if (currentConfig().optInt("uiScalePercent", 80) != p) put("uiScalePercent", p);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
     /** 背包开关打开后立即执行一轮（socket RUN；闲鱼未运行则提示，下次打开闲鱼自动执行） */
     private void kickRun(final String label) {
         new Thread(new Runnable() {
@@ -1362,6 +1523,8 @@ public class MainActivity extends Activity {
             @Override
             public void run() {
                 int exit = -1;
+                // 串行化（v1.1.4）：连续 put 会起多个线程各自 cat > 同一文件，实测出现过尾部多出 "}" 的残文
+                synchronized (CFG_SYNC_LOCK) {
                 try {
                     java.lang.Process p = Runtime.getRuntime().exec(new String[]{
                             "su", "-c", "mkdir -p /sdcard/Android/data/com.taobao.idlefish/files"
@@ -1380,9 +1543,13 @@ public class MainActivity extends Activity {
                 } catch (Throwable t) {
                     android.util.Log.e("RhSync", "su write fail", t);
                 }
+                }
             }
         }, "rh-cfg-sync").start();
     }
+
+    /** 覆盖文件写入互斥锁（多线程 su 写同一文件会互相踩踏） */
+    private static final Object CFG_SYNC_LOCK = new Object();
 
     /** 放开文件权限，让 LSPosed 的 XSharedPreferences 能在目标进程读到 */
     private void openPrefsPerm() {
@@ -1399,6 +1566,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         stopCoinUiLoop(); // 退后台停轮询，零后台开销
+        commitNumberInputs(); // 数字框未失焦（直接返回/切后台）也兜底落盘
         if (dirty) {
             dirty = false;
             Toast.makeText(this, "配置已保存 · 重启闲鱼生效", Toast.LENGTH_SHORT).show();
