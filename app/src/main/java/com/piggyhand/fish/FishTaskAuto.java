@@ -68,7 +68,7 @@ public final class FishTaskAuto {
     private final ClassLoader cl;
     private final String cacheDir;
     private final Set<String> processed = new HashSet<>();
-    private final StringBuilder report = new StringBuilder();
+    private final RhReport report = new RhReport(); // 1.1.3 每行带 HH:mm:ss 时间戳
     private volatile boolean abort = false;
     private static android.content.Context appCtx;
     /** 每任务 Toast 气泡开关（config.toastNotify，默认开） */
