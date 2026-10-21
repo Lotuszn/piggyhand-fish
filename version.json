@@ -1,6 +1,6 @@
 {
-  "latest": "1.1.2",
+  "latest": "1.1.4",
   "url": "https://github.com/Lotuszn/piggyhand-fish/releases/latest",
   "cnUrl": "https://gitee.com/lotuszn/piggyhand-fish/releases",
-  "notes": "v1.1.2 更新：凭空想象修复bug"
+  "notes": "v1.1.4 更新：新增「显示更多商品」(3/4列) 与「UI 比例」；报告带时间戳；修复若干问题"
 }
