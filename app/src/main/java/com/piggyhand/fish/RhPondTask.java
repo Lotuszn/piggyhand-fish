@@ -101,7 +101,7 @@ public final class RhPondTask {
     /** 后台线程调用；返回报告全文（同时写 rh_tasks_pond.txt） */
     public static String run(Context ctx) {
         long t0 = System.currentTimeMillis();
-        StringBuilder sb = new StringBuilder();
+        RhReport sb = new RhReport(); // 1.1.3 每行带 HH:mm:ss 时间戳
         String fish = RhLocationContext.fishAdCode(), gps = RhLocationContext.gps();
         try {
             ConfigManager cfg = ConfigManager.load();
@@ -284,7 +284,7 @@ public final class RhPondTask {
         }
     }
 
-    private static void finish(Context ctx, StringBuilder sb, long t0) {
+    private static void finish(Context ctx, RhReport sb, long t0) {
         sb.append("耗时 ").append((System.currentTimeMillis() - t0) / 1000).append("s\n");
         try {
             java.io.File f = new java.io.File(ctx.getExternalCacheDir(), "rh_tasks_pond.txt");
