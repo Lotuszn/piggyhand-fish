@@ -45,7 +45,7 @@ public final class RhFileLog {
                 String day = df.format(new Date(now));
                 java.io.File dir = ctx.getExternalFilesDir(null);
                 if (dir == null) {
-                    dir = new java.io.File("/storage/emulated/0/Android/data/com.taobao.idlefish/files");
+                    dir = new java.io.File(ConfigManager.fishExternal("files"));
                 }
                 if (!dir.exists()) dir.mkdirs();
                 java.io.File f = new java.io.File(dir, "zhushou_run_" + day + ".log");

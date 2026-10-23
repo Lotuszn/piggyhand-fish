@@ -86,13 +86,56 @@ public class ConfigManager {
         public Object[] args;
     }
 
-    /** 引擎覆盖配置文件（闲鱼外部私有目录 files/ 下，闲鱼进程必可读；su 双写落这里） */
-    public static final String OVERRIDE_PATH =
-            "/sdcard/Android/data/com.taobao.idlefish/files/rh_config.json";
+    /** Android 的 userId 步进：uid = userId * 100000 + appId（UserHandle.getUserId 在 SDK stub 里不可见，自己算） */
+    public static final int PER_USER_RANGE = 100000;
+
+    /** 当前进程所属 userId：主用户 0 / 分身 999 */
+    public static int myUserId() {
+        try {
+            return android.os.Process.myUid() / PER_USER_RANGE;
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    /** 任意 uid 所属的 userId */
+    public static int userIdOf(int uid) {
+        return uid / PER_USER_RANGE;
+    }
+
+    /**
+     * 当前进程所属 Android 用户的存储根：主用户 0 → /storage/emulated/0，分身 → /storage/emulated/999。
+     * 2026-10-23 多用户修复：原实现全程硬编码 /storage/emulated/0，在分身里读写的是主用户的数据
+     * （账号串号、配置互相覆盖）。所有跨进程路径统一走这里解析。
+     */
+    public static String storageRoot() {
+        return "/storage/emulated/" + myUserId();
+    }
+
+    /** 闲鱼外部目录（files / cache），按当前用户解析 */
+    public static String fishExternal(String sub) {
+        return storageRoot() + "/Android/data/com.taobao.idlefish/" + sub;
+    }
+
+    /** 引擎覆盖配置文件：闲鱼外部私有目录 files/ 下，闲鱼进程必可读；su 双写落这里 */
+    public static String overridePath() {
+        return fishExternal("files") + "/rh_config.json";
+    }
+
+    /**
+     * 报告服务端口 = 27715 + userId。
+     * 2026-10-23 多用户修复：127.0.0.1 回环端口是全设备共享、不按用户隔离的。
+     * 固定 27715 时，主用户与分身的闲鱼各起一份报告服务会抢同一端口，
+     * 后绑定的 ServerSocket 直接抛异常，且 App 可能连上"另一个用户"的引擎。
+     */
+    public static int reportPort() {
+        return 27715 + myUserId();
+    }
 
     /** 配置读取优先级（2026-10-19 调整）：闲鱼私有覆盖文件（模块 App su 双写，实时最新） -> 模块 App SharedPreferences(XSharedPreferences，LSPosed 快照可能滞后) -> 代码内置默认。sdcard 公共区被闲鱼 Scoped Storage 拦（canRead=false 实测），弃用 */
     public static ConfigManager load() {
         // 1) 覆盖文件通道：模块 App persistSilent 时经 su 双写，实时最新
+        final String OVERRIDE_PATH = overridePath(); // 按当前用户解析（分身 → /storage/emulated/999）
         try {
             File f = new File(OVERRIDE_PATH);
             if (f.exists() && f.canRead() && f.length() > 0) {

@@ -380,14 +380,19 @@ public final class FishMtopHook {
         }
         if (proc != null && proc.contains(":")) return; // 仅主进程
 
+        log("[report-server] enter, proc=" + proc + " userId=" + ConfigManager.myUserId()
+                + " port=" + ConfigManager.reportPort());
         new Thread(new Runnable() {
             @Override
             public void run() {
                 java.net.ServerSocket ss = null;
+                // 端口按 userId 偏移（0 → 27715 / 分身 999 → 28714）：回环端口全设备共享，
+                // 固定端口会被另一个用户的闲鱼抢占，后绑定者直接抛异常
+                final int port = ConfigManager.reportPort();
                 try {
-                    ss = new java.net.ServerSocket(27715, 50,
+                    ss = new java.net.ServerSocket(port, 50,
                             java.net.InetAddress.getByName("127.0.0.1"));
-                    log("[report-server] listening 127.0.0.1:27715");
+                    log("[report-server] listening 127.0.0.1:" + port);
                     while (true) {
                         final java.net.Socket s = ss.accept();
                         // 每连接独立线程：单连接挂起不能堵死服务（串行循环曾致 CLOSE_WAIT 堆积）
@@ -402,7 +407,13 @@ public final class FishMtopHook {
                                     String req = br.readLine();
                                     log("[report-server] req=" + req);
                                     String body = "";
-                                    if (req != null && req.trim().equals("REPORT")) {
+                                    if (req != null && req.trim().equals("PING")) {
+                                        // 身份回执（2026-10-23）：回环端口跨用户互通，仅凭"连得上"无法
+                                        // 证明是本用户的引擎。回传自身 uid/userId，App 侧据此校验归属。
+                                        int uid = android.os.Process.myUid();
+                                        body = "RH|" + uid + "|" + ConfigManager.userIdOf(uid) + "|"
+                                                + android.os.Process.myPid();
+                                    } else if (req != null && req.trim().equals("REPORT")) {
                                         body = readCacheFile("rh_tasks_result.txt");
                                         if (body == null) body = "";
                                     } else if (req != null && req.startsWith("POND_REPORT")) {
