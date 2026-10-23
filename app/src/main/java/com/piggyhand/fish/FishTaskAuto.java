@@ -120,7 +120,7 @@ public final class FishTaskAuto {
             ClassLoader cl = ctx.getClassLoader();
             java.io.File ext = ctx.getExternalCacheDir();
             String dir = ext != null ? ext.getAbsolutePath()
-                    : "/storage/emulated/0/Android/data/com.taobao.idlefish/cache";
+                    : ConfigManager.fishExternal("cache");
             FishTaskAuto probe = new FishTaskAuto(cl, dir);
             org.json.JSONObject resp = probe.callApi(TASK_LIST_API, "2.0",
                     "{\"sceneId\":496}", "探测");
@@ -163,7 +163,7 @@ public final class FishTaskAuto {
         final ClassLoader cl = ctx.getClassLoader();
         java.io.File ext = ctx.getExternalCacheDir();
         final String dir = ext != null ? ext.getAbsolutePath()
-                : "/storage/emulated/0/Android/data/com.taobao.idlefish/cache";
+                : ConfigManager.fishExternal("cache");
         new Thread(() -> {
             try {
                 new FishTaskAuto(cl, dir).run(extrasJson);
@@ -985,7 +985,7 @@ public final class FishTaskAuto {
             ClassLoader cl = ctx.getClassLoader();
             java.io.File ext = ctx.getExternalCacheDir();
             String dir = ext != null ? ext.getAbsolutePath()
-                    : "/storage/emulated/0/Android/data/com.taobao.idlefish/cache";
+                    : ConfigManager.fishExternal("cache");
             FishTaskAuto inst = new FishTaskAuto(cl, dir);
             org.json.JSONObject r = inst.callApi(MAP_INIT_API, "1.0",
                     "{" + RhLocationContext.jsonPair() + "\"version\":4}",
@@ -1016,7 +1016,7 @@ public final class FishTaskAuto {
                 // files 目录（非 cache）：force-stop/清缓存不会清掉 files，账本必须持久
                 java.io.File ext = ctx.getExternalFilesDir(null);
                 String dir = ext != null ? ext.getAbsolutePath()
-                        : "/storage/emulated/0/Android/data/com.taobao.idlefish/files";
+                        : ConfigManager.fishExternal("files");
                 java.io.File dirF = new java.io.File(dir);
                 if (!dirF.exists()) dirF.mkdirs();
                 java.io.File f = new java.io.File(dirF, "zhushou_" + day + ".log");
