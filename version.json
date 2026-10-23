@@ -1,6 +1,6 @@
 {
-  "latest": "1.1.4",
+  "latest": "1.1.7",
   "url": "https://github.com/Lotuszn/piggyhand-fish/releases/latest",
   "cnUrl": "https://gitee.com/lotuszn/piggyhand-fish/releases",
-  "notes": "v1.1.4 更新：新增「显示更多商品」(3/4列) 与「UI 比例」；报告带时间戳；修复若干问题"
+  "notes": "v1.1.7 更新：主页沉浸式，状态栏与导航栏透明，背景整屏铺满；背包新增保存配置按钮；支持分身独立判定；凭空想象修复 bug"
 }
