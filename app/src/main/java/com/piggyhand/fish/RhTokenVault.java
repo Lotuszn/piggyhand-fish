@@ -159,7 +159,7 @@ public final class RhTokenVault {
             if (c == null) return;
             java.io.File dir = c.getExternalFilesDir(null);
             String dirPath = dir != null ? dir.getAbsolutePath()
-                    : "/storage/emulated/0/Android/data/com.taobao.idlefish/files";
+                    : ConfigManager.fishExternal("files");
             java.io.File dirF = new java.io.File(dirPath);
             if (!dirF.exists()) dirF.mkdirs();
             JSONObject root = new JSONObject();
