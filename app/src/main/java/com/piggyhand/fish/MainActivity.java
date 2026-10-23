@@ -96,7 +96,9 @@ public class MainActivity extends Activity {
     private EditText etUiScale;
     private LiquidSwitch swUiScale;
     private EditText etPattern, etMax;
-    private Button btnRun, btnRefresh, btnExportLog;
+    private Button btnRun, btnRefresh, btnExportLog, btnSaveBag;
+    /** 批量落盘期间抑制焦点回调里的单键写盘（按钮/onPause 一次写完，避免 6 次 su 双写） */
+    private boolean bagCommitQuiet = false;
 
     private boolean dirty = false;
     private boolean logLoaded = false;
@@ -116,11 +118,9 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // 亮色状态栏 / 导航栏，与 blob 背景衔接
-        getWindow().setStatusBarColor(0xFFFDF3E3);
-        getWindow().setNavigationBarColor(0xFFF2F4F8);
-        getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        // 沉浸式系统栏（v1.1.6）：背景光斑一直铺到屏幕顶端，内容层靠 fitsSystemWindows 补 inset。
+        // 原先是给状态栏刷不透明奶白 0xFFFDF3E3，跟页面渐变背景拼出一条硬边（截图红框处的割裂）。
+        applyEdgeToEdge();
 
         setContentView(R.layout.activity_main);
 
@@ -191,6 +191,7 @@ public class MainActivity extends Activity {
         btnRun = findViewById(R.id.btnRun);
         btnRefresh = findViewById(R.id.btnRefresh);
         btnExportLog = findViewById(R.id.btnExportLog);
+        btnSaveBag = findViewById(R.id.btnSaveBag);
 
         // 版本号
         String ver = UpdateChecker.currentVersion(this);
@@ -265,6 +266,12 @@ public class MainActivity extends Activity {
         installBag(cfg, etBagRocket, swBagRocket, "bagRocketOn", "bagRocketNum", "火箭骰子");
         installBag(cfg, etBagDouble, swBagDouble, "bagDoubleOn", "bagDoubleNum", "双倍骰子");
         installBag(cfg, etBagGgk, swBagGgk, "bagGgkOn", "bagGgkNum", "刮刮卡");
+        // 🎒 保存配置（v1.1.6）：数量框还停在输入态时也能直接落盘，不依赖失焦事件
+        btnSaveBag.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                saveBagConfig(true);
+            }
+        });
         // 🖼 显示更多商品：瀑布流列数 2~4（2=原样）；开关/列数即时落盘（RhFeedCols 3s 内热读）
         installFeedCols(cfg);
         // 🖼 UI 比例：40~100（100=原样）；开关/比例即时落盘（RhUiScale 3s 内热读）
@@ -488,6 +495,33 @@ public class MainActivity extends Activity {
         }, 700);
     }
 
+    /**
+     * 沉浸式系统栏（v1.1.6）：
+     * 状态栏 / 导航栏一律透明，让底层的 bg_blobs 光斑一直铺到屏幕顶端与底端，
+     * 内容层由布局里的 fitsSystemWindows 自动补上 top / bottom inset（页头不会顶到时钟下面）。
+     * 之前是给状态栏刷一版不透明奶白 0xFFFDF3E3，和渐变背景之间出现一条硬色带 —— 截图红框那处割裂。
+     * 图标保持深色（LIGHT_STATUS_BAR / LIGHT_NAVIGATION_BAR），因为背景是浅色光斑。
+     */
+    private void applyEdgeToEdge() {
+        try {
+            android.view.Window w = getWindow();
+            w.setStatusBarColor(android.graphics.Color.TRANSPARENT);
+            w.setNavigationBarColor(android.graphics.Color.TRANSPARENT);
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                // 关掉系统自动加的对比度遮罩，否则透明栏会被补一层灰
+                w.setStatusBarContrastEnforced(false);
+                w.setNavigationBarContrastEnforced(false);
+            }
+            int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN       // 内容画到状态栏下面
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION // 内容画到导航栏下面
+                    | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                    | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            w.getDecorView().setSystemUiVisibility(flags);
+        } catch (Throwable ignored) {
+        }
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
@@ -498,22 +532,30 @@ public class MainActivity extends Activity {
 
     /**
      * 模块状态检测（异步防 ANR，两线程并行；onCreate / onResume 都会触发）：
-     * - LSPosed 三级判定：① PING 引擎报告服务（最真实：引擎此刻在闲鱼里跑）；
-     *   ② 失败时 su 查 LSPosed 日志留痕（本开机周期模块被加载过 = 已启用，
-     *   覆盖"闲鱼没跑导致引擎不在"的误报——10-17 用户实锤）；③ 均无 = 未激活
+     * - LSPosed 两级判定，两级都按「当前用户」校验归属（2026-10-23 分身修复）：
+     *   ① 连本用户报告服务并核对 PING 回执里的 uid/userId；
+     *   ② 回查 LSPosed 日志，要求同时命中「本用户闲鱼的 uid」与模块名。
+     *   原实现只要「连得上 27715」或「日志里有 piggyhand 字样」就算已激活，
+     *   而回环端口与日志文件都是全设备共享的，导致分身无 root 时双红、给 root 后双绿
+     *   （绿灯实际来自 root 能读日志 + 主用户闲鱼的注入记录，与分身无关）。
      * - Root = su 试跑（未授权设备首次调用可能触发管理器弹窗，5s 超时判失败）
      */
     private void startStateCheck() {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                boolean ok = socketCmd("PING") != null;
-                if (!ok) {
-                    // 闲鱼未运行时引擎必然不在——回查 LSPosed 模块日志留痕
-                    String out = suExec("grep -c piggyhand $(ls -t /data/adb/lspd/log/modules_*.log 2>/dev/null | head -1) 2>/dev/null");
-                    ok = parseIntSafe(out) > 0;
-                }
-                final boolean okF = ok;
+                final boolean socketOk = probeEngineSameUser();
+                // 闲鱼未运行时引擎必然不在——回查 LSPosed 模块日志留痕（限本用户闲鱼 + 本模块）
+                boolean logHit = false;
+                if (!socketOk) logHit = lspLogHasSameUserFish();
+                final boolean logOk = logHit;
+                // 诊断留痕：分身/主用户的判定差异全在这几个值上（logcat -s RhState）
+                android.util.Log.i("RhState", "[state] userId=" + ConfigManager.myUserId()
+                        + " fishUid=" + fishPackageUid()
+                        + " port=" + ConfigManager.reportPort()
+                        + " socketSameUser=" + socketOk
+                        + " logHit=" + logOk);
+                final boolean okF = socketOk || logOk;
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
@@ -536,6 +578,55 @@ public class MainActivity extends Activity {
                 });
             }
         }, "rh-root-check").start();
+    }
+
+    /**
+     * ① 端到端探测：连本用户的报告服务，并核对 PING 回执里的身份。
+     * 端口按 userId 偏移已能隔开两个用户，回执 uid 校验是第二道保险
+     * （端口被别的进程占用、或旧版内核只有 27715 时兜住）。
+     */
+    private static boolean probeEngineSameUser() {
+        String resp = socketCmd("PING");
+        if (resp == null) return false;          // 端口未监听 / 被 MIUI 拦 / 连接被拒
+        String t = resp.trim();
+        if (!t.startsWith("RH|")) return false;  // 旧版内核不返回身份，无法确认归属 → 不认
+        String[] f = t.split("\\|");
+        if (f.length < 3) return false;
+        int serverUid;
+        try {
+            serverUid = Integer.parseInt(f[1].trim());
+        } catch (Throwable e) {
+            return false;
+        }
+        return ConfigManager.userIdOf(serverUid) == ConfigManager.myUserId();
+    }
+
+    /**
+     * ② 日志留痕：LSPosed 的 modules_*.log 是所有用户共写的单一文件，
+     * 只 grep 模块名会把「主用户闲鱼加载过模块」误算成「本用户已激活」。
+     * 这里要求同一行同时出现「本用户 uid 段的进程号」和模块名。
+     * uid 段用 id 区间匹配而不是查包名 uid：Android 11+ 包可见性会让
+     * getPackageInfo 对未声明的第三方包直接抛 NameNotFound（分身里实测 fishUid=-1）。
+     * 顺带修掉「只查最新一个文件」：取最近 3 个（日志会随触达大小滚动）。
+     */
+    private boolean lspLogHasSameUserFish() {
+        int userId = ConfigManager.myUserId();
+        // user 0 的 uid 是 1~5 位（如 10269），分身是 1xxxxx/999xxxxx 段（如 99910269）
+        String uidSeg = userId == 0 ? "[0-9]{1,5}" : userId + "[0-9]{5}";
+        String cmd = "for f in $(ls -t /data/adb/lspd/log/modules_*.log 2>/dev/null | head -3); do "
+                + "grep -hE ' " + uidSeg + ": .*\\(com\\.taobao\\.idlefish\\)\\[com\\.piggyhand\\.fish' \"$f\" 2>/dev/null; "
+                + "done | wc -l";
+        String out = suExec(cmd, 12); // 3 个 4MB 日志，5s 不够
+        return parseIntSafe(out) > 0;
+    }
+
+    /** 当前用户下 com.taobao.idlefish 的 uid（主用户 10269 / 分身 99910269）；取不到返回 -1 */
+    private int fishPackageUid() {
+        try {
+            return getPackageManager().getPackageInfo("com.taobao.idlefish", 0).applicationInfo.uid;
+        } catch (Throwable t) {
+            return -1;
+        }
     }
 
     /** 前台同步循环：进前台立即刷一轮，之后每 10s 一轮；与引擎 60s 采集周期错频，读到新行即上屏 */
@@ -575,7 +666,8 @@ public class MainActivity extends Activity {
                     java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("yyyy.MM.dd", Locale.US);
                     String today = df.format(new java.util.Date());
                     String yest = df.format(new java.util.Date(System.currentTimeMillis() - 86400000L));
-                    String dir = "/storage/emulated/0/Android/data/com.taobao.idlefish/files";
+                    // 按当前用户解析（分身 → /storage/emulated/999），否则读的是主账号的余额账本
+                    String dir = ConfigManager.fishExternal("files");
                     String out = suExec("tail -1 '" + dir + "/zhushou_" + yest
                             + ".log' 2>/dev/null; echo '---RHSEP---'; cat '"
                             + dir + "/zhushou_" + today + ".log' 2>/dev/null");
@@ -641,8 +733,9 @@ public class MainActivity extends Activity {
             public void run() {
                 java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("yyyy.MM.dd", Locale.US);
                 String day = df.format(new java.util.Date());
-                String src = "/storage/emulated/0/Android/data/com.taobao.idlefish/files/zhushou_run_" + day + ".log";
-                String dst = "/storage/emulated/0/xiaozhushou" + day + ".log";
+                String src = ConfigManager.fishExternal("files") + "/zhushou_run_" + day + ".log";
+                // 导出到本用户存储根（分身落 /storage/emulated/999），避免两个账号的日志混在一起
+                String dst = ConfigManager.storageRoot() + "/xiaozhushou" + day + ".log";
                 String probe = suExec("ls -la '" + src + "' 2>/dev/null");
                 final String msg;
                 if (probe == null || probe.trim().isEmpty()) {
@@ -688,12 +781,17 @@ public class MainActivity extends Activity {
         return "?";
     }
 
-    /** su 执行任意命令（5s 超时）。返回 stdout（可能为空串），失败/超时返回 null */
+    /** su 执行任意命令（默认 5s 超时）。返回 stdout（可能为空串），失败/超时返回 null */
     private static String suExec(String cmd) {
+        return suExec(cmd, 5);
+    }
+
+    /** su 执行任意命令（指定超时秒数）；读多个大日志的场景需要放宽 */
+    private static String suExec(String cmd, int timeoutSec) {
         Process p = null;
         try {
             p = Runtime.getRuntime().exec(new String[]{"su", "-c", cmd});
-            boolean done = p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+            boolean done = p.waitFor(timeoutSec, java.util.concurrent.TimeUnit.SECONDS);
             if (!done) {
                 p.destroy();
                 return null;
@@ -1326,7 +1424,8 @@ public class MainActivity extends Activity {
                 if (!hasFocus) {
                     int nv = bagNumOf(et);
                     et.setText(String.valueOf(nv)); // 失焦校正显示（-2→-1、1000→999、空→0）
-                    put(numKey, nv);
+                    // 批量落盘（保存按钮 / onPause 兜底）正在进行时不再单键写盘，避免重复 su 双写
+                    if (!bagCommitQuiet) put(numKey, nv);
                 }
             }
         });
@@ -1348,6 +1447,84 @@ public class MainActivity extends Activity {
             return v;
         } catch (Throwable t) {
             return 0;
+        }
+    }
+
+    /**
+     * 🎒 背包数量批量落盘（v1.1.6）。
+     * 旧逻辑只靠 EditText 的 onFocusChange 写盘，而 Android 上「收起键盘 / 直接按返回」不保证触发
+     * 失焦回调；v1.1.4 的 onPause 兜底只覆盖了列数/比例，没覆盖背包这 6 个数量框，所以敲完数字
+     * 直接点按钮或回桌面时值会丢。
+     * 这里不依赖任何焦点事件：先收键盘清焦点（期间抑制单键写盘），再直接读 6 个输入框的当前文本，
+     * 归一化后与已存配置比对，一次性写盘（6 个键只触发一次 persistSilent → 一次 su 双写）。
+     *
+     * @param toast 是否弹反馈（按钮点击 true，onPause 兜底 false）
+     * @return 实际发生变化的键数
+     */
+    private int saveBagConfig(boolean toast) {
+        final StringBuilder brief = new StringBuilder();
+        int changed = 0;
+        bagCommitQuiet = true;
+        try {
+            clearInputFocusAndKeyboard(); // 收起输入法：点保存后不该还留着键盘
+            JSONObject o = currentConfig();
+            changed += bagCommitOne(o, "bagLuckNum", etBagLuck, "好运骰", brief);
+            changed += bagCommitOne(o, "bag8Num", etBag8, "八面骰", brief);
+            changed += bagCommitOne(o, "bag12Num", etBag12, "十二面骰", brief);
+            changed += bagCommitOne(o, "bagRocketNum", etBagRocket, "火箭骰", brief);
+            changed += bagCommitOne(o, "bagDoubleNum", etBagDouble, "双倍骰", brief);
+            changed += bagCommitOne(o, "bagGgkNum", etBagGgk, "刮刮卡", brief);
+            if (changed > 0) persistSilent(o); // 一次落盘：SharedPreferences + su 双写 override
+        } catch (Throwable t) {
+            if (toast) {
+                Toast.makeText(this, "保存失败：" + t.getClass().getSimpleName(), Toast.LENGTH_LONG).show();
+            }
+            return 0;
+        } finally {
+            bagCommitQuiet = false;
+        }
+        if (toast) {
+            String msg;
+            if (changed == 0) {
+                // 可能刚落焦点时已被单键写盘，这里值已经是最新的：不写"无变化"，避免误导
+                msg = "✅ 背包配置已保存";
+            } else if (brief.length() > 34) {
+                msg = "✅ 已保存 " + changed + " 项背包数量";
+            } else {
+                msg = "✅ 已保存 " + changed + " 项：" + brief;
+            }
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+        }
+        return changed;
+    }
+
+    /** 单个背包数量框：归一化回显 → 与已存值比对 → 有变化才写进 JSON；返回是否变更（0/1） */
+    private int bagCommitOne(JSONObject o, String key, EditText et, String label, StringBuilder brief)
+            throws org.json.JSONException {
+        if (et == null) return 0;
+        int nv = bagNumOf(et);
+        et.setText(String.valueOf(nv)); // 回显归一化结果（空→0、-2→-1、1000→999）
+        if (o.optInt(key, 0) == nv) return 0;
+        o.put(key, (Object) Integer.valueOf(nv)); // JSONObject 无 put(String,int)，显式装箱走 put(String,Object)
+        if (brief.length() > 0) brief.append('、');
+        brief.append(label).append(' ').append(nv);
+        return 1;
+    }
+
+    /** 收起输入法并清焦点（clearFocus 会触发输入框失焦回调，调用方负责抑制其中的写盘） */
+    private void clearInputFocusAndKeyboard() {
+        try {
+            android.view.inputmethod.InputMethodManager imm =
+                    (android.view.inputmethod.InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            View f = getCurrentFocus();
+            if (imm != null) {
+                if (f != null) imm.hideSoftInputFromWindow(f.getWindowToken(), 0);
+                // 兜底：个别 ROM 上焦点落在内部容器、输入框 token 收不掉键盘，再用窗口 token 收一次
+                View decor = getWindow() == null ? null : getWindow().getDecorView();
+                if (decor != null) imm.hideSoftInputFromWindow(decor.getWindowToken(), 0);
+            }
+            if (f != null) f.clearFocus();
+        } catch (Throwable ignored) {
         }
     }
 
@@ -1449,9 +1626,10 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * v1.1.4 数字框兜底落盘：用户改完数字直接按返回/切后台时 EditText 不一定收到失焦事件
+     * 数字框兜底落盘：用户改完数字直接按返回/切后台时 EditText 不一定收到失焦事件
      * （实测 input tap 转移焦点不触发 onFocusChange），不放这里改完就白改。
      * 仅在与已存配置不同时写盘，避免每次 onPause 都 su 双写。
+     * v1.1.4 只覆盖列数 / UI 比例；v1.1.6 把背包 6 个数量框也纳入同一条兜底路径。
      */
     private void commitNumberInputs() {
         try {
@@ -1468,6 +1646,11 @@ public class MainActivity extends Activity {
                 etUiScale.setText(String.valueOf(p));
                 if (currentConfig().optInt("uiScalePercent", 80) != p) put("uiScalePercent", p);
             }
+        } catch (Throwable ignored) {
+        }
+        // v1.1.6：背包 6 个数量框原先只靠失焦写盘，这里一并兜底（内部先比对，无变化不写盘）
+        try {
+            saveBagConfig(false);
         } catch (Throwable ignored) {
         }
     }
@@ -1526,9 +1709,12 @@ public class MainActivity extends Activity {
                 // 串行化（v1.1.4）：连续 put 会起多个线程各自 cat > 同一文件，实测出现过尾部多出 "}" 的残文
                 synchronized (CFG_SYNC_LOCK) {
                 try {
+                    // 全路径按当前用户拼（分身 → /storage/emulated/999/Android/data/...）：
+                    // su shell 里的 /sdcard 会解析成主用户 0，不能用
+                    final String dir = ConfigManager.fishExternal("files");
+                    final String dst = ConfigManager.overridePath();
                     java.lang.Process p = Runtime.getRuntime().exec(new String[]{
-                            "su", "-c", "mkdir -p /sdcard/Android/data/com.taobao.idlefish/files"
-                                    + " && cat > " + ConfigManager.OVERRIDE_PATH});
+                            "su", "-c", "mkdir -p '" + dir + "' && cat > '" + dst + "'"});
                     java.io.OutputStream os = p.getOutputStream();
                     os.write(o.toString().getBytes("UTF-8"));
                     os.flush();
@@ -1613,7 +1799,7 @@ public class MainActivity extends Activity {
             "\n\n解决步骤：\n"
                     + "1. root 授权：打开 Magisk / APatch → 超级用户 → 允许「咸鱼小猪手」，回本页点「刷新报告」\n"
                     + "2. MIUI 联网放行：安全中心 → 应用管理 → 咸鱼小猪手 → 联网控制 → 允许 WLAN 与数据\n"
-                    + "3. 保持闲鱼在后台运行（报告服务随闲鱼进程启动，端口 27715）\n"
+                    + "3. 保持闲鱼在后台运行（报告服务随闲鱼进程启动，端口按用户自动分配）\n"
                     + "4. 最近一次钓鱼结果也会推送在通知栏";
 
     /** 四通道读报告结果：text=报告全文 / via=成功通道 / diag=全失败诊断 */
@@ -1628,14 +1814,14 @@ public class MainActivity extends Activity {
      * 广播回传（ACTION_RESULT）作为独立即时通道由 resultReceiver 承担，不在此列。
      */
     private static ReadResult tryReadReport() {
-        String path = "/storage/emulated/0/Android/data/com.taobao.idlefish/cache/rh_tasks_result.txt";
+        String path = ConfigManager.fishExternal("cache") + "/rh_tasks_result.txt";
         ReadResult r = new ReadResult();
         StringBuilder diag = new StringBuilder("无法读取钓鱼报告\n\n逐通道诊断：\n");
         String[] p = readPlain(path);
         if (p[0] != null) { r.text = p[0]; r.via = "直读文件"; return r; }
         diag.append("· 直读：").append(p[1]).append('\n');
         p = readViaSocket();
-        if (p[0] != null) { r.text = p[0]; r.via = "socket (127.0.0.1:27715)"; return r; }
+        if (p[0] != null) { r.text = p[0]; r.via = "socket (127.0.0.1:" + ConfigManager.reportPort() + ")"; return r; }
         diag.append("· socket：").append(p[1]).append('\n');
         p = readViaSu(path);
         if (p[0] != null) { r.text = p[0]; r.via = "su (root)"; return r; }
@@ -1649,7 +1835,7 @@ public class MainActivity extends Activity {
         java.net.Socket s = null;
         try {
             s = new java.net.Socket();
-            s.connect(new java.net.InetSocketAddress("127.0.0.1", 27715), 2500);
+            s.connect(new java.net.InetSocketAddress("127.0.0.1", ConfigManager.reportPort()), 2500);
             s.setSoTimeout(3000);
             java.io.OutputStream os = s.getOutputStream();
             os.write((cmd + "\n").getBytes("UTF-8"));
@@ -1665,12 +1851,12 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 本机 socket 通道：连闲鱼主进程的报告服务（127.0.0.1:27715，无任何权限依赖）。返回 {内容, 失败原因} */
+    /** 本机 socket 通道：连本用户闲鱼主进程的报告服务（127.0.0.1:27715+userId，无任何权限依赖）。返回 {内容, 失败原因} */
     private static String[] readViaSocket() {
         java.net.Socket s = null;
         try {
             s = new java.net.Socket();
-            s.connect(new java.net.InetSocketAddress("127.0.0.1", 27715), 2500);
+            s.connect(new java.net.InetSocketAddress("127.0.0.1", ConfigManager.reportPort()), 2500);
             s.setSoTimeout(3000);
             java.io.OutputStream os = s.getOutputStream();
             os.write("REPORT\n".getBytes("UTF-8"));
