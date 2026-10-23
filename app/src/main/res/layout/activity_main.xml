@@ -11,9 +11,11 @@
         android:src="@drawable/bg_blobs"
         android:importantForAccessibility="no" />
 
+    <!-- fitsSystemWindows：沉浸式下由它给内容层补状态栏/导航栏 inset，光斑背景则保持满屏 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:fitsSystemWindows="true"
         android:orientation="vertical">
 
         <!-- ============ 页面容器 ============ -->
@@ -105,7 +107,7 @@
                                     android:id="@+id/tvVersion"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="v1.1.4 · LSPosed"
+                                    android:text="v1.1.7 · LSPosed"
                                     android:textColor="@color/brand_deep"
                                     android:textSize="10sp"
                                     android:textStyle="bold" />
@@ -1517,6 +1519,42 @@
                                         android:layout_height="wrap_content"
                                         android:layout_marginStart="8dp" />
                                 </LinearLayout>
+                                <View
+                                    android:layout_width="match_parent"
+                                    android:layout_height="1dp"
+                                    android:layout_marginLeft="14dp"
+                                    android:layout_marginRight="14dp"
+                                    android:background="#0F17181C" />
+                                <!-- 保存配置（v1.1.6）：数量框未失焦也能一次落盘 -->
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="vertical"
+                                    android:paddingLeft="13dp"
+                                    android:paddingRight="13dp"
+                                    android:paddingTop="10dp"
+                                    android:paddingBottom="12dp">
+
+                                    <Button
+                                        android:id="@+id/btnSaveBag"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="42dp"
+                                        android:background="@drawable/bg_btn_run"
+                                        android:letterSpacing="0.1"
+                                        android:text="保存配置"
+                                        android:textColor="@color/btn_text"
+                                        android:textSize="13sp"
+                                        android:textStyle="bold" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_gravity="center_horizontal"
+                                        android:layout_marginTop="6dp"
+                                        android:text="改完数量点这里即存，不必先点别处"
+                                        android:textColor="@color/text_sub"
+                                        android:textSize="9.5sp" />
+                                </LinearLayout>
                             </LinearLayout>
                         </LinearLayout>
 
@@ -1932,7 +1970,7 @@
                                     android:id="@+id/tvGhVal"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="v1.1.4 ›"
+                                    android:text="v1.1.7 ›"
                                     android:textColor="@color/text_sub"
                                     android:textSize="11sp" />
                             </LinearLayout>
