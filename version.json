@@ -1,6 +1,6 @@
 {
-  "latest": "1.1.8",
+  "latest": "1.1.9",
   "url": "https://github.com/Lotuszn/piggyhand-fish/releases/latest",
   "cnUrl": "https://gitee.com/lotuszn/piggyhand-fish/releases",
-  "notes": "v1.1.8 更新：强化功能新增「不显示桌面图标」开关，隐藏后桌面不再出现图标；隐藏状态可直接从 LSPosed 模块页右下角按钮进入界面"
+  "notes": "v1.1.9 更新：新增「去除开屏广告」，冷启动与热启动都跳过，点开直接进首页；强化功能新增「不显示桌面图标」开关；修复每日任务与鱼塘任务在部分机型上自动执行失败后当天不再重试的问题"
 }

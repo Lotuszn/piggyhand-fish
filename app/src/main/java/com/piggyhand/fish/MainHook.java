@@ -41,6 +41,8 @@ public class MainHook implements IXposedHookLoadPackage {
         RhFeedCols.hook(lpp.classLoader);
         // v1.1.4 🖼 UI 比例（常驻注册，RhUiScale 回调内 3s 热读 uiScaleOn/uiScalePercent）
         RhUiScale.hook(lpp.classLoader);
+        // 🚫 去除开屏广告（常驻注册，RhSplashAd 回调内 60s 热读 noSplashAd）
+        RhSplashAd.hook(lpp.classLoader);
         applyRules(lpp);
         if (cfg.adSdkPresets) hookAdSdkPresets(lpp);
         if (cfg.scout) scout(lpp);
