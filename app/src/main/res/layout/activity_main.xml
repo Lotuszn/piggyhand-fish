@@ -974,7 +974,7 @@
                                             android:layout_width="wrap_content"
                                             android:layout_height="wrap_content"
                                             android:layout_marginTop="2dp"
-                                            android:text="隐藏后桌面不再出现图标；下次打开可用 adb 命令拉起本界面"
+                                            android:text="隐藏后桌面不再出现图标"
                                             android:textColor="@color/text_sub"
                                             android:textSize="9.5sp" />
                                     </LinearLayout>

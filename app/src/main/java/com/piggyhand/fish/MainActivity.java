@@ -271,10 +271,8 @@ public class MainActivity extends Activity {
                 put("hideIcon", on);
                 applyLauncherIcon(on);
                 Toast.makeText(MainActivity.this,
-                        on ? "🖥 桌面图标已隐藏 · 打开本界面：adb shell am start -n "
-                                + "com.piggyhand.fish/.MainActivity"
-                           : "🖥 桌面图标已恢复",
-                        Toast.LENGTH_LONG).show();
+                        on ? "桌面图标已隐藏" : "桌面图标已恢复",
+                        Toast.LENGTH_SHORT).show();
             }
         });
         // 启动时对齐一次实际组件状态：覆盖安装后 alias 会回到默认 enabled，这里按配置还原用户的隐藏选择
