@@ -1,6 +1,6 @@
 {
-  "latest": "1.1.9",
+  "latest": "1.1.7",
   "url": "https://github.com/Lotuszn/piggyhand-fish/releases/latest",
   "cnUrl": "https://gitee.com/lotuszn/piggyhand-fish/releases",
-  "notes": "v1.1.9 更新：新增「去除开屏广告」，冷启动与热启动都跳过，点开直接进首页；强化功能新增「不显示桌面图标」开关；修复每日任务与鱼塘任务在部分机型上自动执行失败后当天不再重试的问题"
+  "notes": "v1.1.7 更新：主页沉浸式，状态栏与导航栏透明、光斑背景整屏铺满；分身与主空间激活状态独立判定；背包配置一键保存"
 }
