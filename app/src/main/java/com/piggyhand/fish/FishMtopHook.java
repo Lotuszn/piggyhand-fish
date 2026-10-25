@@ -416,6 +416,22 @@ public final class FishMtopHook {
                                     } else if (req != null && req.trim().equals("REPORT")) {
                                         body = readCacheFile("rh_tasks_result.txt");
                                         if (body == null) body = "";
+                                    } else if (req != null && req.trim().equals("UI")) {
+                                        // 桌面图标隐藏后的软件入口：显式 ComponentName 拉起配置界面。
+                                        // 模块跑在闲鱼进程（另一个 uid），跨包启动必须带 NEW_TASK；
+                                        // 宿主要在后台时被系统拦是已知限制，adb 的 am start 可作兜底。
+                                        try {
+                                            android.content.Intent uit = new android.content.Intent();
+                                            uit.setComponent(new android.content.ComponentName(
+                                                    "com.piggyhand.fish", "com.piggyhand.fish.MainActivity"));
+                                            uit.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                                            appCtx.startActivity(uit);
+                                            body = "OK";
+                                            log("[ui] launch main activity requested");
+                                        } catch (Throwable t) {
+                                            body = "FAIL " + t;
+                                            log("[ui] launch FAIL: " + t);
+                                        }
                                     } else if (req != null && req.startsWith("POND_REPORT")) {
                                         // v1.0.9 鱼塘任务报告读取
                                         body = readCacheFile("rh_tasks_pond.txt");

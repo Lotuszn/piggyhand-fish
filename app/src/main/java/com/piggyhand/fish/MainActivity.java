@@ -45,6 +45,8 @@ public class MainActivity extends Activity {
     private static final String ACTION_MTOP_CALL = "com.piggyhand.fish.MTOP_CALL";
     private static final String ACTION_RESULT = "com.piggyhand.fish.RESULT";
     private static final String FISH_PKG = "com.taobao.idlefish";
+    /** 桌面图标载体：AndroidManifest 里的 activity-alias，禁用它即可隐藏图标（不影响本界面被显式拉起） */
+    private static final String LAUNCHER_ALIAS = "com.piggyhand.fish.LauncherAlias";
     private static final String RELEASES_URL =
             "https://github.com/Lotuszn/piggyhand-fish/releases/latest";
     private static final String GITEE_RELEASES_URL =
@@ -85,7 +87,7 @@ public class MainActivity extends Activity {
     private final java.util.concurrent.atomic.AtomicBoolean drawerBusy2 = new java.util.concurrent.atomic.AtomicBoolean(false);
     private final java.util.concurrent.atomic.AtomicBoolean drawerBusy3 = new java.util.concurrent.atomic.AtomicBoolean(false);
     private View linkPicker; // 下载渠道选择弹层（非空 = 正在显示）
-    private LiquidSwitch swAutoRun, swMtop, swAds, swScout, swPolish, swToast, swFishMedia, swPondTask, swNoChatSwipe;
+    private LiquidSwitch swAutoRun, swMtop, swAds, swScout, swPolish, swToast, swFishMedia, swPondTask, swNoChatSwipe, swHideIcon;
     // 🎒 背包自动使用：6 道具行（输入框+开关）
     private android.widget.EditText etBagLuck, etBag8, etBag12, etBagRocket, etBagDouble, etBagGgk;
     private LiquidSwitch swBagLuck, swBag8, swBag12, swBagRocket, swBagDouble, swBagGgk;
@@ -166,6 +168,7 @@ public class MainActivity extends Activity {
         swFishMedia = findViewById(R.id.swFishMedia);
         swPondTask = findViewById(R.id.swPondTask);
         swNoChatSwipe = findViewById(R.id.swNoChatSwipe);
+        swHideIcon = findViewById(R.id.swHideIcon);
         // 🎒 背包功能控件
         etBagLuck = findViewById(R.id.etBagLuck);       swBagLuck = findViewById(R.id.swBagLuck);
         etBag8 = findViewById(R.id.etBag8);             swBag8 = findViewById(R.id.swBag8);
@@ -259,6 +262,23 @@ public class MainActivity extends Activity {
         swNoChatSwipe.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
             @Override public void onToggle(boolean on) { put("noChatSwipe", on); }
         });
+        // 🖥 不显示桌面图标：桌面图标由 LauncherAlias 承载，禁用 alias 即可隐藏（本界面不受影响）
+        final boolean hideIconCfg = cfg.optBoolean("hideIcon", false);
+        swHideIcon.setOnSilent(hideIconCfg);
+        swHideIcon.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+            @Override
+            public void onToggle(boolean on) {
+                put("hideIcon", on);
+                applyLauncherIcon(on);
+                Toast.makeText(MainActivity.this,
+                        on ? "🖥 桌面图标已隐藏 · 打开本界面：adb shell am start -n "
+                                + "com.piggyhand.fish/.MainActivity"
+                           : "🖥 桌面图标已恢复",
+                        Toast.LENGTH_LONG).show();
+            }
+        });
+        // 启动时对齐一次实际组件状态：覆盖安装后 alias 会回到默认 enabled，这里按配置还原用户的隐藏选择
+        applyLauncherIcon(hideIconCfg);
         // 🎒 背包自动使用：初始态 + 绑定（数量 -1=用到0，留空/0=不用；开关打开立即执行一轮）
         installBag(cfg, etBagLuck, swBagLuck, "bagLuckOn", "bagLuckNum", "好运骰");
         installBag(cfg, etBag8, swBag8, "bag8On", "bag8Num", "八面骰");
@@ -1671,6 +1691,24 @@ public class MainActivity extends Activity {
                 });
             }
         }, "rh-bag-kick").start();
+    }
+
+    /**
+     * 桌面图标显隐：图标由 manifest 的 activity-alias（LauncherAlias）承载，MainActivity 本身不挂
+     * LAUNCHER，所以禁用 alias 只影响桌面入口，界面照样能被显式拉起。
+     * 改自己包的组件状态不需要任何权限；DONT_KILL_APP 避免切换时把当前界面一起杀掉。
+     */
+    private void applyLauncherIcon(boolean hide) {
+        try {
+            getPackageManager().setComponentEnabledSetting(
+                    new android.content.ComponentName(this, LAUNCHER_ALIAS),
+                    hide ? android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                         : android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    android.content.pm.PackageManager.DONT_KILL_APP);
+            android.util.Log.i("RhIcon", "[icon] launcher alias hidden=" + hide);
+        } catch (Throwable t) {
+            android.util.Log.e("RhIcon", "[icon] setComponentEnabledSetting FAIL", t);
+        }
     }
 
     private void put(String key, Object val) {
