@@ -24,7 +24,17 @@
              这样运行时能单独禁用 alias 把图标藏起来，而不影响界面被拉起 -->
         <activity
             android:name=".MainActivity"
-            android:exported="true" />
+            android:exported="true">
+            <!-- LSPosed 管理器模块页右下角那个「启动」按钮靠这个 category 认入口：
+                 AppHelper.getSettingsIntent 第一优先级查 MODULE_SETTINGS，查不到才退回
+                 CATEGORY_INFO / CATEGORY_LAUNCHER。必须挂在 <activity> 上而不是 alias 上，
+                 否则 alias 一旦被禁用，按钮会跟着消失（隐藏图标后就没法从 LSPosed 进界面了）。
+                 桌面只认 CATEGORY_LAUNCHER，所以这条不会多出图标。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" />
+            </intent-filter>
+        </activity>
 
         <activity-alias
             android:name=".LauncherAlias"
