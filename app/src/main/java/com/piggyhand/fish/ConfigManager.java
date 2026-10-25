@@ -52,6 +52,8 @@ public class ConfigManager {
     public boolean pond = true;
     /** 💬 禁用聊天页左滑进对方主页手势（RhChatHook 双层拦截：容器触摸+主页跳转） */
     public boolean noChatSwipe = false;
+    /** 🖥 不显示桌面图标：禁用 LauncherAlias（桌面图标没了，MainActivity 仍可被显式拉起） */
+    public boolean hideIcon = false;
     /* 🎒 背包自动使用（FishTaskAuto.doBagUse）：骰子走 map.roll 地图掷骰，刮刮卡走 prop.use；数量 -1=用到 0 */
     public boolean bagLuckOn = false;    public int bagLuckNum = 0;      // 好运骰 LUCKY_DICE
     public boolean bag8On = false;       public int bag8Num = 0;         // 八面骰 SURFACE8_DICE
@@ -197,6 +199,7 @@ public class ConfigManager {
             c.fishMedia = o.optBoolean("fishMedia", true);
             c.pond = o.optBoolean("pond", true);
             c.noChatSwipe = o.optBoolean("noChatSwipe", false);
+            c.hideIcon = o.optBoolean("hideIcon", false);
             c.bagLuckOn = o.optBoolean("bagLuckOn", false);       c.bagLuckNum = o.optInt("bagLuckNum", 0);
             c.bag8On = o.optBoolean("bag8On", false);             c.bag8Num = o.optInt("bag8Num", 0);
             c.bag12On = o.optBoolean("bag12On", false);           c.bag12Num = o.optInt("bag12Num", 0);
