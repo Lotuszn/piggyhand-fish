@@ -344,6 +344,9 @@ public final class FishMtopHook {
             RhPondTask.autoRunDaily(appCtx);
             // v1.1.9 🏅 会员任务自动跑：开关 oliverTask=true 且当日未跑时延迟 45s 触发
             RhOlivertask.autoRunDaily(appCtx);
+            // 会员页顶部「500 每日经验」：独立体系（user.level.exp.fetch），任务全完成也要领，
+            // 所以单独起一条 20s 的线，不挂在 45s 的任务链上
+            RhOlivertask.autoRunDailyExp(appCtx);
             // 闲鱼币余额日志（差分法今日领取）：每分钟取值写 zhushou_*.log，仅主进程
             FishTaskAuto.startCoinBalanceLogger(appCtx);
             // 报告 Socket 服务（仅主进程）：模块 UI 经 127.0.0.1:27715 免权限读取钓鱼报告，

@@ -1,6 +1,6 @@
 {
-  "latest": "1.1.7",
+  "latest": "1.1.10",
   "url": "https://github.com/Lotuszn/piggyhand-fish/releases/latest",
   "cnUrl": "https://gitee.com/lotuszn/piggyhand-fish/releases",
-  "notes": "v1.1.7 更新：主页沉浸式，状态栏与导航栏透明、光斑背景整屏铺满；分身与主空间激活状态独立判定；背包配置一键保存"
+  "notes": "v1.1.10 更新：会员页顶部「500 每日经验」自动领取（与 4 条会员任务独立，任务全做完也照领）；含去除开屏广告、不显示桌面图标、每日任务失败自动重试"
 }

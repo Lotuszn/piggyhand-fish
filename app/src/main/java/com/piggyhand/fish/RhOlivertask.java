@@ -28,6 +28,18 @@ public final class RhOlivertask {
     /** 闲鱼会员经验值活动 ID（2026-10-25 抓包值；活动换 ID 时改这里） */
     public static final String ACTIVITY_ID = "102178";
 
+    /* ---------- 每日 500 经验（会员页顶部气泡） ----------
+     * 与下面 4 个任务是**两套体系**：H5 点气泡实测落到的接口是
+     *   mtop.idle.user.level.exp.fetch v1.0  body = {"expId":1,"expType":2}
+     * 领完气泡文案变「明天来」，通关进度 +500（实测 133850 → 134350）。
+     * 它走 user.level，不吃 oliver 的 activityId/asac —— 所以 4 个任务全 COMPLETE、
+     * isDoneToday=true 的时候，这一项**照样还能领**，闸门必须独立，不能挂在任务链里。
+     */
+    static final String API_DAILY_EXP = "mtop.idle.user.level.exp.fetch";
+    static final String DAILY_EXP_BODY = "{\"expId\":1,\"expType\":2}";
+    /** 每日经验领取标记（毫秒失效时刻），与 DONE_FILE 分开存 */
+    static final String EXP_FILE = "rh_oliver_exp.txt";
+
     private RhOlivertask() {}
 
     /**
@@ -143,6 +155,116 @@ public final class RhOlivertask {
     }
 
     /**
+     * 每日经验自动领取入口：与 autoRunDaily 平行，**不受 4 个任务完成状态影响**。
+     * 延迟 20s（任务链 45s 才启动，中间留空档，避免两路同时抢 mtop 通道）。
+     */
+    public static void autoRunDailyExp(final Context ctx) {
+        try {
+            // 仅主进程
+            String proc = null;
+            try {
+                proc = (String) android.app.Application.class.getMethod("getProcessName").invoke(null);
+            } catch (Throwable ignored) {
+            }
+            if (proc != null && proc.contains(":")) return;
+
+            // 开关沿用 oliverTask（同一个「会员任务」功能，不额外加 UI）
+            boolean on = true;
+            try {
+                ConfigManager cfg = ConfigManager.load();
+                if (cfg != null) on = cfg.oliverTask;
+            } catch (Throwable ignored) {
+            }
+            if (!on) {
+                RhFileLog.write("[oliver-exp] disabled by config (oliverTask=false), skip");
+                return;
+            }
+            if (isExpDoneToday(ctx)) {
+                RhFileLog.write("[oliver-exp] skip: already claimed today");
+                return;
+            }
+
+            RhFileLog.write("[oliver-exp] scheduled in 20s");
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        Thread.sleep(20000);
+                        RhFileLog.write("[oliver-exp] " + claimDailyExp(ctx));
+                    } catch (Throwable t) {
+                        RhFileLog.write("[oliver-exp] fail: " + t);
+                    }
+                }
+            }, "rh-oliver-exp").start();
+        } catch (Throwable t) {
+            RhFileLog.write("[oliver-exp] autoRunDailyExp err: " + t);
+        }
+    }
+
+    /**
+     * 真领一次，返回一行结果文本（写进运行日志 + 报告）。
+     *
+     * 回包现状（2026-10-26 实测）：这条链的回包不走 mtopsdk 的 MtopFinishEvent，
+     * 我们的响应捕获（FishMtopHook 的 finish 事件 hook）管不到，callAndWait 大概率拿 null。
+     * 所以按「已发出即记账」处理 —— 接口本身幂等，已领再打只会返回已领错误，一天一次不会重复加经验。
+     * 万一哪天拿到回包且 ret 不含 SUCCESS，则不落标记，下次进 App 再试。
+     */
+    static String claimDailyExp(Context ctx) {
+        String body;
+        try {
+            body = RhPondTask.callAndWait(ctx, API_DAILY_EXP, "1.0", DAILY_EXP_BODY, "expfetch", 3500);
+        } catch (Throwable t) {
+            return "callAndWait 异常，不记账：" + t;
+        }
+        if (body != null && body.length() > 0) {
+            if (body.indexOf("SUCCESS") < 0) {
+                return "回包未成功，不记账，下次再试 -> " + head(body, 180);
+            }
+            markExpDone(ctx);
+            return "领取成功 +500 经验 -> " + head(body, 180);
+        }
+        // 无回包：请求已由 direct 通道发出（日志 [direct] sent 可查），按已领记账
+        markExpDone(ctx);
+        return "已发送 " + API_DAILY_EXP + " " + DAILY_EXP_BODY
+                + "（该接口回包不在捕获通道内，按已领取记账）";
+    }
+
+    private static String head(String s, int n) {
+        return s.length() <= n ? s : s.substring(0, n) + "…";
+    }
+
+    private static java.io.File expFile(Context ctx) {
+        return new java.io.File(rhDir(ctx), EXP_FILE);
+    }
+
+    /** 每日经验今日是否已领（标记过期或读坏一律当未领，最多多打一次幂等接口） */
+    static boolean isExpDoneToday(Context ctx) {
+        try {
+            java.io.File f = expFile(ctx);
+            if (!f.exists() || f.length() == 0) return false;
+            java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(f));
+            String line = br.readLine();
+            br.close();
+            if (line == null) return false;
+            long until = Long.parseLong(line.trim());
+            return System.currentTimeMillis() < until;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static void markExpDone(Context ctx) {
+        try {
+            java.io.File f = expFile(ctx);
+            java.io.FileWriter w = new java.io.FileWriter(f, false);
+            w.write(String.valueOf(nextMidnight()));
+            w.close();
+        } catch (Throwable t) {
+            RhFileLog.write("[oliver-exp] mark write fail: " + t);
+        }
+    }
+
+    /**
      * 并发闸门：oliver.show 被并发调用时服务端会回 208B 非 JSON（限流页），
      * 一次连点就能把整轮跑废。同一时刻只放行一轮。
      */
@@ -241,6 +363,15 @@ public final class RhOlivertask {
         long t0 = System.currentTimeMillis();
         RhReport sb = new RhReport();
         sb.append("🏅 会员任务报告 ").append(now()).append('\n');
+
+        // 每日经验与 4 个任务是两套体系：任务全做完也要领，所以必须放在 isDoneToday 闸门之前
+        try {
+            if (!isExpDoneToday(ctx)) {
+                sb.append("[0] 每日经验 ").append(claimDailyExp(ctx)).append('\n');
+            }
+        } catch (Throwable t) {
+            sb.append("[0] 每日经验异常：").append(t).append('\n');
+        }
 
         // 进引擎前的第一道闸：本地已完成标记还在有效期内，连 show 都不用打
         if (isDoneToday(ctx)) {
