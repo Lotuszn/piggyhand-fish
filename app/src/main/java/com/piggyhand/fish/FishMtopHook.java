@@ -342,6 +342,8 @@ public final class FishMtopHook {
             FishTaskAuto.autoRunDaily(appCtx);
             // v1.0.9 🐟 鱼塘任务自动跑：开关 pond=true 且当日未跑时延迟 40s 触发
             RhPondTask.autoRunDaily(appCtx);
+            // v1.1.9 🏅 会员任务自动跑：开关 oliverTask=true 且当日未跑时延迟 45s 触发
+            RhOlivertask.autoRunDaily(appCtx);
             // 闲鱼币余额日志（差分法今日领取）：每分钟取值写 zhushou_*.log，仅主进程
             FishTaskAuto.startCoinBalanceLogger(appCtx);
             // 报告 Socket 服务（仅主进程）：模块 UI 经 127.0.0.1:27715 免权限读取钓鱼报告，
@@ -416,10 +418,54 @@ public final class FishMtopHook {
                                     } else if (req != null && req.trim().equals("REPORT")) {
                                         body = readCacheFile("rh_tasks_result.txt");
                                         if (body == null) body = "";
+                                    } else if (req != null && req.trim().equals("UI")) {
+                                        // 桌面图标隐藏后的软件入口：显式 ComponentName 拉起配置界面。
+                                        // 模块跑在闲鱼进程（另一个 uid），跨包启动必须带 NEW_TASK；
+                                        // 宿主要在后台时被系统拦是已知限制，adb 的 am start 可作兜底。
+                                        try {
+                                            android.content.Intent uit = new android.content.Intent();
+                                            uit.setComponent(new android.content.ComponentName(
+                                                    "com.piggyhand.fish", "com.piggyhand.fish.MainActivity"));
+                                            uit.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                                            appCtx.startActivity(uit);
+                                            body = "OK";
+                                            log("[ui] launch main activity requested");
+                                        } catch (Throwable t) {
+                                            body = "FAIL " + t;
+                                            log("[ui] launch FAIL: " + t);
+                                        }
                                     } else if (req != null && req.startsWith("POND_REPORT")) {
                                         // v1.0.9 鱼塘任务报告读取
                                         body = readCacheFile("rh_tasks_pond.txt");
                                         if (body == null) body = "NO_REPORT";
+                                    } else if (req != null && req.startsWith("OLIVER_REPORT")) {
+                                        // v1.1.9 会员任务报告读取（必须先于 OLIVER 判断，
+                                        // 否则 OLIVER_REPORT 会被前缀匹配吃掉）
+                                        body = readCacheFile("rh_tasks_oliver.txt");
+                                        if (body == null) body = "NO_REPORT";
+                                    } else if (req != null && req.startsWith("OLIVER_STATE")) {
+                                        // v1.1.9 会员任务完成状态查询（同样必须先于 OLIVER 前缀）
+                                        // 返回 "DONE <失效毫秒>" 或 "TODO"
+                                        try {
+                                            body = RhOlivertask.stateText(appCtx);
+                                        } catch (Throwable t) {
+                                            body = "TODO";
+                                        }
+                                    } else if (req != null && req.startsWith("OLIVER")) {
+                                        // v1.1.9 会员任务引擎触发（后台执行，结果 OLIVER_REPORT 读）
+                                        final Context oc = appCtx;
+                                        new Thread(new Runnable() {
+                                            @Override
+                                            public void run() {
+                                                try {
+                                                    RhOlivertask.run(oc);
+                                                    log("[oliver] engine done");
+                                                } catch (Throwable t) {
+                                                    log("[oliver] engine fail: " + t);
+                                                }
+                                            }
+                                        }, "rh-oliver").start();
+                                        body = "OK started";
                                     } else if (req != null && req.startsWith("POND")) {
                                         // v1.0.9 鱼塘任务引擎触发（后台执行，结果 POND_REPORT 读）
                                         final Context pc = appCtx;
@@ -798,6 +844,14 @@ public final class FishMtopHook {
             java.io.FileWriter w = new java.io.FileWriter(f, false);
             w.write(content);
             w.close();
+            // 同写一个毫秒戳旁路文件：/sdcard 的 mtime 只有 1~2s 精度，
+            // 等待方（RhPondTask.callAndWait）靠它判断「这是本轮响应」而不是旧文件
+            java.io.File s = cacheFile(name + ".stamp");
+            if (s != null) {
+                java.io.FileWriter sw = new java.io.FileWriter(s, false);
+                sw.write(String.valueOf(System.currentTimeMillis()));
+                sw.close();
+            }
         } catch (Throwable t) {
             log("writeCacheFile " + name + " FAIL: " + t);
         }

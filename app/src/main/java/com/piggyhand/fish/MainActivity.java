@@ -45,6 +45,8 @@ public class MainActivity extends Activity {
     private static final String ACTION_MTOP_CALL = "com.piggyhand.fish.MTOP_CALL";
     private static final String ACTION_RESULT = "com.piggyhand.fish.RESULT";
     private static final String FISH_PKG = "com.taobao.idlefish";
+    /** 桌面图标载体：AndroidManifest 里的 activity-alias，禁用它即可隐藏图标（不影响本界面被显式拉起） */
+    private static final String LAUNCHER_ALIAS = "com.piggyhand.fish.LauncherAlias";
     private static final String RELEASES_URL =
             "https://github.com/Lotuszn/piggyhand-fish/releases/latest";
     private static final String GITEE_RELEASES_URL =
@@ -85,7 +87,9 @@ public class MainActivity extends Activity {
     private final java.util.concurrent.atomic.AtomicBoolean drawerBusy2 = new java.util.concurrent.atomic.AtomicBoolean(false);
     private final java.util.concurrent.atomic.AtomicBoolean drawerBusy3 = new java.util.concurrent.atomic.AtomicBoolean(false);
     private View linkPicker; // 下载渠道选择弹层（非空 = 正在显示）
-    private LiquidSwitch swAutoRun, swMtop, swAds, swScout, swPolish, swToast, swFishMedia, swPondTask, swNoChatSwipe;
+    private LiquidSwitch swAutoRun, swMtop, swAds, swScout, swPolish, swToast, swFishMedia, swPondTask, swNoChatSwipe, swHideIcon;
+    private LiquidSwitch swNoSplash; // 🚫 去除开屏广告：掐断 SplashAdController 入口
+    private LiquidSwitch swOlivertask; // 🏅 会员任务：每日自动完成会员经验值任务
     // 🎒 背包自动使用：6 道具行（输入框+开关）
     private android.widget.EditText etBagLuck, etBag8, etBag12, etBagRocket, etBagDouble, etBagGgk;
     private LiquidSwitch swBagLuck, swBag8, swBag12, swBagRocket, swBagDouble, swBagGgk;
@@ -151,6 +155,7 @@ public class MainActivity extends Activity {
         swAutoRun = findViewById(R.id.swAutoRun);
         swMtop = findViewById(R.id.swMtop);
         swAds = findViewById(R.id.swAds);
+        swNoSplash = findViewById(R.id.swNoSplash);
         swScout = findViewById(R.id.swScout);
         swPolish = findViewById(R.id.swPolish);
         swToast = findViewById(R.id.swToast);
@@ -165,7 +170,9 @@ public class MainActivity extends Activity {
         tvDrawerArrow3 = findViewById(R.id.tvDrawerArrow3);
         swFishMedia = findViewById(R.id.swFishMedia);
         swPondTask = findViewById(R.id.swPondTask);
+        swOlivertask = findViewById(R.id.swOlivertask);
         swNoChatSwipe = findViewById(R.id.swNoChatSwipe);
+        swHideIcon = findViewById(R.id.swHideIcon);
         // 🎒 背包功能控件
         etBagLuck = findViewById(R.id.etBagLuck);       swBagLuck = findViewById(R.id.swBagLuck);
         etBag8 = findViewById(R.id.etBag8);             swBag8 = findViewById(R.id.swBag8);
@@ -214,6 +221,7 @@ public class MainActivity extends Activity {
         swAutoRun.setOnSilent(cfg.optBoolean("autoRun", true));
         swMtop.setOnSilent(cfg.optBoolean("mtopHook", true));
         swAds.setOnSilent(cfg.optBoolean("adSdkPresets", true));
+        swNoSplash.setOnSilent(cfg.optBoolean("noSplashAd", true));
         swScout.setOnSilent(true); // 侦察模式 UI 已隐藏：功能保持默认开启
         swPolish.setOnSilent(cfg.optBoolean("polish", true));
         swToast.setOnSilent(cfg.optBoolean("toastNotify", true));
@@ -229,6 +237,10 @@ public class MainActivity extends Activity {
         });
         swAds.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
             @Override public void onToggle(boolean on) { put("adSdkPresets", on); }
+        });
+        // 🚫 去除开屏广告（RhSplashAd 回调内 60s 热读 noSplashAd）
+        swNoSplash.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+            @Override public void onToggle(boolean on) { put("noSplashAd", on); }
         });
         swScout.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
             @Override
@@ -254,11 +266,31 @@ public class MainActivity extends Activity {
         swPondTask.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
             @Override public void onToggle(boolean on) { put("pond", on); }
         });
+        // 🏅 会员任务开关：开启=打开闲鱼自动跑一次（RhOlivertask.autoRunDaily 读 oliverTask）
+        swOlivertask.setOnSilent(cfg.optBoolean("oliverTask", true));
+        swOlivertask.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+            @Override public void onToggle(boolean on) { put("oliverTask", on); }
+        });
         // 💬 禁止聊天左滑：禁用聊天页左滑进对方主页手势（RhChatHook 60s 热读 noChatSwipe）
         swNoChatSwipe.setOnSilent(cfg.optBoolean("noChatSwipe", false));
         swNoChatSwipe.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
             @Override public void onToggle(boolean on) { put("noChatSwipe", on); }
         });
+        // 🖥 不显示桌面图标：桌面图标由 LauncherAlias 承载，禁用 alias 即可隐藏（本界面不受影响）
+        final boolean hideIconCfg = cfg.optBoolean("hideIcon", false);
+        swHideIcon.setOnSilent(hideIconCfg);
+        swHideIcon.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+            @Override
+            public void onToggle(boolean on) {
+                put("hideIcon", on);
+                applyLauncherIcon(on);
+                Toast.makeText(MainActivity.this,
+                        on ? "桌面图标已隐藏" : "桌面图标已恢复",
+                        Toast.LENGTH_SHORT).show();
+            }
+        });
+        // 启动时对齐一次实际组件状态：覆盖安装后 alias 会回到默认 enabled，这里按配置还原用户的隐藏选择
+        applyLauncherIcon(hideIconCfg);
         // 🎒 背包自动使用：初始态 + 绑定（数量 -1=用到0，留空/0=不用；开关打开立即执行一轮）
         installBag(cfg, etBagLuck, swBagLuck, "bagLuckOn", "bagLuckNum", "好运骰");
         installBag(cfg, etBag8, swBag8, "bag8On", "bag8Num", "八面骰");
@@ -309,6 +341,54 @@ public class MainActivity extends Activity {
                         });
                     }
                 }, "rh-pond-ui").start();
+            }
+        });
+
+        // 🏅 会员任务：点击整行=立即执行一次。已去掉结果弹窗，只用一句 Toast 交代；完整报告仍落盘
+        findViewById(R.id.rowOlivertask).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                // 只认「本次点击之后生成」的报告：OLIVER_REPORT 永远回最近一次落盘的那份，
+                // 按时间戳比对才不会把上一轮的结果当成本次结果（宽容 3s，覆盖秒级取整）。
+                final long since = System.currentTimeMillis() - 3000;
+                toastUi("🏅 正在检查会员任务…");
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        // 前置状态：引擎侧完成标记有效期内直接跳过，一个接口都不用打
+                        String st = socketCmd("OLIVER_STATE");
+                        android.util.Log.i("RHO", "pre-check: " + st);
+                        if (st != null && st.contains("DONE")) {
+                            toastUi("🏅 今日会员任务已完成，跳过（明天 0 点重置）");
+                            return;
+                        }
+
+                        String kick = socketCmd("OLIVER");
+                        final boolean acked = kick != null && kick.length() > 0;
+                        android.util.Log.i("RHO", "click: acked=" + acked);
+                        // 通了就正常等报告；没通只快速探一轮（闲鱼卡顿时指令可能已进引擎），
+                        // 还探不到就直接判死并拉起闲鱼——每轮 socketCmd 自带 3s 超时，轮多了白等。
+                        String rep = acked ? pollOliverReport(since, 6) : pollOliverReport(since, 1);
+                        android.util.Log.i("RHO", "phase1 rep=" + (rep == null ? "null" : "ok"));
+                        if (rep == null) {
+                            // 两种情况都会走到这：①指令没送达（通道已被冻结）
+                            // ②指令送达了但引擎跑在后台被压住，报告迟迟不落盘。
+                            // 两者都只有「闲鱼到前台」能救，所以不区分 acked，一律兜底拉起来重发。
+                            toastUi("闲鱼不在前台，正在打开闲鱼执行…");
+                            android.util.Log.i("RHO", "phase1 dead -> open fish front");
+                            openFishFront();
+                            // 等通道真的活过来（闲鱼冷启动要几秒），活一条就发，别死等固定时长
+                            for (int i = 0; i < 5; i++) {
+                                sleepQuiet(2000);
+                                if (socketCmd("OLIVER_REPORT") != null) break;
+                            }
+                            socketCmd("OLIVER");
+                            rep = pollOliverReport(since, 15);        // 再给 30s
+                            android.util.Log.i("RHO", "phase2 rep=" + (rep == null ? "null" : "ok"));
+                        }
+                        toastUi(summarizeOliver(rep));
+                    }
+                }, "rh-oliver-ui").start();
             }
         });
 
@@ -1233,6 +1313,92 @@ public class MainActivity extends Activity {
 
     /** 🐟 鱼塘任务报告弹窗（等宽字体滚动查看） */
     private void showPondReport(String rep) {
+        showReportCard("🐟 鱼塘任务报告", rep, "稍后重新点击「鱼塘任务」查看。");
+    }
+
+    /**
+     * 会员任务：结果压缩成一句 Toast。
+     * 弹窗已按需求去掉，完整报告仍然写进 rh_tasks_oliver.txt 和模块日志，排障时照旧可查。
+     */
+    private static String summarizeOliver(String rep) {
+        if (rep == null) return "🏅 没拿到会员任务结果：先打开闲鱼再来点";
+        if (rep.contains("任务列表拉取失败")) return "🏅 任务列表拉取失败，隔一分钟再点";
+        if (rep.contains("没取到 asac")) return "🏅 活动参数缺失，本轮没执行";
+        if (rep.contains("上一轮还在执行")) return "🏅 上一轮还在跑，本次跳过";
+        if (rep.contains("今日任务已完成") || rep.contains("服务端显示全部完成"))
+            return "🏅 今日会员任务已完成，跳过";
+        String gain = "";
+        java.util.regex.Matcher g = java.util.regex.Pattern
+                .compile("共 \\+(\\d+) 经验").matcher(rep);
+        if (g.find() && !"0".equals(g.group(1))) gain = " +" + g.group(1) + " 经验";
+        java.util.regex.Matcher l = java.util.regex.Pattern
+                .compile("复核: (\\d+) 个未完成").matcher(rep);
+        if (l.find()) {
+            int left = Integer.parseInt(l.group(1));
+            if (left == 0) return "🏅 会员任务全部完成" + gain;
+            return "🏅 已执行，仍有 " + left + " 个未完成" + gain;
+        }
+        return "🏅 已执行，详情见日志" + gain;
+    }
+
+    /** 后台线程发 Toast 的简写 */
+    private void toastUi(final String msg) {
+        runUi(new Runnable() {
+            @Override public void run() {
+                Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    /** 轮询会员任务报告：只接受生成时间晚于 since 的那份，避免把上一轮的报告当成结果 */
+    private static String pollOliverReport(long since, int rounds) {
+        for (int i = 0; i < rounds; i++) {
+            sleepQuiet(1500);
+            String r = socketCmd("OLIVER_REPORT");
+            if (r == null) return null;   // 读超时＝通道已被冻结，再等也是白发，直接交给兜底
+            if (!r.contains("会员任务报告")) continue;
+            long t = parseReportTime(r);
+            if (t <= 0 || t >= since) return r;
+        }
+        return null;
+    }
+
+    /** 报告首行的 "yyyy-MM-dd HH:mm:ss" 转本地毫秒；解析失败返回 0（按有效处理） */
+    private static long parseReportTime(String rep) {
+        try {
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("(\\d{4})-(\\d{2})-(\\d{2}) (\\d{2}):(\\d{2}):(\\d{2})").matcher(rep);
+            if (!m.find()) return 0;
+            java.util.Calendar c = java.util.Calendar.getInstance();
+            c.set(Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)) - 1,
+                    Integer.parseInt(m.group(3)), Integer.parseInt(m.group(4)),
+                    Integer.parseInt(m.group(5)), Integer.parseInt(m.group(6)));
+            c.set(java.util.Calendar.MILLISECOND, 0);
+            return c.getTimeInMillis();
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    private static void sleepQuiet(long ms) {
+        try { Thread.sleep(ms); } catch (InterruptedException ignored) { }
+    }
+
+    /** 把闲鱼拉到前台：后台冻结时它不处理 socket 指令，只有前台能跑引擎 */
+    private void openFishFront() {
+        try {
+            android.content.Intent it = getPackageManager()
+                    .getLaunchIntentForPackage("com.taobao.idlefish");
+            if (it != null) {
+                it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(it);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 报告卡片通用弹层：标题 + 等宽正文（可滚） + 关闭 */
+    private void showReportCard(String head, String rep, String emptyHint) {
         try {
             final android.app.Dialog dlg = new android.app.Dialog(this);
             LinearLayout card = new LinearLayout(this);
@@ -1243,7 +1409,7 @@ public class MainActivity extends Activity {
             card.setBackground(bg);
 
             TextView title = new TextView(this);
-            title.setText("🐟 鱼塘任务报告");
+            title.setText(head);
             title.setTextSize(15);
             title.setTypeface(Typeface.DEFAULT_BOLD);
             title.setTextColor(0xFF17181C);
@@ -1264,7 +1430,7 @@ public class MainActivity extends Activity {
             android.widget.ScrollView sv = new android.widget.ScrollView(this);
             TextView body = new TextView(this);
             body.setText(rep == null || rep.length() == 0
-                    ? "报告尚未生成（闲鱼进程可能未运行，或引擎仍在执行）\n\n稍后重新点击「鱼塘任务」查看。" : rep);
+                    ? "报告尚未生成（闲鱼进程可能未运行，或引擎仍在执行）\n\n" + emptyHint : rep);
             body.setTextSize(11);
             body.setTypeface(Typeface.MONOSPACE);
             body.setTextColor(0xFF2A2E35);
@@ -1671,6 +1837,24 @@ public class MainActivity extends Activity {
                 });
             }
         }, "rh-bag-kick").start();
+    }
+
+    /**
+     * 桌面图标显隐：图标由 manifest 的 activity-alias（LauncherAlias）承载，MainActivity 本身不挂
+     * LAUNCHER，所以禁用 alias 只影响桌面入口，界面照样能被显式拉起。
+     * 改自己包的组件状态不需要任何权限；DONT_KILL_APP 避免切换时把当前界面一起杀掉。
+     */
+    private void applyLauncherIcon(boolean hide) {
+        try {
+            getPackageManager().setComponentEnabledSetting(
+                    new android.content.ComponentName(this, LAUNCHER_ALIAS),
+                    hide ? android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                         : android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    android.content.pm.PackageManager.DONT_KILL_APP);
+            android.util.Log.i("RhIcon", "[icon] launcher alias hidden=" + hide);
+        } catch (Throwable t) {
+            android.util.Log.e("RhIcon", "[icon] setComponentEnabledSetting FAIL", t);
+        }
     }
 
     private void put(String key, Object val) {

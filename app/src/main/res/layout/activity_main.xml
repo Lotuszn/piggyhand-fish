@@ -107,7 +107,7 @@
                                     android:id="@+id/tvVersion"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="v1.1.7 · LSPosed"
+                                    android:text="v1.1.9 · LSPosed"
                                     android:textColor="@color/brand_deep"
                                     android:textSize="10sp"
                                     android:textStyle="bold" />
@@ -736,6 +736,68 @@
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content" />
                             </LinearLayout>
+
+                            <View
+                                android:layout_width="match_parent"
+                                android:layout_height="1dp"
+                                android:background="#0F17181C" />
+
+                            <!-- 🏅 会员任务（v1.1.9）：点击整行=立即执行一次；开关=每天打开闲鱼自动执行 -->
+                            <LinearLayout
+                                android:id="@+id/rowOlivertask"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:background="@drawable/ripple_round"
+                                android:clickable="true"
+                                android:focusable="true"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingTop="9dp"
+                                android:paddingBottom="9dp">
+
+                                <FrameLayout
+                                    android:layout_width="27dp"
+                                    android:layout_height="27dp"
+                                    android:background="@drawable/bg_icon_o">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_gravity="center"
+                                        android:includeFontPadding="false"
+                                        android:text="🏅"
+                                        android:textSize="13sp" />
+                                </FrameLayout>
+
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="10dp"
+                                    android:layout_weight="1"
+                                    android:orientation="vertical">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="会员任务"
+                                        android:textColor="@color/text_main"
+                                        android:textSize="12.5sp"
+                                        android:textStyle="bold" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="自动完成会员经验值任务，每日 +900 经验 · 今日已完成会自动跳过"
+                                        android:textColor="@color/text_sub"
+                                        android:textSize="9.5sp" />
+                                </LinearLayout>
+
+                                <com.piggyhand.fish.LiquidSwitch
+                                    android:id="@+id/swOlivertask"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content" />
+                            </LinearLayout>
                         </LinearLayout>
                         </LinearLayout>
                         </LinearLayout>
@@ -810,6 +872,65 @@
                                     android:layout_height="1dp"
                                     android:layout_marginLeft="14dp"
                                     android:layout_marginRight="14dp"
+                                    android:background="#0F17181C" />
+
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:gravity="center_vertical"
+                                    android:orientation="horizontal"
+                                    android:paddingLeft="13dp"
+                                    android:paddingRight="13dp"
+                                    android:paddingTop="9dp"
+                                    android:paddingBottom="9dp">
+
+                                    <FrameLayout
+                                        android:layout_width="27dp"
+                                        android:layout_height="27dp"
+                                        android:background="@drawable/bg_icon_b">
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:layout_gravity="center"
+                                            android:includeFontPadding="false"
+                                            android:text="🚫"
+                                            android:textSize="13sp" />
+                                    </FrameLayout>
+
+                                    <LinearLayout
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="10dp"
+                                        android:layout_weight="1"
+                                        android:orientation="vertical">
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="去除开屏广告"
+                                            android:textColor="@color/text_main"
+                                            android:textSize="12.5sp"
+                                            android:textStyle="bold" />
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:layout_marginTop="2dp"
+                                            android:text="冷/热启动都跳过 · 秒进首页"
+                                            android:textColor="@color/text_sub"
+                                            android:textSize="9.5sp" />
+                                    </LinearLayout>
+
+                                    <com.piggyhand.fish.LiquidSwitch
+                                        android:id="@+id/swNoSplash"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content" />
+                                </LinearLayout>
+
+                                <View
+                                    android:layout_width="match_parent"
+                                    android:layout_height="1dp"
                                     android:background="#0F17181C" />
 
                                 <LinearLayout
@@ -921,6 +1042,66 @@
 
                                     <com.piggyhand.fish.LiquidSwitch
                                         android:id="@+id/swNoChatSwipe"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content" />
+                                </LinearLayout>
+
+                                <View
+                                    android:layout_width="match_parent"
+                                    android:layout_height="1dp"
+                                    android:background="#0F17181C" />
+
+                                <!-- 🖥 不显示桌面图标（隐藏 LauncherAlias；界面本身仍可被显式拉起） -->
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:gravity="center_vertical"
+                                    android:orientation="horizontal"
+                                    android:paddingLeft="13dp"
+                                    android:paddingRight="13dp"
+                                    android:paddingTop="9dp"
+                                    android:paddingBottom="9dp">
+
+                                    <FrameLayout
+                                        android:layout_width="27dp"
+                                        android:layout_height="27dp"
+                                        android:background="@drawable/bg_icon_p">
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:layout_gravity="center"
+                                            android:includeFontPadding="false"
+                                            android:text="🖥"
+                                            android:textSize="13sp" />
+                                    </FrameLayout>
+
+                                    <LinearLayout
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="10dp"
+                                        android:layout_weight="1"
+                                        android:orientation="vertical">
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="不显示桌面图标"
+                                            android:textColor="@color/text_main"
+                                            android:textSize="12.5sp"
+                                            android:textStyle="bold" />
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:layout_marginTop="2dp"
+                                            android:text="隐藏后桌面不再出现图标"
+                                            android:textColor="@color/text_sub"
+                                            android:textSize="9.5sp" />
+                                    </LinearLayout>
+
+                                    <com.piggyhand.fish.LiquidSwitch
+                                        android:id="@+id/swHideIcon"
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content" />
                                 </LinearLayout>
@@ -1970,7 +2151,7 @@
                                     android:id="@+id/tvGhVal"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="v1.1.7 ›"
+                                    android:text="v1.1.9 ›"
                                     android:textColor="@color/text_sub"
                                     android:textSize="11sp" />
                             </LinearLayout>

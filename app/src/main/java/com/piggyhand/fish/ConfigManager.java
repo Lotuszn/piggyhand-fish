@@ -27,6 +27,7 @@ public class ConfigManager {
             "  \"scoutPattern\": \"reward|bonus|coin\",\n" +
             "  \"maxScoutMethods\": 400,\n" +
             "  \"adSdkPresets\": true,\n" +
+            "  \"noSplashAd\": true,\n" +
             "  \"rules\": [\n" +
             "    {\n" +
             "      \"comment\": \"侦察完成后按日志填规则。示例:\",\n" +
@@ -43,6 +44,8 @@ public class ConfigManager {
     public int autoRunIntervalMin = 240;
     public boolean scout = true;
     public boolean adSdkPresets = true;
+    /** 🚫 去除开屏广告（RhSplashAd 掐断 SplashAdController 入口，连接口都不请求）；默认开 */
+    public boolean noSplashAd = true;
     public boolean mtopHook = true;
     public boolean toastNotify = true;
     public boolean polish = true;
@@ -50,8 +53,12 @@ public class ConfigManager {
     public boolean fishMedia = true;
     /** 🐟 鱼塘任务：打开闲鱼自动跑一次（AWARD 收割+签到气泡）；手动 POND 触发不受此开关限制 */
     public boolean pond = true;
+    /** 🏅 会员任务：打开闲鱼自动跑一次（会员经验值四条任务 上报+领取）；手动 OLIVER 触发不受此开关限制 */
+    public boolean oliverTask = true;
     /** 💬 禁用聊天页左滑进对方主页手势（RhChatHook 双层拦截：容器触摸+主页跳转） */
     public boolean noChatSwipe = false;
+    /** 🖥 不显示桌面图标：禁用 LauncherAlias（桌面图标没了，MainActivity 仍可被显式拉起） */
+    public boolean hideIcon = false;
     /* 🎒 背包自动使用（FishTaskAuto.doBagUse）：骰子走 map.roll 地图掷骰，刮刮卡走 prop.use；数量 -1=用到 0 */
     public boolean bagLuckOn = false;    public int bagLuckNum = 0;      // 好运骰 LUCKY_DICE
     public boolean bag8On = false;       public int bag8Num = 0;         // 八面骰 SURFACE8_DICE
@@ -192,11 +199,14 @@ public class ConfigManager {
             c.autoRunIntervalMin = Math.min(1440, Math.max(0, min));
             c.scout = o.optBoolean("scout", true);
             c.adSdkPresets = o.optBoolean("adSdkPresets", true);
+            c.noSplashAd = o.optBoolean("noSplashAd", true);
             c.mtopHook = o.optBoolean("mtopHook", true);
             c.toastNotify = o.optBoolean("toastNotify", true);
             c.fishMedia = o.optBoolean("fishMedia", true);
             c.pond = o.optBoolean("pond", true);
+            c.oliverTask = o.optBoolean("oliverTask", true);
             c.noChatSwipe = o.optBoolean("noChatSwipe", false);
+            c.hideIcon = o.optBoolean("hideIcon", false);
             c.bagLuckOn = o.optBoolean("bagLuckOn", false);       c.bagLuckNum = o.optInt("bagLuckNum", 0);
             c.bag8On = o.optBoolean("bag8On", false);             c.bag8Num = o.optInt("bag8Num", 0);
             c.bag12On = o.optBoolean("bag12On", false);           c.bag12Num = o.optInt("bag12Num", 0);

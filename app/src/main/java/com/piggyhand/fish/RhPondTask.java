@@ -297,21 +297,34 @@ public final class RhPondTask {
         RhFileLog.write(sb.toString());
     }
 
-    /** 进程内直调一个 mtop 接口并等待响应落盘（复用全局 MtopFinishEvent hook 的 rh_resp_<尾段>.json） */
+    /**
+     * 进程内直调一个 mtop 接口并等待响应落盘（复用全局 MtopFinishEvent hook 的 rh_resp_<尾段>.json）。
+     *
+     * 判定新响应不能再用「lastModified() >= t0」：/sdcard 走 FUSE(sdcardfs)，
+     * mtime 只有 1~2 秒精度，会被截断到窗口边界，导致刚落盘的文件被判成旧文件，
+     * 白等到超时返回 null —— Android 10 上必现（MIX 3 实测 22:40/22:55 两轮全挂）。
+     * 改用两层判据：① 落盘时同写的 .stamp 文件，内容是毫秒字符串，不受 fs 精度影响；
+     * ② length:mtime 指纹，与 FishTaskAuto.callApi 同一套逻辑兜底。
+     */
     static String callAndWait(Context ctx, String api, String version,
                               String data, String tailKey, long maxWaitMs) {
         try {
             String tail = tailKey;
             int dot = api.lastIndexOf('.');
             if (dot >= 0) tail = api.substring(dot + 1);
-            final java.io.File f = new java.io.File(ctx.getExternalCacheDir(), "rh_resp_" + tail + ".json");
+            java.io.File cacheDir = ctx.getExternalCacheDir();
+            if (cacheDir == null) cacheDir = ctx.getCacheDir();
+            final java.io.File f = new java.io.File(cacheDir, "rh_resp_" + tail + ".json");
+            final java.io.File stamp = new java.io.File(cacheDir, "rh_resp_" + tail + ".json.stamp");
             long t0 = System.currentTimeMillis();
+            String fp0 = fp(f);                       // 发之前拍指纹快照
             boolean sent = ApiDirect.send(ctx.getClassLoader(), api, version, data);
             if (!sent) return null;
-            long deadline = System.currentTimeMillis() + maxWaitMs;
+            long deadline = t0 + maxWaitMs;
             while (System.currentTimeMillis() < deadline) {
-                Thread.sleep(250);
-                if (f.exists() && f.lastModified() >= t0) {
+                Thread.sleep(200);
+                if (stampNewer(stamp, t0) || fpChanged(f, fp0)) {
+                    Thread.sleep(60);                  // 让 FileWriter 把尾部刷完再读
                     byte[] b = new byte[(int) f.length()];
                     java.io.FileInputStream in = new java.io.FileInputStream(f);
                     in.read(b);
@@ -319,10 +332,40 @@ public final class RhPondTask {
                     return new String(b, "UTF-8");
                 }
             }
+            RhFileLog.write("[pond] callAndWait timeout " + api + " fp0=" + fp0 + " fp=" + fp(f));
             return null;
         } catch (Throwable t) {
             RhFileLog.write("[pond] callAndWait " + api + " err: " + t);
             return null;
+        }
+    }
+
+    /** 文件指纹：长度 + mtime。文件不存在/空 → null */
+    private static String fp(java.io.File f) {
+        try {
+            if (!f.exists() || f.length() == 0) return null;
+            return f.length() + ":" + f.lastModified();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static boolean fpChanged(java.io.File f, String fp0) {
+        String fp = fp(f);
+        return fp != null && !fp.equals(fp0);
+    }
+
+    /** .stamp 里的毫秒值 >= 请求发起时刻 → 这是本轮响应 */
+    private static boolean stampNewer(java.io.File stamp, long t0) {
+        try {
+            if (!stamp.exists() || stamp.length() == 0) return false;
+            java.io.FileInputStream in = new java.io.FileInputStream(stamp);
+            byte[] b = new byte[(int) stamp.length()];
+            in.read(b);
+            in.close();
+            return Long.parseLong(new String(b, "UTF-8").trim()) >= t0;
+        } catch (Throwable t) {
+            return false;
         }
     }
 

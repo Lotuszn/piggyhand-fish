@@ -7,14 +7,20 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 SRC="$ROOT"
 # 版本号（改版本只动这里 + app/build.gradle + 布局占位 + version.json 四处）
 # 兼容版构建：VER="1.0.9-兼容版" bash build-apk.sh（环境变量可覆盖，产物名随之变化）
-VER="${VER:-1.1.7}"
-VERCODE="${VERCODE:-18}"
+VER="${VER:-1.1.9}"
+VERCODE="${VERCODE:-20}"
 # 交付产物命名（用户规则）：闲鱼小猪手-版本号.apk
 OUT_APK="闲鱼小猪手-$VER.apk"
 # SDK 三件套：android.jar + build-tools(含 aapt2/apksigner) + r8.jar（默认取 fish-work/sdk）
 AJ="${ANDROID_JAR:-$ROOT/../fish-work/sdk/pf/android-34/android.jar}"
 BT="${BUILD_TOOLS:-$ROOT/../fish-work/sdk/bt/android-14}"
 R8="${R8_JAR:-$ROOT/../fish-work/sdk/r8.jar}"
+
+# Git-Bash 下 $ROOT 是 /c/Users/... 形式，aapt2.exe/zipalign.exe 是原生程序不认这种路径
+# （报 "Unable to open ... No such file or directory"），统一转成 C:/Users/... 形式
+if command -v cygpath >/dev/null 2>&1; then
+  AJ="$(cygpath -m "$AJ")"; BT="$(cygpath -m "$BT")"; R8="$(cygpath -m "$R8")"
+fi
 
 cd "$SRC"
 # keystore 放 build 外持久化（build 每次清空；重签会导致签名变化→被迫卸载重装丢 LSPosed 启用态）
