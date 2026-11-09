@@ -17,7 +17,6 @@ public final class RhCashJoin {
    static final String API_DETAIL = "mtop.taobao.idle.cash.detail";
    static final String API_JOIN = "mtop.taobao.idle.cash.join";
    static final String API_COIN = "mtop.taobao.idle.coin.activity.user.info";
-   static final String ASAC_JOIN = "2A21419W4V75OCRAXF3VZB";
    static final String STATE_FILE = "rh_cash_join.txt";
    static final String REPORT_FILE = "rh_tasks_join.txt";
    static final int MAX_TRY = 3;
@@ -243,7 +242,9 @@ public final class RhCashJoin {
 
                         try {
                            var35.put("actId", var9);
-                           var35.put("asac", "2A21419W4V75OCRAXF3VZB");
+                           // 多用户：asac 走本机动态捕获，无捕获省略字段
+                           String varAsac = RhLocationContext.asac();
+                           if (varAsac != null) var35.put("asac", varAsac);
                            var35.put("betNum", var24);
                            var35.put("version", "v1.1");
                            var35.put("couponIdListStr", "");

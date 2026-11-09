@@ -56,6 +56,8 @@ public class ConfigManager {
     /** 🏅 会员任务：打开闲鱼自动跑一次（会员经验值四条任务 上报+领取）；手动 OLIVER 触发不受此开关限制 */
     public boolean oliverTask = true;
     public boolean gameTask = true;      // 玩一玩游戏任务
+    /** 🎯 7天圈数挑战：到档自动领取闲鱼币奖励（常用功能抽屉可切；关掉后主流程/收尾/迷你跑批都不再查档） */
+    public boolean cycleChallenge = true;
     public boolean cashClaim = true;     // 瓜分现金红包
     public boolean cashJoin = true;      // 瓜分现金报名
     /** 💬 禁用聊天页左滑进对方主页手势（RhChatHook 双层拦截：容器触摸+主页跳转） */
@@ -209,6 +211,7 @@ public class ConfigManager {
             c.pond = o.optBoolean("pond", true);
             c.oliverTask = o.optBoolean("oliverTask", true);
             c.gameTask = o.optBoolean("gameTask", true);
+            c.cycleChallenge = o.optBoolean("cycleChallenge", true);
             c.cashClaim = o.optBoolean("cashClaim", true);
             c.cashJoin = o.optBoolean("cashJoin", true);
             c.noChatSwipe = o.optBoolean("noChatSwipe", false);
@@ -226,8 +229,8 @@ public class ConfigManager {
             c.pondFishAdCode = o.optString("pondFishAdCode", "");
             c.pondGps = o.optString("pondGps", "");
             // 1.1.2 迁移：旧版内置默认值（重庆）视为未配置，改走动态定位
-            if ("500107".equals(c.pondFishAdCode)) c.pondFishAdCode = "";
-            if ("29.524374,106.471423".equals(c.pondGps)) c.pondGps = "";
+            if ("500107".equals(c.pondFishAdCode)) c.pondFishAdCode = ""; // AUDIT-ALLOW 迁移清理：识别旧测试区码并清除，非提交参数
+            if ("29.524374,106.471423".equals(c.pondGps)) c.pondGps = ""; // AUDIT-ALLOW 迁移清理：识别旧测试坐标并清除，非提交参数
         c.polish = o.optBoolean("polish", true);
             c.scoutPattern = o.optString("scoutPattern", "reward|bonus|coin");
             c.maxScoutMethods = o.optInt("maxScoutMethods", 400);

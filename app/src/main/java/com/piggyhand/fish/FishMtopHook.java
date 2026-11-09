@@ -492,6 +492,25 @@ public final class FishMtopHook {
                                             }
                                         }, "rh-cash").start();
                                         body = "OK started";
+                                    } else if (req != null && req.startsWith("CYCLE_REPORT")) {
+                                        // v1.2.10 圈数挑战手动触发结果读取（必须先于 CYCLE 的前缀匹配）
+                                        body = readReportFile("rh_tasks_cycle.txt");
+                                        if (body == null) body = "NO_REPORT";
+                                    } else if (req != null && req.startsWith("CYCLE")) {
+                                        // v1.2.10 手动跑一次圈数挑战查档+领取（结果 CYCLE_REPORT 读，报告带 @runId 防旧档误读）
+                                        final Context yc = appCtx;
+                                        new Thread(new Runnable() {
+                                            @Override
+                                            public void run() {
+                                                try {
+                                                    FishTaskAuto.runCycleClaimOnce(yc);
+                                                    log("[cycle] manual run done");
+                                                } catch (Throwable t) {
+                                                    log("[cycle] manual fail: " + t);
+                                                }
+                                            }
+                                        }, "rh-cycle").start();
+                                        body = "OK started";
                                     } else if (req != null && req.startsWith("GAME_REPORT")) {
                                         // v1.2.9 游戏任务报告读取（必须先于 GAME 的前缀匹配）
                                         body = readReportFile("rh_tasks_game.txt");
@@ -677,7 +696,9 @@ public final class FishMtopHook {
         }
         // 闲鱼业务接口全量落盘（探测新链路需要）；排除高频噪音接口防刷盘
         // 注意 "mtop.taobao.idle" 不带点：兼容 mtop.taobao.idlemtopsearch.*（搜索域）
-        if (la.startsWith("mtop.taobao.idle")
+        // 11-10 补 "mtop.idle."：圈数挑战三接口（multi.day.challenge / challenge.idleCoinSign / interact.cycle.challenge）
+        // 用这个短命名空间，之前响应全被丢弃导致只有请求没报文
+        if ((la.startsWith("mtop.taobao.idle") || la.startsWith("mtop.idle."))
                 && !la.contains("device.report")
                 && !la.contains("ut.log")
                 && !la.contains("highway.upload")

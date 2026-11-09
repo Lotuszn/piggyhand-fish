@@ -19,7 +19,6 @@ import org.json.JSONObject;
 public final class RhCashClaim {
    static final String API_LIST = "mtop.taobao.idle.cash.join.list";
    static final String API_WITHDRAW = "mtop.taobao.idle.cash.withdraw";
-   static final String ASAC_WITHDRAW = "2A214197T295OCF0YNVYHJ";
    static final String ST_FAILED = "0";
    static final String ST_WAITING = "1";
    static final String ST_END = "2";
@@ -209,7 +208,9 @@ public final class RhCashClaim {
                   try {
                      var36.put("actId", var30);
                      var36.put("id", var17);
-                     var36.put("asac", "2A214197T295OCF0YNVYHJ");
+                     // 多用户：asac 走本机动态捕获（RhLocationContext），测试期写死值已移除；无捕获省略字段
+                     String varAsac = RhLocationContext.asac();
+                     if (varAsac != null) var36.put("asac", varAsac);
                      var36.put("version", "v1.1");
                   } catch (Throwable var23) {
                   }
@@ -297,13 +298,14 @@ public final class RhCashClaim {
 
    private static JSONObject withdraw(Context var0, String var1) {
       HashMap var2 = new HashMap();
-      var2.put("asac", "2A214197T295OCF0YNVYHJ");
+      String varAsac = RhLocationContext.asac(); // 多用户：动态 asac，无捕获省略
+      if (varAsac != null) var2.put("asac", varAsac);
       JSONObject var3 = callMtop(var0, "mtop.taobao.idle.cash.withdraw", "1.0", var1, var2, null, 8000L);
       if (var3 != null && hasSuccess(var3)) {
          return var3;
       } else {
          HashMap var4 = new HashMap();
-         var4.put("asac", "2A214197T295OCF0YNVYHJ");
+         if (varAsac != null) var4.put("asac", varAsac);
          JSONObject var5 = callMtop(var0, "mtop.taobao.idle.cash.withdraw", "1.0", var1, null, var4, 8000L);
          if (var5 != null && hasSuccess(var5)) {
             return var5;
