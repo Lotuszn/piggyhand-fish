@@ -7,6 +7,7 @@
     <!-- Android 11+ 包可见性：需要查闲鱼的 uid / 版本，不加这段 getPackageInfo 直接抛 NameNotFound -->
     <queries>
         <package android:name="com.taobao.idlefish" />
+        <package android:name="com.tencent.mobileqq" />
     </queries>
 
     <application
