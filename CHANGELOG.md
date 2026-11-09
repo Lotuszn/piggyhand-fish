@@ -4,6 +4,39 @@
 
 ---
 
+## v1.2.9 · 响应通道回归修复
+
+**2026-11-09**
+
+v1.2.8 为了让报告跟着存档一起进持久区，把 `launch()` 传给引擎实例的目录从 `cacheDirPath()` 改成了 `lvlDirPath()`。但 `callApi()` 用同一个字段拼 `rh_resp_<api尾段>.json` 的路径，宿主始终写 `getExternalCacheDir()`，于是引擎每个请求都在 `files/` 下读空文件，**等满 30s 超时**。lvl 段正常，只看 lvl 日志会误判通过。
+
+```
+09:47:44.569 [tasks] 币余额 -> SUCCESS        ← 探针实例（cacheDirPath），读到
+09:48:11.350 [tasks] timeout: 地图状态         ← 引擎实例（lvlDirPath），读空
+09:48:41.700 [tasks] timeout: 背包列表
+09:49:12.057 [tasks] timeout: 擦亮
+```
+
+修复：
+
+- 拆字段。`cacheDir` 只负责 `rh_resp_*.json` / `rh_pref.json`（跟随宿主写盘目录）；新增 `reportDir` 只负责 `rh_tasks_result.txt`（持久区 files/）。
+- 修指纹撞车。`fileFp()` 优先读宿主的 `.stamp` 毫秒戳，回落 `length:mtime`。连续两次同接口且响应等长、落盘同秒时，旧算法会判定「没新响应」照样超时。
+- 报告读取端同步：`FishMtopHook.readReportFile()` 先 files/ 再 cache/，`MainActivity.tryReadReport()` 五通道（files 直读 → cache 直读 → socket → su files → su cache）。
+
+验证：force-stop 冷启动后触发一轮，70s 完成，**零 timeout**：
+
+```
+09:53:18.340 [lvl] loaded day=20261109 n=22
+09:53:19.052 地图状态 SUCCESS / 09:53:19.759 背包列表 SUCCESS / 09:53:20.465 背包地图 SUCCESS
+09:53:21.169 擦亮 SUCCESS / 09:53:21.878 任务列表 SUCCESS
+09:53:21 [lvl] 跳过=7 记录=22 day=20261109
+09:54:27.222 === task auto done ===
+```
+
+剩余失败仅为跨 App 云控任务（`FROM_APP_REJECT` / `ILLEGAL`）与浏览任务（需真实行为），属设计内。
+
+---
+
 ## v1.2.8 · 冷启动标识丢失修复
 
 **2026-11-09**

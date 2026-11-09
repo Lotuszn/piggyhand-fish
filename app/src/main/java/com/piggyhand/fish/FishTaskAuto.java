@@ -59,7 +59,11 @@ public final class FishTaskAuto {
    private static final int BROWSE_MAX_STEPS = 60;
    private static final long BROWSE_GAP_MS = 5000L;
    private final ClassLoader cl;
+   /** 响应通道目录：宿主 FishMtopHook.writeCacheFile 落 rh_resp_*.json 的地方，必须是 getExternalCacheDir。
+    *  只用来读写 rh_resp_*、rh_pref.json，不承载任何需要跨冷启动保留的东西。 */
    private final String cacheDir;
+   /** 报告目录：持久区（files/）。宿主的 cache/ 会被冷启动清空，报告必须住这里。 */
+   private final String reportDir;
    private final Set<String> processed = new HashSet<>();
    private final RhReport report = new RhReport();
    private volatile boolean abort = false;
@@ -104,6 +108,8 @@ public final class FishTaskAuto {
    private FishTaskAuto(ClassLoader var1, String var2) {
       this.cl = var1;
       this.cacheDir = var2;
+      // 报告与 lvl 存档共用持久目录；lvlDir 未初始化时退化为通道目录（只影响首次极端时序，不影响请求）
+      this.reportDir = lvlDir != null ? lvlDir : var2;
    }
 
    private static void markRejected(String var0) {
@@ -352,8 +358,8 @@ public final class FishTaskAuto {
          }
 
          ClassLoader var5 = var0.getClassLoader();
-         String var3 = lvlDirPath(var0);   // 持久目录
-         lvlDir = var3;
+         String var3 = cacheDirPath(var0);   // 响应通道：必须是宿主写 rh_resp_* 的那个目录
+         lvlDir = lvlDirPath(var0);          // 持久区：存档 + 报告，冷启动不被清
          lvlLoaded = false;
          lvlLoadOnce(var0);
          new Thread(() -> {
@@ -2069,6 +2075,15 @@ public final class FishTaskAuto {
 
    private String fileFp(String var1) {
       try {
+         // 优先用宿主写的 .stamp（毫秒戳）：/sdcard 的 mtime 只有 1~2s 精度，
+         // 连续两次同接口且响应等长时 length:mtime 会撞成同一个值，被误判"没新响应"而超时。
+         File var0 = new File(var1 + ".stamp");
+         if (var0.exists() && var0.length() > 0L) {
+            String var4 = new String(Files.readAllBytes(var0.toPath()), "UTF-8").trim();
+            if (var4.length() > 0) {
+               return "stamp:" + var4;
+            }
+         }
          File var2 = new File(var1);
          return var2.exists() && var2.length() != 0L ? var2.length() + ":" + var2.lastModified() : null;
       } catch (Throwable var3) {
@@ -2176,7 +2191,7 @@ public final class FishTaskAuto {
       this.doMapRoll();
       this.report.append("耗时 ").append((System.currentTimeMillis() - var1) / 1000L).append("s\n");
       String var3 = this.report.toString();
-      this.writeFile(this.cacheDir + "/rh_tasks_result.txt", var3);
+      this.writeFile(this.reportDir + "/rh_tasks_result.txt", var3);
       log("=== task auto done ===\n" + var3);
       this.notifyDone(var3);
       int var4 = 0;

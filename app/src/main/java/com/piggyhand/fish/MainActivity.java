@@ -1998,18 +1998,26 @@ public class MainActivity extends Activity {
      * 广播回传（ACTION_RESULT）作为独立即时通道由 resultReceiver 承担，不在此列。
      */
     private static ReadResult tryReadReport() {
-        String path = ConfigManager.fishExternal("cache") + "/rh_tasks_result.txt";
+        // v1.2.9：报告迁到持久区 files/（宿主的 cache/ 冷启动会被清），cache 路径仅作旧版兜底
+        String filesPath = ConfigManager.fishExternal("files") + "/rh_tasks_result.txt";
+        String cachePath = ConfigManager.fishExternal("cache") + "/rh_tasks_result.txt";
         ReadResult r = new ReadResult();
         StringBuilder diag = new StringBuilder("无法读取钓鱼报告\n\n逐通道诊断：\n");
-        String[] p = readPlain(path);
-        if (p[0] != null) { r.text = p[0]; r.via = "直读文件"; return r; }
-        diag.append("· 直读：").append(p[1]).append('\n');
+        String[] p = readPlain(filesPath);
+        if (p[0] != null) { r.text = p[0]; r.via = "直读文件 files"; return r; }
+        diag.append("· 直读 files：").append(p[1]).append('\n');
+        p = readPlain(cachePath);
+        if (p[0] != null) { r.text = p[0]; r.via = "直读文件 cache"; return r; }
+        diag.append("· 直读 cache：").append(p[1]).append('\n');
         p = readViaSocket();
         if (p[0] != null) { r.text = p[0]; r.via = "socket (127.0.0.1:" + ConfigManager.reportPort() + ")"; return r; }
         diag.append("· socket：").append(p[1]).append('\n');
-        p = readViaSu(path);
-        if (p[0] != null) { r.text = p[0]; r.via = "su (root)"; return r; }
-        diag.append("· su (root)：").append(p[1]).append('\n');
+        p = readViaSu(filesPath);
+        if (p[0] != null) { r.text = p[0]; r.via = "su (root) files"; return r; }
+        diag.append("· su files：").append(p[1]).append('\n');
+        p = readViaSu(cachePath);
+        if (p[0] != null) { r.text = p[0]; r.via = "su (root) cache"; return r; }
+        diag.append("· su cache：").append(p[1]).append('\n');
         r.diag = diag.toString();
         return r;
     }

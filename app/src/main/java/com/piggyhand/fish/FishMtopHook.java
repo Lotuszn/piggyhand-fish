@@ -279,7 +279,7 @@ public final class FishMtopHook {
                     }
                     // 报告回传：把上次钓鱼结果经广播发回模块 UI（免跨 App 存储权限）
                     if ("__GET_RESULT__".equals(api)) {
-                        final String rep = readCacheFile("rh_tasks_result.txt");
+                        final String rep = readReportFile("rh_tasks_result.txt");
                         new Thread(new Runnable() {
                             @Override
                             public void run() {
@@ -419,7 +419,7 @@ public final class FishMtopHook {
                                         body = "RH|" + uid + "|" + ConfigManager.userIdOf(uid) + "|"
                                                 + android.os.Process.myPid();
                                     } else if (req != null && req.trim().equals("REPORT")) {
-                                        body = readCacheFile("rh_tasks_result.txt");
+                                        body = readReportFile("rh_tasks_result.txt");
                                         if (body == null) body = "";
                                     } else if (req != null && req.trim().equals("UI")) {
                                         // 桌面图标隐藏后的软件入口：显式 ComponentName 拉起配置界面。
@@ -838,6 +838,30 @@ public final class FishMtopHook {
             log("readCacheFile " + name + " FAIL: " + t);
             return null;
         }
+    }
+
+    /** 报告类文件住持久区 files/：宿主的 cache/ 冷启动会被系统清空，报告跟着丢。
+     *  读顺序 files/ -> cache/（后者兼容 v1.2.7 及以前留在 cache 的老文件）。 */
+    private static String readReportFile(String name) {
+        Context c = appCtx;
+        if (c != null) {
+            try {
+                java.io.File dir = c.getExternalFilesDir(null);
+                if (dir != null) {
+                    java.io.File f = new java.io.File(dir, name);
+                    if (f.exists() && f.length() > 0) {
+                        byte[] b = new byte[(int) f.length()];
+                        java.io.FileInputStream in = new java.io.FileInputStream(f);
+                        in.read(b);
+                        in.close();
+                        return new String(b, "UTF-8");
+                    }
+                }
+            } catch (Throwable t) {
+                log("readReportFile " + name + " FAIL: " + t);
+            }
+        }
+        return readCacheFile(name);
     }
 
     private static void writeCacheFile(String name, String content) {
