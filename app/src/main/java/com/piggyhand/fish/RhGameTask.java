@@ -455,7 +455,11 @@ public final class RhGameTask {
       boolean var4 = false;
 
       try {
-         File var5 = new File(rhCacheDir(var0), "rh_tasks_game.txt");
+         // 报告主写持久区（cache/ 会被装包与清缓存抹掉，二次读不到了）
+         File var5 = new File(FishMtopHook.persistDir(var0), "rh_tasks_game.txt");
+         if (var5.getParentFile() != null && !var5.getParentFile().exists()) {
+            var5.getParentFile().mkdirs();
+         }
          FileWriter var6 = new FileWriter(var5, false);
          var6.write(var1.toString());
          var6.close();

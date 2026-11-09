@@ -37,6 +37,25 @@ v1.2.8 为了让报告跟着存档一起进持久区，把 `launch()` 传给引�
 
 同时补齐 v1.2.8 重建时丢掉的三个界面面板——「游戏任务」开关（常用功能组）、「自动投币」「自动开红包」（瓜分现金红包抽屉组）。v1.2.0 / v1.2.4 / v1.2.6 加这三块时，Java 与 `activity_main.xml` 是一起改的；重建只恢复了引擎类，界面入口整块丢失，导致功能能跑但点不到。本次从 v1.2.7 的构建产物恢复 `MainActivity`（90 个内部类）与完整布局（84 个 id），并把资源 id 从编译期数字还原为 `R.id.*` 符号——数字 id 是按旧 R 表分配的，直接复用会强转成错误控件（首当其冲是 `track` 被解析成 `tvPondWarn`，启动即崩）。
 
+### v1.2.9 追加：面板接线修复（全量功能测试发现）
+
+面板恢复后做真机全量测试，又暴露两处接线缺口，均已修复：
+
+1. **三个引擎入口没接**。v1.2.7 字节码里 `registerInvoker()` 的初始化序列是
+   `FishTaskAuto → RhPondTask → RhOlivertask.autoRunDaily → RhGameTask → RhCashClaim → RhCashJoin → RhOlivertask.autoRunDailyExp`，
+   重建源码时中间三个 `autoRunDaily` 调用丢了——引擎类都在，就是没人叫。现象：开关能存（`gameTask`/`cashJoin`/`cashClaim` 均落 `rh_config.json`），但引擎永远不动。已按 v1.2.7 顺序补回 `FishMtopHook.java:349-357`。
+2. **报告 Socket 服务缺 6 条指令**。`MainActivity`（恢复自 v1.2.7）会发 `GAME` / `GAME_REPORT` / `JOIN` / `JOIN_REPORT` / `CLAIM` / `CASH_REPORT` / `CASH_STATE`，而 `startReportServer()` 只实现了鱼塘与会员那套。点面板按钮无响应、状态文案恒为「今日未执行（引擎未在线）」。已按 v1.2.7 协议补齐：`CASH_STATE` 回传 `CLAIM|<day|state|…>#JOIN|<day|state|…>`，`#` 前开红包、后投币。
+
+顺手修了一个状态丢失缺陷：`RhCashClaim` / `RhCashJoin` 的状态文件（`rh_cash_claim.txt` / `rh_cash_join.txt`）和三个任务报告原本落在 `getExternalCacheDir()`，**pm install -r 一次整个目录就被清空**（实测更新包后面板状态从「今日已开红包」退回「今日未执行」）。新增 `FishMtopHook.persistDir()`（外部 files，退内部 files），状态与报告主写持久区，读取时回落 cache 兼容旧文件。注意 `dir()`（mtop 响应通道）必须保持 cache/ 不动——`callMtop` 轮询的 `rh_resp_<尾段>.json` 与宿主写盘目录必须同侧，这次差点重蹈 v1.2.8 覆辙（第一版改坏了，真机立即复现 `callMtop timeout`，已回退拆分）。
+
+真机验证（2026-11-09）：
+
+- 游戏任务：点行触发 `GAME` → 引擎跑完 → 报告「88 个游戏 / 59 个任务 / 0 个可做（今日已完成）」；当日自动跑记录 59/59 全成功 +5900 闲鱼币。
+- 自动投币：watcher 接管，`TERMINAL done_server`（本期 5/5 已满），面板「今日已投满 ✓」。
+- 自动开红包：开奖日窗口内自动领取成功（金额 11），落 done 标记；手动 `CLAIM` 通道同样走通。
+- `activity_main.xml` 重新补回全量注释（77 处：文件头结构总览 + 每个抽屉/开关/按钮行内注释），带注释重编译装机界面不变。
+- 下载渠道调整：`showDownloadPicker()` 改为 **UC 网盘**（`drive.uc.cn/s/df475a5e0ad94`，国内直连·推荐）→ **夸克网盘**（`pan.quark.cn/s/b0a477c5b50f`）→ **GitHub Releases**（国际源）三项；移除 Gitee 发行版与 123 网盘入口。**更新检测通道不动**：`UpdateChecker` 三源（Gitee raw version.json → jsDelivr → GitHub API）保留，Gitee 仍是第一检测源。`version.json` 的 `cnUrl` 同步改为 UC 网盘（随下次发行 push 生效）。
+
 ---
 
 ## v1.2.8 · 冷启动标识丢失修复

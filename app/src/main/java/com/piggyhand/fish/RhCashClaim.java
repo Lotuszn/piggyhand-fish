@@ -367,6 +367,8 @@ public final class RhCashClaim {
       }
    }
 
+   /** 响应通道目录：必须与 FishMtopHook.writeCacheFile 同目录（cache/），
+    *  callMtop 轮询的就是这里落下来的 rh_resp_<tail>.json。 */
    private static File dir(Context var0) {
       File var1 = null;
 
@@ -384,6 +386,28 @@ public final class RhCashClaim {
 
       if (var1 == null) {
          var1 = new File("/data/data/com.taobao.idlefish/cache");
+      }
+
+      if (!var1.exists()) {
+         var1.mkdirs();
+      }
+
+      return var1;
+   }
+
+   /** 状态落盘目录：持久区优先（外部 files，退内部 files），最后才回落 cache。
+    *  与 dir() 分开是因为 dir() 是 mtop 响应通道，必须和宿主写响应的目录一致；
+    *  状态文件放 cache 会在装包/清缓存时整目录消失，面板就退回「今日未执行」。 */
+   private static File stateDir(Context var0) {
+      File var1 = null;
+
+      try {
+         var1 = FishMtopHook.persistDir(var0);
+      } catch (Throwable var2) {
+      }
+
+      if (var1 == null) {
+         var1 = dir(var0);
       }
 
       if (!var1.exists()) {
@@ -417,7 +441,11 @@ public final class RhCashClaim {
 
    private static JSONObject readState(Context var0) {
       try {
-         File var1 = new File(dir(var0), "rh_cash_claim.txt");
+         File var1 = new File(stateDir(var0), "rh_cash_claim.txt");
+         // 老版本把状态写 cache/：持久区没有时回落读一次，免得升级当天状态丢
+         if (!var1.exists()) {
+            var1 = new File(dir(var0), "rh_cash_claim.txt");
+         }
          if (!var1.exists()) {
             return null;
          } else {
@@ -453,7 +481,7 @@ public final class RhCashClaim {
       }
 
       try {
-         File var6 = dir(var0);
+         File var6 = stateDir(var0);
          File var7 = new File(var6, "rh_cash_claim.txt.tmp");
          FileOutputStream var8 = new FileOutputStream(var7, false);
          var8.write(var5.toString().getBytes("UTF-8"));
@@ -497,7 +525,11 @@ public final class RhCashClaim {
 
    public static boolean isDoneToday(Context var0) {
       try {
-         File var1 = new File(dir(var0), "rh_cash_done.txt");
+         File var1 = new File(stateDir(var0), "rh_cash_done.txt");
+         if (!var1.exists()) {
+            // 兼容升级前写在 cache/ 的标记
+            var1 = new File(dir(var0), "rh_cash_done.txt");
+         }
          if (!var1.exists()) {
             return false;
          } else {
@@ -512,7 +544,7 @@ public final class RhCashClaim {
    private static void markDoneToday(Context var0) {
       try {
          long var1 = nextMidnight();
-         File var3 = new File(dir(var0), "rh_cash_done.txt");
+         File var3 = new File(stateDir(var0), "rh_cash_done.txt");
          FileWriter var4 = new FileWriter(var3, false);
          var4.write(String.valueOf(var1));
          var4.flush();
@@ -607,7 +639,7 @@ public final class RhCashClaim {
       boolean var4 = false;
 
       try {
-         FileWriter var5 = new FileWriter(new File(dir(var0), "rh_tasks_cash.txt"), false);
+         FileWriter var5 = new FileWriter(new File(stateDir(var0), "rh_tasks_cash.txt"), false);
          var5.write(var1.toString());
          var5.close();
          var4 = true;

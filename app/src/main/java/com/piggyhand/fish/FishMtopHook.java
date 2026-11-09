@@ -344,6 +344,13 @@ public final class FishMtopHook {
             RhPondTask.autoRunDaily(appCtx);
             // v1.1.9 🏅 会员任务自动跑：开关 oliverTask=true 且当日未跑时延迟 45s 触发
             RhOlivertask.autoRunDaily(appCtx);
+            // v1.2.9 🎮 游戏任务自动跑：开关 gameTask=true 且当日未跑时延迟 50s 触发
+            // 纯协议链（center→detail→complete→award），不依赖游戏页 UI
+            RhGameTask.autoRunDaily(appCtx);
+            // v1.2.9 🧧 自动开红包：开奖日 10:00 起进窗口，每日 2 轮（1 正常 + 1 补）
+            RhCashClaim.autoRunDaily(appCtx);
+            // v1.2.9 🪙 自动投币：00:01 后进窗口，每轮 30s 轮询 coin 余额补投到当期额度上限
+            RhCashJoin.autoRunDaily(appCtx);
             // 会员页顶部「500 每日经验」：独立体系（user.level.exp.fetch），任务全完成也要领，
             // 所以单独起一条 20s 的线，不挂在 45s 的任务链上
             RhOlivertask.autoRunDailyExp(appCtx);
@@ -437,6 +444,73 @@ public final class FishMtopHook {
                                             body = "FAIL " + t;
                                             log("[ui] launch FAIL: " + t);
                                         }
+                                    } else if (req != null && req.startsWith("CASH_REPORT")) {
+                                        // v1.2.9 开红包报告读取
+                                        body = readReportFile("rh_tasks_cash.txt");
+                                        if (body == null) body = "NO_REPORT";
+                                    } else if (req != null && req.startsWith("JOIN_REPORT")) {
+                                        // v1.2.9 投币报告读取（必须先于 JOIN 的前缀匹配）
+                                        body = readReportFile("rh_tasks_join.txt");
+                                        if (body == null) body = "NO_REPORT";
+                                    } else if (req != null && req.trim().equals("JOIN")) {
+                                        // v1.2.9 手动投币一轮（后台执行，结果 JOIN_REPORT 读）
+                                        final Context jc = appCtx;
+                                        new Thread(new Runnable() {
+                                            @Override
+                                            public void run() {
+                                                try {
+                                                    RhCashJoin.run(jc);
+                                                    log("[join] manual done");
+                                                } catch (Throwable t) {
+                                                    log("[join] manual fail: " + t);
+                                                }
+                                            }
+                                        }, "rh-cash-join-one").start();
+                                        body = "OK started";
+                                    } else if (req != null && req.startsWith("CASH_STATE")) {
+                                        // v1.2.9 两组状态合并回传：CLAIM|day|state|round|lastRet
+                                        //                        #JOIN|day|state|...
+                                        // App 侧按 '#' 拆两段、按 '|' 取 [1]=day [2]=state 定文案
+                                        try {
+                                            body = "CLAIM|" + RhCashClaim.stateText(appCtx)
+                                                    + "#JOIN|" + RhCashJoin.stateText(appCtx);
+                                        } catch (Throwable t) {
+                                            body = "NONE";
+                                        }
+                                    } else if (req != null && req.trim().equals("CLAIM")) {
+                                        // v1.2.9 手动开红包一轮（结果 CASH_REPORT 读）
+                                        final Context cc = appCtx;
+                                        new Thread(new Runnable() {
+                                            @Override
+                                            public void run() {
+                                                try {
+                                                    RhCashClaim.run(cc);
+                                                    log("[cash] claim done");
+                                                } catch (Throwable t) {
+                                                    log("[cash] claim fail: " + t);
+                                                }
+                                            }
+                                        }, "rh-cash").start();
+                                        body = "OK started";
+                                    } else if (req != null && req.startsWith("GAME_REPORT")) {
+                                        // v1.2.9 游戏任务报告读取（必须先于 GAME 的前缀匹配）
+                                        body = readReportFile("rh_tasks_game.txt");
+                                        if (body == null) body = "NO_REPORT";
+                                    } else if (req != null && req.startsWith("GAME")) {
+                                        // v1.2.9 手动跑一轮游戏任务（纯协议链，结果 GAME_REPORT 读）
+                                        final Context gc = appCtx;
+                                        new Thread(new Runnable() {
+                                            @Override
+                                            public void run() {
+                                                try {
+                                                    RhGameTask.run(gc);
+                                                    log("[game] engine done");
+                                                } catch (Throwable t) {
+                                                    log("[game] engine fail: " + t);
+                                                }
+                                            }
+                                        }, "rh-game").start();
+                                        body = "OK started";
                                     } else if (req != null && req.startsWith("POND_REPORT")) {
                                         // v1.0.9 鱼塘任务报告读取
                                         body = readCacheFile("rh_tasks_pond.txt");
@@ -999,6 +1073,23 @@ public final class FishMtopHook {
             f = c.getCacheDir();
             if (f == null) return null;
             if (!f.exists()) f.mkdirs();
+            return f;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /** 持久目录（外部 files，退内部 files）。
+     *  任务状态与报告都落这里：外部 cache 会随装包/清缓存整目录消失
+     *  （v1.2.9 实测：一次 pm install -r 后 rh_cash_claim.txt 就没了，
+     *  面板状态从「今日已开红包」退回「今日未执行」）。 */
+    static java.io.File persistDir(android.content.Context ctx) {
+        android.content.Context c = (ctx != null) ? ctx : appCtx;
+        if (c == null) return null;
+        try {
+            java.io.File f = c.getExternalFilesDir(null);
+            if (f == null) f = c.getFilesDir();
+            if (f != null && !f.exists()) f.mkdirs();
             return f;
         } catch (Throwable ignored) {
             return null;

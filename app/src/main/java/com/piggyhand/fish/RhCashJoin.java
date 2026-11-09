@@ -359,7 +359,11 @@ public final class RhCashJoin {
 
    private static JSONObject readState(Context var0) {
       try {
-         File var1 = new File(dir(var0), "rh_cash_join.txt");
+         File var1 = new File(stateDir(var0), "rh_cash_join.txt");
+         // 老版本把状态写 cache/：持久区没有时回落读一次，免得升级当天状态丢
+         if (!var1.exists()) {
+            var1 = new File(dir(var0), "rh_cash_join.txt");
+         }
          if (!var1.exists()) {
             return null;
          } else {
@@ -436,7 +440,7 @@ public final class RhCashJoin {
 
    private static void writeState(Context var0, JSONObject var1) {
       try {
-         File var2 = dir(var0);
+         File var2 = stateDir(var0);
          File var3 = new File(var2, "rh_cash_join.txt.tmp");
          FileOutputStream var4 = new FileOutputStream(var3, false);
          var4.write(var1.toString().getBytes("UTF-8"));
@@ -512,6 +516,7 @@ public final class RhCashJoin {
       return new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date());
    }
 
+   /** 响应通道目录：必须与宿主写 rh_resp_<tail>.json 的目录一致（cache/）。 */
    private static File dir(Context var0) {
       File var1 = null;
 
@@ -529,6 +534,26 @@ public final class RhCashJoin {
 
       if (var1 == null) {
          var1 = new File("/data/data/com.taobao.idlefish/cache");
+      }
+
+      if (!var1.exists()) {
+         var1.mkdirs();
+      }
+
+      return var1;
+   }
+
+   /** 状态落盘目录：持久区优先，最后回落 cache（cache 会被装包/清缓存抹掉）。 */
+   private static File stateDir(Context var0) {
+      File var1 = null;
+
+      try {
+         var1 = FishMtopHook.persistDir(var0);
+      } catch (Throwable var2) {
+      }
+
+      if (var1 == null) {
+         var1 = dir(var0);
       }
 
       if (!var1.exists()) {
@@ -593,7 +618,7 @@ public final class RhCashJoin {
       var1.append("耗时 ").append((System.currentTimeMillis() - var2) / 1000L).append("s\n");
 
       try {
-         FileWriter var4 = new FileWriter(new File(dir(var0), "rh_tasks_join.txt"), false);
+         FileWriter var4 = new FileWriter(new File(stateDir(var0), "rh_tasks_join.txt"), false);
          var4.write(var1.toString());
          var4.close();
       } catch (Throwable var7) {

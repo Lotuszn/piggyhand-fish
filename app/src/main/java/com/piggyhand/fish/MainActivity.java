@@ -73,8 +73,8 @@ public class MainActivity extends Activity {
    private static final String FISH_PKG = "com.taobao.idlefish";
    private static final String LAUNCHER_ALIAS = "com.piggyhand.fish.LauncherAlias";
    private static final String RELEASES_URL = "https://github.com/Lotuszn/piggyhand-fish/releases/latest";
-   private static final String GITEE_RELEASES_URL = "https://gitee.com/lotuszn/piggyhand-fish/releases";
-   private static final String PAN_URL = "https://1827807734.share.123pan.cn/123pan/5faujv-budcH?pwd=iHLf";
+   private static final String UC_PAN_URL = "https://drive.uc.cn/s/df475a5e0ad94";
+   private static final String QUARK_PAN_URL = "https://pan.quark.cn/s/b0a477c5b50f";
    private static final String COOLAPK_URL = "https://www.coolapk.com/u/2206962";
    private ViewGroup track;
    private View pagesWrap;
@@ -1359,11 +1359,11 @@ public class MainActivity extends Activity {
          var5.setTypeface(Typeface.DEFAULT_BOLD);
          var5.setTextColor(-15263716);
          var3.addView(var5);
+         var3.addView(this.pickRow("UC 网盘", "国内直连 · 推荐", "https://drive.uc.cn/s/df475a5e0ad94"));
+         var3.addView(this.divider());
+         var3.addView(this.pickRow("夸克网盘", "国内直连", "https://pan.quark.cn/s/b0a477c5b50f"));
+         var3.addView(this.divider());
          var3.addView(this.pickRow("GitHub Releases", "国际源 · 需代理环境", "https://github.com/Lotuszn/piggyhand-fish/releases/latest"));
-         var3.addView(this.divider());
-         var3.addView(this.pickRow("Gitee 发行版", "国内直连 · 推荐", "https://gitee.com/lotuszn/piggyhand-fish/releases"));
-         var3.addView(this.divider());
-         var3.addView(this.pickRow("123 网盘", "备用通道 · 提取码 iHLf", "https://1827807734.share.123pan.cn/123pan/5faujv-budcH?pwd=iHLf"));
          TextView var6 = new TextView(this);
          var6.setText("取消");
          var6.setTextSize(11.5F);
