@@ -19,7 +19,6 @@ public final class RhGameTask {
    static final String API_DETAIL = "mtop.taobao.idle.mini.game.task.detail.query";
    static final String API_COMPLETE = "mtop.taobao.idle.mini.game.task.complete";
    static final String API_AWARD = "mtop.taobao.idle.mini.game.task.award";
-   static final String ASAC = "3A25C04LLN0E7ABPUJN79L";
    static final String REPORT_FILE = "rh_tasks_game.txt";
    static final String DONE_FILE = "rh_game_done.txt";
    static final String TRY_FILE = "rh_game_try.txt";
@@ -227,7 +226,9 @@ public final class RhGameTask {
                      JSONObject var48 = new JSONObject();
                      var48.put("taskId", var19);
                      var48.put("appkey", var17);
-                     var48.put("asac", "3A25C04LLN0E7ABPUJN79L");
+                     // 多用户：asac 走本机动态捕获，无捕获省略字段
+                     String varAsac = RhLocationContext.asac();
+                     if (varAsac != null) var48.put("asac", varAsac);
                      JSONObject var50 = parse(RhPondTask.callAndWait(var0, "mtop.taobao.idle.mini.game.task.award", "1.0", var48.toString(), "award", 6000L));
                      if (var50 != null && hasSuccess(var50)) {
                         JSONObject var51 = var50.optJSONObject("data");
