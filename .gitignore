@@ -20,3 +20,6 @@ build.bak.*/
 _recover/
 build_prev_*/
 *.snap.txt
+
+# 修改前备份留档（bak.py，每文件最多3份 FIFO，不进仓库）
+_bak/
