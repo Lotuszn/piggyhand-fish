@@ -1,6 +1,6 @@
 {
-  "latest": "1.1.10",
+  "latest": "1.2.8",
   "url": "https://github.com/Lotuszn/piggyhand-fish/releases/latest",
   "cnUrl": "https://gitee.com/lotuszn/piggyhand-fish/releases",
-  "notes": "v1.1.10 更新：会员页顶部「500 每日经验」自动领取（与 4 条会员任务独立，任务全做完也照领）；含去除开屏广告、不显示桌面图标、每日任务失败自动重试"
+  "notes": "v1.2.8 更新：修复「手动杀进程再打开后任务完成标识失效、僵尸任务重新弹 Toast」。标识存档从 cache/ 迁到 files/ —— 闲鱼冷启动会清空 cache 目录，原存档连同运行报告一起被删，导致当天重新领取一遍。新增懒加载，探针/定时/广播三入口都能恢复存档；老存档自动迁移。实测冷启动后 loaded n=22、探针可跑数 20→13、签到与玩一玩均跳过、领取 0。"
 }

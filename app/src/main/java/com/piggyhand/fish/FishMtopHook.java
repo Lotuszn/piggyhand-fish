@@ -960,4 +960,24 @@ public final class FishMtopHook {
         XposedBridge.log("[" + TAG + "] " + msg);
         RhFileLog.write(msg);
     }
+
+    /** 宿主 cache 目录（优先外部 cache）；v1.2.x 起供 FishTaskAuto 落盘用 */
+    static java.io.File cacheDir() {
+        java.io.File f;
+        android.content.Context c = appCtx;
+        if (c == null) return null;
+        try {
+            f = c.getExternalCacheDir();
+            if (f != null && f.exists()) return f;
+        } catch (Throwable ignored) {
+        }
+        try {
+            f = c.getCacheDir();
+            if (f == null) return null;
+            if (!f.exists()) f.mkdirs();
+            return f;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
 }

@@ -4,6 +4,25 @@
 
 ---
 
+## v1.2.8 · 冷启动标识丢失修复
+
+**2026-11-09**
+
+v1.2.7 的完成标识在「手动杀进程再打开」后失效，7 条僵尸任务重新弹 Toast。日志证据：
+
+```
+[lvl] load skip: dir=null
+[lvl] load skip: no file /storage/emulated/0/Android/data/com.taobao.idlefish/cache/rh_task_lvl.json
+```
+
+根因：存档在 `cache/`，闲鱼冷启动会清空自身 cache 目录（同刻 `rh_tasks_result.txt` 一并消失，`files/` 下落盘日志完好）。空图 → `lvlSkip` 恒 false → 当天重新领一遍。
+
+修复：存档/报告/快照统一迁 `files/`（`getExternalFilesDir`，回落内部 `files/`）；新增 `lvlLoadOnce(ctx)` 懒加载，探针/定时/广播三入口自愈读档；老存档从 `cache/` 自动迁移；`dir=null` / `no file` / `load fail` 三种分支留痕。
+
+验证：冷启动 → `[lvl] loaded day=20261109 n=22` → `[probe] runnable=13`（原 20）→ 签到/玩一玩 `跳过：标识=2` → `领取成功 0`。
+
+---
+
 ## v1.1.10 · 每日 500 经验
 
 **2026-10-26** ｜ `闲鱼小猪手-1.1.10.apk`

@@ -55,6 +55,9 @@ public class ConfigManager {
     public boolean pond = true;
     /** 🏅 会员任务：打开闲鱼自动跑一次（会员经验值四条任务 上报+领取）；手动 OLIVER 触发不受此开关限制 */
     public boolean oliverTask = true;
+    public boolean gameTask = true;      // 玩一玩游戏任务
+    public boolean cashClaim = true;     // 瓜分现金红包
+    public boolean cashJoin = true;      // 瓜分现金报名
     /** 💬 禁用聊天页左滑进对方主页手势（RhChatHook 双层拦截：容器触摸+主页跳转） */
     public boolean noChatSwipe = false;
     /** 🖥 不显示桌面图标：禁用 LauncherAlias（桌面图标没了，MainActivity 仍可被显式拉起） */
@@ -205,6 +208,9 @@ public class ConfigManager {
             c.fishMedia = o.optBoolean("fishMedia", true);
             c.pond = o.optBoolean("pond", true);
             c.oliverTask = o.optBoolean("oliverTask", true);
+            c.gameTask = o.optBoolean("gameTask", true);
+            c.cashClaim = o.optBoolean("cashClaim", true);
+            c.cashJoin = o.optBoolean("cashJoin", true);
             c.noChatSwipe = o.optBoolean("noChatSwipe", false);
             c.hideIcon = o.optBoolean("hideIcon", false);
             c.bagLuckOn = o.optBoolean("bagLuckOn", false);       c.bagLuckNum = o.optInt("bagLuckNum", 0);

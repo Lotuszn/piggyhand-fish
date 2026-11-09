@@ -17,3 +17,6 @@ local.properties
 .DS_Store
 Thumbs.db
 build.bak.*/
+_recover/
+build_prev_*/
+*.snap.txt
