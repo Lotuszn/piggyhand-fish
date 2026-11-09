@@ -951,6 +951,73 @@
                                         >
                                         </com.piggyhand.fish.LiquidSwitch>
                                     </LinearLayout>
+                                    <View
+    android:background="#0f17181c"
+    android:layout_width="fill_parent"
+    android:layout_height="1.0dip"
+                                    >
+                                    </View>
+                                    <!-- rowCycleChallenge 7天圈数挑战：到档自动领取 + 行点击立即查领一次（v1.2.10） -->
+                                    <LinearLayout
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:id="@+id/rowCycleChallenge"
+    android:background="@drawable/ripple_round"
+    android:paddingTop="9.0dip"
+    android:paddingBottom="9.0dip"
+    android:focusable="true"
+    android:clickable="true"
+    android:layout_width="fill_parent"
+    android:layout_height="wrap_content"
+                                    >
+                                        <FrameLayout
+    android:background="@drawable/bg_icon_p"
+    android:layout_width="27.0dip"
+    android:layout_height="27.0dip"
+                                        >
+                                            <TextView
+    android:textSize="13.0sp"
+    android:layout_gravity="center"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:text="🎯"
+    android:includeFontPadding="false"
+                                            >
+                                            </TextView>
+                                        </FrameLayout>
+                                        <LinearLayout
+    android:orientation="vertical"
+    android:layout_width="0.0dip"
+    android:layout_height="wrap_content"
+    android:layout_weight="1.0"
+    android:layout_marginStart="10.0dip"
+                                        >
+                                            <TextView
+    android:textSize="12.5sp"
+    android:textStyle="bold"
+    android:textColor="@color/text_main"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:text="7天圈数挑战"
+                                            >
+                                            </TextView>
+                                            <TextView
+    android:textSize="9.5sp"
+    android:textColor="@color/text_sub"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="2.0dip"
+    android:text="到档自动领取闲鱼币奖励 · 点行立即查领一次"
+                                            >
+                                            </TextView>
+                                        </LinearLayout>
+                                        <com.piggyhand.fish.LiquidSwitch
+    android:id="@+id/swCycleChallenge"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+                                        >
+                                        </com.piggyhand.fish.LiquidSwitch>
+                                    </LinearLayout>
                                 </LinearLayout>
                             </LinearLayout>
                         </LinearLayout>
@@ -2596,6 +2663,59 @@
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:text="\@Lotuszn ›"
+                                >
+                                </TextView>
+                            </LinearLayout>
+                            <View
+    android:background="#0f17181c"
+    android:layout_width="fill_parent"
+    android:layout_height="1.0dip"
+                            >
+                            </View>
+                            <!-- rowQQGroup 加入我们：点击跳转 QQ 群加群链接 -->
+                            <LinearLayout
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:id="@+id/rowQQGroup"
+    android:paddingTop="11.0dip"
+    android:paddingBottom="11.0dip"
+    android:focusable="true"
+    android:clickable="true"
+    android:layout_width="fill_parent"
+    android:layout_height="wrap_content"
+    android:foreground="?android:selectableItemBackground"
+    android:minHeight="56.0dip"
+                            >
+                                <LinearLayout
+    android:orientation="vertical"
+    android:layout_width="0.0dip"
+    android:layout_height="wrap_content"
+    android:layout_weight="1.0"
+                                >
+                                    <TextView
+    android:textSize="12.5sp"
+    android:textColor="@color/text_main"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:text="加入我们🐧"
+                                    >
+                                    </TextView>
+                                    <TextView
+    android:textSize="10.0sp"
+    android:textColor="@color/text_sub"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="2.0dip"
+    android:text="QQ 群 · 交流与反馈"
+                                    >
+                                    </TextView>
+                                </LinearLayout>
+                                <TextView
+    android:textSize="11.0sp"
+    android:textColor="@color/text_sub"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:text="进群 ›"
                                 >
                                 </TextView>
                             </LinearLayout>
