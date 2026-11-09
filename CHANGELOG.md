@@ -4,6 +4,32 @@
 
 ---
 
+## v1.3.1 · 多用户隔离 + 关于页加群直达
+
+**2026-11-10**
+
+版本号说明：v1.2.10 / v1.3.0 曾构建未发行（v1.2.10 为停更段；规则改为每段最高 10 后向前进位），本版直接 v1.2.9 → v1.3.1，versionCode 34。
+
+### 多用户数据隔离（测试账号数据清零）
+
+按多用户审计要求，所有写死的账号侧数据清零、全部改动态：
+
+- 三处 asac 写死移除（`RhCashClaim` 数据 JSON 与两条 header、`RhCashJoin`、`RhGameTask`），改 `RhLocationContext` 动态捕获：宿主原生流量里的 fishAdCode / gps / asac 落盘 `rh_loc.json`，取不到的字段直接省略不拼进请求（与 v1.1.2 的 gps 策略对齐）；
+- `ConfigManager` 按 `myUserId()` 分账号：存储根目录（分身 999 → `/storage/emulated/999`）与报告端口（28714）随宿主多开环境自适应；
+- 审计固化：`_dev/audit_hardcode.py` 扫 6 类硬编码模式，作为双仓同步/发版门禁（`AUDIT_RULES.md`；违规须通知负责人亲自审计，不得自动整改）。
+
+### 关于页「加入我们🐧」
+
+- `activity_main.xml` 常用功能组新增 `rowQQGroup`；`MainActivity` 点击后按 mqqapi 协议直拉 QQ 加群卡片，三级回退（mqqapi intent → QQ 主页 → 浏览器）；
+- `AndroidManifest.xml` `<queries>` 补 `com.tencent.mobileqq`：Android 11+ 包可见性缺失会导致 intent 解析失败直接落浏览器回退；真机验证已直达群卡片。
+
+### 发布链路收紧
+
+- `gitee_sync.py` 发行版附件名前缀 闲鱼小猪手 → 咸鱼小猪手；
+- `api_push.py` / `gitee_sync.py` 推送白名单补挡 `_dev` / `_bak` / `_recover` 与根级 `_*.txt` 调试残留——`_dev` 内含 mtop 响应体与调试脚本（userToken 级数据），此前属敏感泄漏点；Git Data API 全量重建树，本次推送起远端同步清除。
+
+---
+
 ## v1.2.9 · 响应通道回归修复
 
 **2026-11-09**
@@ -36,6 +62,18 @@ v1.2.8 为了让报告跟着存档一起进持久区，把 `launch()` 传给引�
 剩余失败仅为跨 App 云控任务（`FROM_APP_REJECT` / `ILLEGAL`）与浏览任务（需真实行为），属设计内。
 
 同时补齐 v1.2.8 重建时丢掉的三个界面面板——「游戏任务」开关（常用功能组）、「自动投币」「自动开红包」（瓜分现金红包抽屉组）。v1.2.0 / v1.2.4 / v1.2.6 加这三块时，Java 与 `activity_main.xml` 是一起改的；重建只恢复了引擎类，界面入口整块丢失，导致功能能跑但点不到。本次从 v1.2.7 的构建产物恢复 `MainActivity`（90 个内部类）与完整布局（84 个 id），并把资源 id 从编译期数字还原为 `R.id.*` 符号——数字 id 是按旧 R 表分配的，直接复用会强转成错误控件（首当其冲是 `track` 被解析成 `tvPondWarn`，启动即崩）。
+
+### v1.2.9 追加：圈数挑战日奖自动领取（2026-11-10）
+
+接口定案 `mtop.taobao.idle.treasure.hunt.map.daily.reward`（v1.0，请求仅 `{"fishAdCode","gps"}`，与 map.init 同源）。可领状态在 `map.init` 响应 `data.dailyReward`：`todayHasIssue`（true=今日已发）/`todayNum`（今日币数）/`todayStepCount`/`yesterdayStepCount`（7 天连续判定用）。新增 `FishTaskAuto.maybeClaimDailyReward()` 挂在 doMapRoll 首次 init 之后：`todayHasIssue=true` 或无 `dailyReward` 字段直接跳过；未到点服务端回 FAIL 只落 `[daily-reward]` 日志不进报告。主跑批与 finish 收尾各一次机会，服务端发放幂等，无重复领取面。装机实测：重启 70s 内 `[tasks] 圈数日奖 -> SUCCESS` + `[daily-reward] claimed +100`，当日 100 币自动入账。
+
+### v1.2.9 追加：7天圈数挑战奖励自动领取（2026-11-10）
+
+协议定案：`mtop.idle.interact.cycle.challenge.info` 返回 `tierList`（`{cycle, rewardAmount, status: AWARD/CHALLENGING/LOCKED}` + `recordId`），档位 10 圈 1000 / 18 圈 2000 / 27 圈 5000 / 35 圈 10000；领取走 `mtop.idle.interact.cycle.challenge.reward`（req `{cycle, recordId, fishAdCode, gps}`）。注意这组接口用短命名空间 `mtop.idle.*`，`FishMtopHook` 响应白名单已补齐（此前 34 次请求响应全被丢弃）。
+
+实现三层：`maybeClaimCycleReward()` 挂跑批 mapRoll 后 + finish 收尾；探针 `probeCycleAward()` 发现可领档时切 `claim_only` 迷你跑批（跳过浏览段，20 秒内完成）；本地去重档 `rh_cycle_claim.txt`（`yyMMdd|cycle`，跨天失效）——**服务端领取成功后 status 仍显示 AWARD**（发奖异步），不记档会每轮探针重复领取（实测同档 3 连领后修复）。装机全链路验证：探针 01:51:37 置位 → 20s 内领取成功 → 01:57:11 「今日已领（本地档），跳过」。
+
+待接：`multi.day.challenge.info`（当前活动未开启，响应 `data:{}`）、`challenge.idleCoinSign.info`（挑战期签到，待活动期抓包）。
 
 ### v1.2.9 追加：面板接线修复（全量功能测试发现）
 
