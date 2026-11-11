@@ -35,6 +35,15 @@ public final class FishMtopHook {
 
     /** 待发送请求 {api, version, data}，下一次 App 请求时借壳发出 */
     private static volatile String[] pendingInvoke;
+    /** v1.4.5 最近创建的 WebView 实例（H5 EVAL 自动化目标页） */
+    static volatile Object lastWebView;
+    /** v1.4.5 该实例最近加载的 http URL（调试用） */
+    static volatile String lastWebViewUrl;
+    /** v1.4.5 已挂 loadUrl hook 的运行时类（去重） */
+    static final java.util.Set<String> loadUrlHooked = java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+    /** v1.4.5 主进程全部 UC WebView 实例（EVAL 时逐个 probe 选出任务页实例） */
+    static final java.util.Set<Object> allWebViews =
+            java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<Object, Boolean>());
     /** 模块运行所在 App 的 context（读写缓存文件用） */
     static volatile Context appCtx; // 包级可见（RhLocationContext 落盘需要）
     /** 宿主 classLoader（兼容版 fallback hook 用） */
@@ -81,6 +90,17 @@ public final class FishMtopHook {
                     // 1.1.2 位置上下文捕获（截断前喂原始体，快扫无命中零开销）
                     try {
                         RhLocationContext.capture(raw);
+                    } catch (Throwable ignored) {
+                    }
+                    // 1.4.3 广告归因请求体捕获：commercial 任务的 idleadv 上报参数一次到手
+                    try {
+                        if (raw.contains("adPositionCode") || raw.contains("idleadv")
+                                || raw.contains("adEvent") || raw.contains("scenarioId")) {
+                            java.io.File f = new java.io.File(cacheDir(), "rh_req_idleadv.json");
+                            java.io.FileWriter w = new java.io.FileWriter(f, false);
+                            w.write(raw);
+                            w.close();
+                        }
                     } catch (Throwable ignored) {
                     }
                     // B 类日志体量控制：data 全量可达数 KB（feeds 等高频接口一天几十 MB），截断 300 字符保诊断线索
@@ -171,6 +191,9 @@ public final class FishMtopHook {
                         String ds = data == null ? "" : String.valueOf(data);
                         RhTrafficPair.onRequest(String.valueOf(api), ds);
                         RhTokenVault.scanRequest(String.valueOf(api), ds);
+                        // v1.4.4 ApiProtocol 网关全量请求 dump（MtopContext 深度字段），
+                        // 7.29.x 页面业务请求 api 名固定、路由在 body 里，老 filter 全漏
+                        ApiProtoDump.dumpCtx(ctx);
                     } catch (Throwable ignored) {
                     }
                 }
@@ -342,11 +365,16 @@ public final class FishMtopHook {
             FishTaskAuto.autoRunDaily(appCtx);
             // v1.0.9 🐟 鱼塘任务自动跑：开关 pond=true 且当日未跑时延迟 40s 触发
             RhPondTask.autoRunDaily(appCtx);
+            // v1.4.1 🍚 自动投喂自动跑：开关 pondFeed=true 且当日未跑时延迟 46s 触发（投喂至饲料耗尽）
+            RhPondTask.autoRunFeedDaily(appCtx);
             // v1.1.9 🏅 会员任务自动跑：开关 oliverTask=true 且当日未跑时延迟 45s 触发
             RhOlivertask.autoRunDaily(appCtx);
             // v1.2.9 🎮 游戏任务自动跑：开关 gameTask=true 且当日未跑时延迟 50s 触发
             // 纯协议链（center→detail→complete→award），不依赖游戏页 UI
             RhGameTask.autoRunDaily(appCtx);
+            // v1.4.6 🪙 赚游戏币任务自动跑：开关 coinGame=true 且标识<2 时延迟 240s 触发
+            // （避开 40~50s 那波引擎，防 center.query 共用响应文件串包；标识 0/1/2 停止条件见 RhCoinTask）
+            RhCoinTask.autoRunDaily(appCtx);
             // v1.2.9 🧧 自动开红包：开奖日 10:00 起进窗口，每日 2 轮（1 正常 + 1 补）
             RhCashClaim.autoRunDaily(appCtx);
             // v1.2.9 🪙 自动投币：00:01 后进窗口，每轮 30s 轮询 coin 余额补投到当期额度上限
@@ -359,6 +387,68 @@ public final class FishMtopHook {
             // 报告 Socket 服务（仅主进程）：模块 UI 经 127.0.0.1:27715 免权限读取钓鱼报告，
             // 绕过 MIUI 跨 App 广播拦截与 scoped storage
             startReportServer();
+            // v1.4.8 移除 WebView 远程调试开关（setWebContentsDebuggingEnabled）：
+            // ANR 实证（/data/anr/ 五次）：UC U4 该调用在 core 未就绪时于主线程 Object.wait
+            // 阻塞数秒（getCoreType 锁），WebView 构造密集页（兑换商店）直接 ANR；
+            // 且 EVAL 通道走 evaluateJavascript，不依赖此 CDP 开关，属纯冗余风险。
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    // UC SDK 类晚于模块初始化加载，延迟 2s 再从宿主 classloader 取
+                    try {
+                        Thread.sleep(2000);
+                    } catch (InterruptedException ignored) {
+                    }
+                    try {
+                        Class<?> ucWv = hostCl.loadClass("com.uc.webview.export.WebView");
+                        de.robv.android.xposed.XposedBridge.hookAllConstructors(
+                                ucWv,
+                                new de.robv.android.xposed.XC_MethodHook() {
+                                    @Override
+                                    public void afterHookedMethod(
+                                            de.robv.android.xposed.XC_MethodHook.MethodHookParam param) {
+                                        lastWebView = param.thisObject;
+                                        try {
+                                            allWebViews.add(param.thisObject);
+                                        } catch (Throwable ignored) {
+                                        }
+                                        // v1.4.8 删 ctor 内同步 setWebContentsDebuggingEnabled：
+                                        // 主线程阻塞源（UC core 未就绪时 Object.wait 数秒 → ANR）
+                                        de.robv.android.xposed.XposedBridge.log(
+                                                "[RewardHook][webview-debug] UC webview ctor captured");
+                                    }
+                                });
+                        // v1.4.5 loadUrl 跟踪：lastWebView 只认真实 http 页面实例，
+                        // 排除启动期预热空白 WebView 抢占 EVAL 目标
+                        de.robv.android.xposed.XposedBridge.hookAllMethods(
+                                ucWv, "loadUrl",
+                                new de.robv.android.xposed.XC_MethodHook() {
+                                    @Override
+                                    public void beforeHookedMethod(
+                                            de.robv.android.xposed.XC_MethodHook.MethodHookParam param) {
+                                        try {
+                                            if (param.args != null && param.args.length > 0
+                                                    && param.args[0] instanceof String) {
+                                                String u = (String) param.args[0];
+                                                if (u.startsWith("http")) {
+                                                    lastWebView = param.thisObject;
+                                                    lastWebViewUrl = u;
+                                                }
+                                            }
+                                        } catch (Throwable ignored) {
+                                        }
+                                    }
+                                });
+                        log("[webview-debug] UC ctor+loadUrl hooks armed");
+                        log("[webview-debug] UC ctor hook armed");
+                    } catch (Throwable t) {
+                        log("[webview-debug] UC class/hook FAILED: " + t);
+                    }
+                }
+            }, "rh-wvdbg-uc").start();
+            // v1.4.8 删 8s 主线程兜底 setWebContentsDebuggingEnabled 调用：
+            // ANR trace 铁证（FishMtopHook$12$1.run:503 主线程 TimedWaiting 于 UC getCoreType 锁）。
+            // EVAL 走 evaluateJavascript 不需要该开关；sys/UC ctor 两处的 setter 也已一并移除。
             // 兼容版自检：25s 后盘点两类 hook 命中数；构造 hook 0 命中（新 ROM 失效个案）
             // 则动态挂方法级 fallback（EventCenter 参数含 MtopFinishEvent 的分发方法）。
             // 25s 窗口：闲鱼启动后请求已批量出现，且先于 autoRunDaily 40s 首轮触发。
@@ -382,6 +472,45 @@ public final class FishMtopHook {
     }
 
     /* ---------------- 报告 Socket 服务 ---------------- */
+
+    /** v1.4.5 主线程专用：对单个 WebView 反射执行 evaluateJavascript（回调丢弃，结果走 title 桥） */
+    private static void invokeEvalOne(Object wv, String js) throws Exception {
+        java.lang.reflect.Method evalM = null;
+        for (java.lang.reflect.Method m : wv.getClass().getMethods()) {
+            if ("evaluateJavascript".equals(m.getName())
+                    && m.getParameterTypes().length >= 1
+                    && m.getParameterTypes()[0] == String.class) {
+                evalM = m;
+                break;
+            }
+        }
+        if (evalM == null) {
+            wv.getClass().getMethod("loadUrl", String.class).invoke(wv, "javascript:" + js);
+            return;
+        }
+        if (evalM.getParameterTypes().length == 2 && evalM.getParameterTypes()[1].isInterface()) {
+            Object cb = java.lang.reflect.Proxy.newProxyInstance(
+                    appCtx.getClassLoader(),
+                    new Class[]{evalM.getParameterTypes()[1]},
+                    new java.lang.reflect.InvocationHandler() {
+                        @Override
+                        public Object invoke(Object proxy, java.lang.reflect.Method m, Object[] a) {
+                            return null;
+                        }
+                    });
+            evalM.invoke(wv, js, cb);
+        } else if (evalM.getParameterTypes().length == 2) {
+            // 2 参但第二参不是接口（抽象类等）——退化为 1 参或 loadUrl
+            try {
+                java.lang.reflect.Method m1 = wv.getClass().getMethod("evaluateJavascript", String.class);
+                m1.invoke(wv, js);
+            } catch (Throwable ignored) {
+                wv.getClass().getMethod("loadUrl", String.class).invoke(wv, "javascript:" + js);
+            }
+        } else {
+            evalM.invoke(wv, js);
+        }
+    }
 
     /** 本机回环端口服务：accept → 收到含 REPORT 的请求 → 回写钓鱼报告全文 */
     private static void startReportServer() {
@@ -530,6 +659,65 @@ public final class FishMtopHook {
                                             }
                                         }, "rh-game").start();
                                         body = "OK started";
+                                    } else if (req != null && req.startsWith("COINEX_REPORT")) {
+                                        // v1.4.9 自动兑换报告读取（必须先于 COINEX / COIN 的前缀匹配）
+                                        body = readReportFile("rh_tasks_coinexch.txt");
+                                        if (body == null) body = "NO_REPORT";
+                                    } else if (req != null && req.startsWith("COINEX")) {
+                                        // v1.4.9 手动执行一次兑换检查（manual=true，不受每日 1 次与时间窗口限制；
+                                        // 自动触发走 RhCoinTask 的标识 2 挂点，硬性条件在 RhCoinExchange 内判）
+                                        final Context cx2 = appCtx;
+                                        new Thread(new Runnable() {
+                                            @Override
+                                            public void run() {
+                                                try {
+                                                    RhCoinExchange.runCheck(cx2, true);
+                                                    log("[exch] manual run done");
+                                                } catch (Throwable t) {
+                                                    log("[exch] manual fail: " + t);
+                                                }
+                                            }
+                                        }, "rh-coinex").start();
+                                        body = "OK started";
+                                    } else if (req != null && req.startsWith("COIN_REPORT")) {
+                                        // v1.4.6 赚游戏币任务报告读取（必须先于 COIN 的前缀匹配）
+                                        body = readReportFile("rh_tasks_coin.txt");
+                                        if (body == null) body = "NO_REPORT";
+                                    } else if (req != null && req.startsWith("COIN")) {
+                                        // v1.4.6 手动跑一轮赚游戏币任务（中央+渠道收口，结果 COIN_REPORT 读；
+                                        // 手动触发不受标识 0/1/2 停止条件限制，跑完按复核结果滚动标记）
+                                        final Context cc2 = appCtx;
+                                        new Thread(new Runnable() {
+                                            @Override
+                                            public void run() {
+                                                try {
+                                                    RhCoinTask.run(cc2);
+                                                    log("[coin] engine done");
+                                                } catch (Throwable t) {
+                                                    log("[coin] engine fail: " + t);
+                                                }
+                                            }
+                                        }, "rh-coin").start();
+                                        body = "OK started";
+                                    } else if (req != null && req.startsWith("PONDFEED_REPORT")) {
+                                        // v1.4.1 自动投喂报告读取（必须先于 PONDFEED / POND 的前缀匹配）
+                                        body = readCacheFile("rh_tasks_pondfeed.txt");
+                                        if (body == null) body = "NO_REPORT";
+                                    } else if (req != null && req.startsWith("PONDFEED")) {
+                                        // v1.4.1 手动投喂（自动进行到饲料耗尽，结果 PONDFEED_REPORT 读）
+                                        final Context fc = appCtx;
+                                        new Thread(new Runnable() {
+                                            @Override
+                                            public void run() {
+                                                try {
+                                                    RhPondTask.runFeed(fc);
+                                                    log("[pondfeed] manual done");
+                                                } catch (Throwable t) {
+                                                    log("[pondfeed] manual fail: " + t);
+                                                }
+                                            }
+                                        }, "rh-pondfeed").start();
+                                        body = "OK started";
                                     } else if (req != null && req.startsWith("POND_REPORT")) {
                                         // v1.0.9 鱼塘任务报告读取
                                         body = readCacheFile("rh_tasks_pond.txt");
@@ -622,6 +810,148 @@ public final class FishMtopHook {
                                         } catch (Throwable t) {
                                             body = "ERR " + t;
                                         }
+                                    } else if (req != null && req.startsWith("EVAL ")) {
+                                        // v1.4.5 H5 自动化：EVAL <js> → 最近 WebView 执行 → document.title 桥回传。
+                                        // UC 多进程模式下 ValueCallback 对象无法跨 binder 传回（Proxy 静默丢失），
+                                        // 改为 JS 侧把结果写 document.title="__RH__"+json，native 轮询 getTitle() 取回。
+                                        String js = req.substring(5).trim();
+                                        final Object wv = lastWebView;
+                                        if (wv == null && allWebViews.isEmpty()) {
+                                            body = "NO_WEBVIEW";
+                                        } else {
+                                            try {
+                                                final String wrapped =
+                                                        "(function(){var __r;try{__r=(function(){" + js
+                                                                + "})()}catch(e){__r='JSERR '+e}"
+                                                                + ";try{document.title='__RH__'+(typeof __r==='object'?"
+                                                                + "JSON.stringify(__r):String(__r))}catch(e){}})()";
+                                                final java.util.concurrent.CountDownLatch latch =
+                                                        new java.util.concurrent.CountDownLatch(1);
+                                                final String[] out = new String[1];
+                                                final String jsF = js;
+                                                new android.os.Handler(android.os.Looper.getMainLooper())
+                                                        .post(new Runnable() {
+                                                    @Override
+                                                    public void run() {
+                                                        // 主线程状态机：probe 各实例 → 选 goofish 页 → 执行 EVAL
+                                                        final android.os.Handler h =
+                                                                new android.os.Handler(android.os.Looper.getMainLooper());
+                                                        final java.util.List<Object> cands =
+                                                                new java.util.ArrayList<Object>(allWebViews);
+                                                        if (cands.isEmpty() && wv != null) cands.add(wv);
+                                                        final int[] idx = {0};
+                                                        final Object[] chosen = {null};
+                                                        final String[] probeUrl = {null};
+                                                        Runnable[] step = new Runnable[1];
+                                                        final boolean[] probing = {true};
+                                                        // 单实例 probe：注入标记 → 400ms 后读 title
+                                                        step[0] = new Runnable() {
+                                                            @Override
+                                                            public void run() {
+                                                                if (probing[0]) {
+                                                                    if (idx[0] >= cands.size()) {
+                                                                        // 全部 probe 完：没有 goofish 页就退回 lastWebView
+                                                                        probing[0] = false;
+                                                                        chosen[0] = (wv != null) ? wv
+                                                                                : (cands.isEmpty() ? null
+                                                                                : cands.get(cands.size() - 1));
+                                                                        h.post(this);
+                                                                        return;
+                                                                    }
+                                                                    Object cur = cands.get(idx[0]);
+                                                                    String mark = "__RP" + idx[0] + "__";
+                                                                    try {
+                                                                        invokeEvalOne(cur,
+                                                                                "document.title='" + mark
+                                                                                        + "'+location.href.slice(0,160)");
+                                                                    } catch (Throwable t) {
+                                                                        out[0] = "ERR probe " + t;
+                                                                        latch.countDown();
+                                                                        return;
+                                                                    }
+                                                                    final String mk = mark;
+                                                                    final Object cw = cur;
+                                                                    h.postDelayed(new Runnable() {
+                                                                        @Override
+                                                                        public void run() {
+                                                                            try {
+                                                                                String t = (String) cw.getClass()
+                                                                                        .getMethod("getTitle")
+                                                                                        .invoke(cw);
+                                                                                if (t != null && t.contains(mk)) {
+                                                                                    String href = t.substring(
+                                                                                            t.indexOf(mk) + mk.length());
+                                                                                    if (href.contains("goofish")
+                                                                                            || href.contains("h5.m.")) {
+                                                                                        chosen[0] = cw;
+                                                                                        probeUrl[0] = href;
+                                                                                        probing[0] = false;
+                                                                                        h.post(step[0]);
+                                                                                        return;
+                                                                                    }
+                                                                                }
+                                                                            } catch (Throwable ignored) {
+                                                                            }
+                                                                            idx[0]++;
+                                                                            h.post(step[0]);
+                                                                        }
+                                                                    }, 400);
+                                                                } else {
+                                                                    // 执行真正的 EVAL
+                                                                    Object target = chosen[0];
+                                                                    if (target == null) {
+                                                                        out[0] = "NO_TARGET";
+                                                                        latch.countDown();
+                                                                        return;
+                                                                    }
+                                                                    try {
+                                                                        invokeEvalOne(target, wrapped);
+                                                                    } catch (Throwable t) {
+                                                                        out[0] = "ERR eval " + t;
+                                                                        latch.countDown();
+                                                                        return;
+                                                                    }
+                                                                    final long deadline =
+                                                                            System.currentTimeMillis() + 10000;
+                                                                    Runnable[] poll = new Runnable[1];
+                                                                    final Object tw = target;
+                                                                    poll[0] = new Runnable() {
+                                                                        @Override
+                                                                        public void run() {
+                                                                            try {
+                                                                                String t = (String) tw.getClass()
+                                                                                        .getMethod("getTitle")
+                                                                                        .invoke(tw);
+                                                                                if (t != null && t.contains("__RH__")) {
+                                                                                    out[0] = t.substring(
+                                                                                            t.indexOf("__RH__") + 6);
+                                                                                    latch.countDown();
+                                                                                    return;
+                                                                                }
+                                                                            } catch (Throwable ignored) {
+                                                                            }
+                                                                            if (System.currentTimeMillis() < deadline
+                                                                                    && out[0] == null) {
+                                                                                h.postDelayed(poll[0], 250);
+                                                                            } else if (out[0] == null) {
+                                                                                out[0] = "EVAL_TIMEOUT";
+                                                                                latch.countDown();
+                                                                            }
+                                                                        }
+                                                                    };
+                                                                    h.postDelayed(poll[0], 300);
+                                                                }
+                                                            }
+                                                        };
+                                                        h.post(step[0]);
+                                                    }
+                                                });
+                                                latch.await(25, java.util.concurrent.TimeUnit.SECONDS);
+                                                body = out[0] == null ? "EVAL_TIMEOUT" : out[0];
+                                            } catch (Throwable t) {
+                                                body = "ERR " + t;
+                                            }
+                                        }
                                     }
                                     java.io.OutputStream os = s.getOutputStream();
                                     os.write(body.getBytes("UTF-8"));
@@ -688,6 +1018,12 @@ public final class FishMtopHook {
         }
         String a = String.valueOf(api);
         String la = a.toLowerCase();
+        // v1.4.4 ApiProtocol 网关全量响应落盘：不受下面 api 前缀 filter 限制，
+        // 7.29.x 游戏任务接口走 ApiProtocol 网关时 api 名不匹配老前缀，先全文兜住
+        try {
+            ApiProtoDump.dumpResp(resp, respBody(resp, 200000));
+        } catch (Throwable ignored) {
+        }
         try {
         // v1.0.8 🎣 详情媒体提取（不依赖接口名：含 imageInfos 键才真正解析）
         // v1.0.8 🎣 详情媒体提取（不依赖接口名：含 imageInfos 键才真正解析）

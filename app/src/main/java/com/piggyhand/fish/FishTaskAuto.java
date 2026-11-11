@@ -206,7 +206,7 @@ public final class FishTaskAuto {
 
                   while (var7.hasNext()) {
                      String var8 = (String)var7.next();
-                     lvlMap.put(var8, var6.optInt(var8, -1));
+                     lvlMap.put(var8, var6.optInt(var8, 0));
                   }
                }
 
@@ -275,8 +275,10 @@ public final class FishTaskAuto {
    }
 
    private static int lvlGet(String var0) {
+      // v1.4.1 修复：缺省 -1 会让 lvlBump 首次计数写成 0（-1+1），实际放行 3 次而非上限 2 次。
+      // 缺省 0 与「未记录」等效：lvlSkip(0>=2=false)、lvlReset(0!=0=false) 行为均不变，bump 首次正确写 1。
       Integer var1 = lvlMap.get(var0);
-      return var1 == null ? -1 : var1;
+      return var1 == null ? 0 : var1;
    }
 
    private static boolean lvlSkip(String var0) {
@@ -305,6 +307,42 @@ public final class FishTaskAuto {
             lvlMap.put(var1, 0);
             lvlSave();
          }
+      }
+   }
+
+   /* ---------- 共享 LVL 门（v1.4.1）：RhPondTask 的自动赚饲料/自动投喂复用同一份 rh_task_lvl.json ----------
+    * 语义与实例版一致：当日计数 >=2 跳过（lvlSkip），每次引擎运行计一次。
+    * 鱼塘两引擎的 bump 只在自动调度线程里调用（每调度一轮 bump 一次），手动 socket 触发不经过这里
+    * —— 与 POND/OLIVER 手动语义对齐。跨天由 lvlEnsure 自动清零。 */
+   private static final Object LVL_SHARED_LOCK = new Object();
+
+   /** 共享 LVL 查询：当日该键已计满（>=2）→ 自动跑跳过 */
+   public static boolean lvlSkipShared(Context ctx, String key) {
+      try {
+         lvlLoadOnce(ctx != null ? ctx : appCtx);
+         lvlEnsure(dayOf(System.currentTimeMillis()));
+         return lvlSkip(key);
+      } catch (Throwable t) {
+         return false; // LVL 存档坏了不拦业务
+      }
+   }
+
+   /** 共享 LVL 计数 +1：每次引擎运行调用一次，当日累计到 2 后 lvlSkipShared 开始返回 true */
+   public static void lvlBumpShared(Context ctx, String key) {
+      try {
+         if (key == null || key.length() == 0) return;
+         synchronized (LVL_SHARED_LOCK) {
+            lvlLoadOnce(ctx != null ? ctx : appCtx);
+            lvlEnsure(dayOf(System.currentTimeMillis()));
+            int v = lvlGet(key);
+            if (v < 2) {
+               lvlMap.put(key, v + 1);
+               lvlSave();
+               log("[lvl] shared bump " + key + " -> " + (v + 1));
+            }
+         }
+      } catch (Throwable t) {
+         log("[lvl] shared bump fail: " + t);
       }
    }
 
@@ -1742,7 +1780,10 @@ public final class FishTaskAuto {
          java.util.Set<String> var14 = readCycleClaimed();
          for (int var5 = 0; var5 < var4.length(); var5++) {
             JSONObject var6 = var4.optJSONObject(var5);
-            if (var6 != null && "AWARD".equalsIgnoreCase(var6.optString("status", ""))) {
+            // v1.4.4 修复（2026-11-11 主机侧）：REACHED（已到达未领）也算可领——
+            // 实测 cycle=18 REACHED 2000 币手动 CALL reward 成功到账，原逻辑只认 AWARD 漏领
+            if (var6 != null && ("AWARD".equalsIgnoreCase(var6.optString("status", ""))
+                    || "REACHED".equalsIgnoreCase(var6.optString("status", "")))) {
                int var7 = parseNum(var6.optString("cycle", "0"));
                if (var14.contains(cycleDay() + "|" + var7)) {
                   log("[cycle-challenge] cycle=" + var7 + " 今日已领（本地档），跳过");
@@ -1815,7 +1856,8 @@ public final class FishTaskAuto {
             {"SURFACE12_DICE", var1.bag12On, var1.bag12Num, "十二面骰"},
             {"ROCKET_DICE", var1.bagRocketOn, var1.bagRocketNum, "火箭骰子"},
             {"DOUBLE_DICE", var1.bagDoubleOn, var1.bagDoubleNum, "双倍骰子"},
-            {"BENEFIT_GGK", var1.bagGgkOn, var1.bagGgkNum, "刮刮卡"}
+            {"BENEFIT_GGK", var1.bagGgkOn, var1.bagGgkNum, "刮刮卡"},
+            {"BENEFIT_DZP_SPRING", var1.bagDzpOn, var1.bagDzpNum, "大转盘"}
          };
          boolean var3 = false;
 
@@ -1868,6 +1910,8 @@ public final class FishTaskAuto {
                int var23 = 0;
                String var24 = null;
                String var25 = null;
+               // 大转盘每张独立 propId（amount 各 1），逐张核销必须按张取 id；GGK 仍沿用首个 id
+               java.util.ArrayList<String> varIds = new java.util.ArrayList<String>();
 
                for (int var26 = 0; var26 < var41.length(); var26++) {
                   JSONObject var27 = var41.optJSONObject(var26);
@@ -1880,6 +1924,10 @@ public final class FishTaskAuto {
                      if (var25 == null) {
                         var25 = var27.optString("id", null);
                      }
+
+                     if (var27.optString("id", null) != null) {
+                        varIds.add(var27.optString("id"));
+                     }
                   }
                }
 
@@ -1888,7 +1936,8 @@ public final class FishTaskAuto {
                   if (var23 <= var43) {
                      this.report.append("[背包] ").append(var22).append(" 已达目标（剩 ").append(var23).append("）\n");
                   } else {
-                     boolean var44 = !"BENEFIT_GGK".equals(var19);
+                     // GGK 与 DZP 走 prop.use 直兑；其余（骰子）走地图掷骰，需地图状态可用
+                     boolean var44 = !"BENEFIT_GGK".equals(var19) && !"BENEFIT_DZP_SPRING".equals(var19);
                      if (var44 && !var10) {
                         this.report.append("[背包] ").append(var22).append(" 地图状态不可用，跳过\n");
                      } else {
@@ -1931,12 +1980,18 @@ public final class FishTaskAuto {
                               var42 += (long)var37;
                               var31 += rollCoins(var36);
                            } else {
+                              // DZP：第 var29 次使用取第 var29 张的 id（快照序）；GGK 沿用首个 id
+                              String varUseId = var25;
+                              if ("BENEFIT_DZP_SPRING".equals(var19) && varIds.size() > 0) {
+                                 varUseId = (String)varIds.get(Math.min(var29, varIds.size() - 1));
+                              }
+
                               JSONObject var34 = this.callApi(
                                  "mtop.taobao.idle.play.prop.use",
                                  "1.0",
                                  objJson(
                                     "id",
-                                    var25,
+                                    varUseId,
                                     "bizCode",
                                     "coinMap",
                                     "configId",
@@ -1948,7 +2003,7 @@ public final class FishTaskAuto {
                                     "gps",
                                     RhLocationContext.gps()
                                  ),
-                                 "背包刮卡"
+                                 "背包" + ("BENEFIT_DZP_SPRING".equals(var19) ? "转盘" : "刮卡")
                               );
                               String var35 = firstRet(var34);
                               if (var35 == null || !var35.contains("SUCCESS")) {
@@ -2236,7 +2291,26 @@ public final class FishTaskAuto {
       }
 
       boolean var11 = var6 != null && var6.contains("SUCCESS");
+      // v1.4.4 修复（2026-11-11 主机侧）：SUCCESS ≠ 领到。实测 6 个任务（106456 等）
+      // getolivertaskbenefit 返回 SUCCESS 但 taskBenefitDTO.needBenefit 仍 "true"、rewards 空——
+      // 服务端没发奖。此场景按失败记账且【不 lvlBump】，把当日 2 次名额留给下一轮引擎重试；
+      // 只有 needBenefit 变 false / 缺失（或 rewards 非空）才判真领到并 bump。
+      boolean claimedReal = var11;
       if (var11) {
+         try {
+            JSONObject var8r = var5.optJSONObject("data");
+            JSONObject var9r = var8r == null ? null : var8r.optJSONObject("taskDTO");
+            if (var9r != null) {
+               JSONObject var10b = var9r.optJSONObject("taskBenefitDTO");
+               JSONArray var10rw = var9r.optJSONArray("rewards");
+               boolean nbStill = var10b != null && "true".equals(var10b.optString("needBenefit", ""))
+                     && (var10rw == null || var10rw.length() == 0);
+               if (nbStill) claimedReal = false;
+            }
+         } catch (Throwable ignored) {
+         }
+      }
+      if (claimedReal) {
          var3.add(var2 + "(" + var1 + ")");
          this.report.append("[领取] ").append(var2).append(" -> ").append(var6).append(" rewards=").append(var7).append('\n');
          toast("✓ " + var2 + coinSuffix(var7));
@@ -2245,7 +2319,13 @@ public final class FishTaskAuto {
          }
       } else {
          var4.add(var2 + "(" + var1 + ")");
-         this.report.append("[领取] ").append(var2).append(" -> ").append(var6 == null ? "无响应" : var6).append('\n');
+         if (var11) {
+            // SUCCESS 但未生效：明示原因，不 bump，下一轮重试（服务端幂等，无重复风险）
+            this.report.append("[领取] ").append(var2).append(" -> 未生效（needBenefit 仍 true，下轮重试）\n");
+            log("[claim] not-effective: " + var2 + " (" + var1 + ")");
+         } else {
+            this.report.append("[领取] ").append(var2).append(" -> ").append(var6 == null ? "无响应" : var6).append('\n');
+         }
       }
    }
 

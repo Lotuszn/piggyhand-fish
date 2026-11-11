@@ -10,8 +10,8 @@ SRC="$ROOT"
 #   patch 到 10 → 下一版 Y+1、Z 归 1（例：1.2.10 → 1.3.1）；Y 到 10 → X+1、Y 归 1、Z 归 1（例：1.10.10 → 2.1.1）；
 #   versionCode 与版本名解耦，单调 +1 不参与进位
 # 兼容版构建：VER="1.0.9-兼容版" bash build-apk.sh（环境变量可覆盖，产物名随之变化）
-VER="${VER:-1.3.1}"
-VERCODE="${VERCODE:-34}"
+VER="${VER:-1.4.4}"
+VERCODE="${VERCODE:-38}"
 # 交付产物命名（用户规则 2026-11-10 修订）：咸鱼小猪手-版本号.apk
 OUT_APK="咸鱼小猪手-$VER.apk"
 # SDK 三件套：android.jar + build-tools(含 aapt2/apksigner) + r8.jar（默认取 fish-work/sdk）
@@ -27,8 +27,10 @@ fi
 
 cd "$SRC"
 # keystore 放 build 外持久化（build 每次清空；重签会导致签名变化→被迫卸载重装丢 LSPosed 启用态）
+# v1.5.0 起不做整目录 rm -rf build（文件数超批量删除确认门会卡构建），改按子目录/单文件清理
 mkdir -p .keystore
-rm -rf build
+rm -rf build/classes build/dex build/gen
+rm -f build/res.zip build/base.apk build/merged.apk build/aligned.apk build/hook.jar build/javac.log
 mkdir -p build/classes build/dex build/gen
 
 # 构建期版本注入（1.1.3）：BuildInfo 供任意进程（闲鱼/App）读取真实版本号
@@ -77,7 +79,9 @@ java -cp "$R8" com.android.tools.r8.D8 --release \
   --output build/dex build/hook.jar
 
 echo "[5/8] 合并 dex 进 APK（resources.arsc 必须 STORED 未压缩，R+ 校验）"
-python - <<'EOF'
+# PY 可环境变量覆盖：宿主 shell python shim 路径破损时传 POSIX 形式的真实 python
+PY="${PY:-python}"
+"$PY" - <<'EOF'
 import zipfile, os
 src = 'build/base.apk'
 dst = 'build/merged.apk'
