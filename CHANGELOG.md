@@ -14,6 +14,7 @@
   - `ApiCallBack` 类级响应旁路 hook（构造器 + 全部方法喂统一捕获通道），直调与页面响应双通道。
 - 修复圈数挑战请求体坏 JSON：城市码/定位拼接对 `jsonPair()` 尾逗号语义误用，`interact.cycle.challenge.info` 等三处直接拼 `}` 产生非法请求体，改用 `jsonPairObj()`。
 - 修复部分构建环境编译失败：UC WebView 类改为运行时反射加载（编译 classpath 无 UC 依赖）。
+- 新增「关于 → 通用 → 清除今日任务标记」按钮：确认后经 socket 清空当日 0/1/2 标识（LVL 内存计数 + `rh_task_lvl.json`）与 13 个 done/try/date 标记文件（覆盖 4 个候选目录），随后 root 重启闲鱼（`am force-stop` + monkey 拉起）重跑当日任务；引擎运行中点击会被拒绝（防计数写回），闲鱼未运行时提示失败不执行重启。
 
 ---
 
