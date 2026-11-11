@@ -2,6 +2,8 @@ package com.piggyhand.fish;
 
 import android.content.Context;
 
+import java.io.File;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -213,6 +215,64 @@ public final class RhPondTask {
     }
 
     /** 手动/自动统一入口：投喂进行到饲料余额耗尽（v1.4.2 固定语义，无次数自定义） */
+    /**
+     * 鱼塘「赚饲料」面板的每日「领饲料」。返回一行摘要（写进报告）。
+     * 接口：play.sign.in.home（查）+ play.sign.in（领），playId=101。
+     */
+    static String dailyFeedSign(Context ctx) {
+        long pid = pondSignPlayId(ctx);
+        JSONObject body = new JSONObject();
+        try {
+            body.put("playId", pid);
+            body.put("usertoken", "");
+        } catch (Throwable ignored) {
+        }
+
+        String homeRaw = callAndWait(ctx, "mtop.taobao.idle.play.sign.in.home", "1.0",
+                body.toString(), "pfsh", 6000);
+        JSONObject home = parse(homeRaw);
+        String days = "?", awarded = "?";
+        if (home != null && hasSuccess(home) && home.optJSONObject("data") != null) {
+            JSONObject d = home.optJSONObject("data");
+            days = d.optString("signInDays", "?");
+            awarded = d.optString("signInAwarded", "?");
+        }
+
+        String doRaw = callAndWait(ctx, "mtop.taobao.idle.play.sign.in", "1.0",
+                body.toString(), "pfsd", 6000);
+        JSONObject so = parse(doRaw);
+        String ret = briefRet(doRaw);
+        if (so != null && hasSuccess(so)) {
+            JSONObject d = so.optJSONObject("data");
+            String nd = d == null ? "" : d.optString("signInDays", "");
+            return "领饲料 playId=" + pid + " → 成功" + (nd.length() > 0 ? "（连签 " + nd + " 天）" : "")
+                    + "，面板剩余饲料 +10g";
+        }
+        if (ret != null && ret.contains("SIGNED_IN")) {
+            return "领饲料 playId=" + pid + " → 今日已领（连签 " + days + " 天，awarded=" + awarded + "）";
+        }
+        return "领饲料 playId=" + pid + " → 失败 " + ret;
+    }
+
+    /** 鱼塘签到 playId：rh_pond_sign_playid.txt 覆盖（可选）→ 内置 101 */
+    private static long pondSignPlayId(Context ctx) {
+        try {
+            File dir = ctx.getExternalFilesDir(null);
+            if (dir == null) dir = ctx.getFilesDir();
+            File f = new File(dir, "rh_pond_sign_playid.txt");
+            if (f.exists() && f.length() > 0) {
+                byte[] b = new byte[(int) f.length()];
+                java.io.FileInputStream in = new java.io.FileInputStream(f);
+                in.read(b);
+                in.close();
+                String s = new String(b, "UTF-8").trim();
+                if (s.length() > 0) return Long.parseLong(s);
+            }
+        } catch (Throwable ignored) {
+        }
+        return 101L;
+    }
+
     public static String runFeed(Context ctx) {
         return runFeedDrain(ctx);
     }
@@ -281,11 +341,19 @@ public final class RhPondTask {
             } else {
                 failCnt++;
                 sb.append("  ✗ 第").append(i + 1).append("发 ").append(briefRet(body)).append('\n');
-                // 连续失败立即止损（频控/记录失效再打也是白打）
-                if (failCnt >= 2) {
-                    sb.append("  · 连续 2 发失败，停止\n");
+                /* 服务端「服务开小差啦」是瞬时限流：2026-11-11 米9 实测连发 24 发后触发，
+                   冷却 15~20s 可继续。旧逻辑「连失败 2 发就停」会把余额永久留在账上，
+                   这里改成退避重试，只有连续失败 8 次（≈2 分钟无恢复）才判定真打不动。 */
+                if (failCnt >= 8) {
+                    sb.append("  · 连续 8 发失败，判定服务端拦截，停止\n");
                     break;
                 }
+                try {
+                    Thread.sleep(15000L);
+                } catch (InterruptedException e) {
+                    break;
+                }
+                continue;
             }
             try {
                 Thread.sleep(1300); // 防频控；实测 1.3s 间隔连发无拦截
@@ -308,6 +376,28 @@ public final class RhPondTask {
      * 都拿不到返回 -1（报告里引导用户先手动投喂一次），绝不硬编码过期活动 ID。
      */
     private static long resolveFeedId(Context ctx) {
+        // ⓿ 动物列表（最权威，2026-11-11 米9 实测）：forest.animal.list 的
+        //    data.result[].feedInfo.feedId 就是当前投喂活动记录 ID，
+        //    不需要用户先手动投喂一次，也不依赖页面动作留下的缓存。
+        try {
+            String lb = callAndWait(ctx, "mtop.taobao.idle.forest.animal.list", "1.0",
+                    "{}", "animallist", 6000);
+            JSONObject lj = parse(lb);
+            if (lj != null && hasSuccess(lj)) {
+                JSONArray arr = lj.getJSONObject("data").optJSONArray("result");
+                for (int i = 0; arr != null && i < arr.length(); i++) {
+                    JSONObject a = arr.optJSONObject(i);
+                    if (a == null) continue;
+                    JSONObject fi = a.optJSONObject("feedInfo");
+                    long id = fi == null ? -1 : fi.optLong("feedId", -1);
+                    if (id > 0) {
+                        saveFeedId(ctx, id);
+                        return id;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
         // ① 响应缓存
         try {
             java.io.File cacheDir = ctx.getExternalCacheDir();
@@ -344,7 +434,48 @@ public final class RhPondTask {
             }
         } catch (Throwable ignored) {
         }
+        // ③ 全量响应缓存兜底：投喂记录（feedId）只要在任意一次响应里出现过就能捡到。
+        //    典型来源是用户打开神奇鱼塘页时 H5 拉活动配置的响应，落在 cache/rh_resp_*.json
+        //    与旁档 rh_apiproto.jsonl 里；比只认 rh_resp_feed.json 覆盖面大得多。
+        long scanned = scanFeedIdFromCaches(ctx);
+        if (scanned > 0) {
+            saveFeedId(ctx, scanned);
+            RhFileLog.write("[pondfeed] feedId 从响应缓存捞到: " + scanned);
+            return scanned;
+        }
         return -1;
+    }
+
+    /** 扫 cache/rh_resp_*.json 与 rh_apiproto.jsonl，取最大的 feedId（同一活动记录，取新值） */
+    private static long scanFeedIdFromCaches(Context ctx) {
+        long best = -1;
+        try {
+            java.io.File dir = ctx.getExternalCacheDir();
+            if (dir == null) dir = ctx.getCacheDir();
+            if (dir == null || !dir.isDirectory()) return -1;
+            java.io.File[] fs = dir.listFiles();
+            if (fs == null) return -1;
+            java.util.regex.Pattern p = java.util.regex.Pattern.compile("\"feedId\"\\s*:\\s*\"?(\\d{4,})");
+            for (java.io.File f : fs) {
+                String n = f.getName();
+                if (!n.startsWith("rh_resp_") && !"rh_apiproto.jsonl".equals(n)) continue;
+                if (f.length() <= 0 || f.length() > 8L * 1024 * 1024) continue; // 大文件跳过，防 OOM
+                try {
+                    byte[] b = new byte[(int) f.length()];
+                    java.io.FileInputStream in = new java.io.FileInputStream(f);
+                    in.read(b);
+                    in.close();
+                    java.util.regex.Matcher m = p.matcher(new String(b, "UTF-8"));
+                    while (m.find()) {
+                        long id = Long.parseLong(m.group(1));
+                        if (id > best) best = id;
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return best;
     }
 
     /** 投喂成功后把 feedId 落持久档（原子写：tmp → rename） */
@@ -438,6 +569,15 @@ public final class RhPondTask {
         sb.append("fishAdCode=").append(fish == null ? "(动态缺省)" : fish)
                 .append(" gps=").append(gps == null ? "(动态缺省)" : gps).append('\n');
 
+        /* ---------- 0. 「赚饲料」面板的每日「领饲料」（连续签到） ----------
+         * 2026-11-11 现场取证：面板里那颗橙色「领饲料」按钮打的是
+         *   mtop.taobao.idle.play.sign.in   body={"playId":101}
+         * playId=101 是鱼塘玩法实例 ID（游戏中心是 4），服务端固定，不随账号变。
+         * 领完面板顶部「剩余饲料」0g → 10g，今天那格变「已领取」、按钮变「明天再来」。
+         * 幂等：已签返回 FAIL_BIZ_PLAY_SIGNED_IN，不报错只记账。
+         */
+        sb.append("[0] ").append(dailyFeedSign(ctx)).append('\n');
+
         /* ---------- 1. 任务列表 ---------- */
         // show 请求体全程复用一份（触发后重拉、复核都用它）
         final String showReq = "{\"activityId\":\"104042\",\"extend\":{}," + RhLocationContext.jsonPair()
@@ -480,6 +620,8 @@ public final class RhPondTask {
          * 接口史：uploadolivertasktrigger 是 496 场景专用，对 104042 报参数不合法，勿再试。
          */
         int pushOk = 0, pushFail = 0, pushSkip = 0;
+        // 领奖计数提前声明：多轮任务必须「推一轮→立刻领一轮」，领奖结果要在触发循环里累计
+        int gain = 0, okCnt = 0, failCnt = 0;
         sb.append("[2] 触发 ACCEPTED 任务:\n");
         for (int i = 0; i < tasks.length(); i++) {
             try {
@@ -491,8 +633,9 @@ public final class RhPondTask {
                 } catch (Throwable ignored) {
                 }
                 long tidNum = 0;
+                String tidStr = t.optString("taskInstanceId");
                 try {
-                    tidNum = Long.parseLong(t.optString("taskInstanceId"));
+                    tidNum = Long.parseLong(tidStr);
                 } catch (Throwable ignored) {
                 }
                 if (tidNum <= 0) {
@@ -572,7 +715,29 @@ public final class RhPondTask {
                         doneThis++;
                         sb.append("  ✓ ").append(title).append(" trigger#").append(r + 1)
                                 .append(st.length() > 0 ? " → " + st : "").append('\n');
-                        if (!"ACCEPTED".equals(st)) break;
+                        /* 多轮任务（看视频 3 轮）的正确节奏是「推一轮→立刻领一轮」：
+                           推到 AWARD 后不领奖，状态就卡在 AWARD，下一发 trigger 服务端
+                           直接拒绝（2026-11-11 米9 实测：1/3 靠连推 2 发只能到 1/3）。
+                           这里用 trigger 响应自带的 awardInfoDTOMap 挑本轮未领档位。 */
+                        boolean awardedThisRound = false;
+                        if ("AWARD".equals(st)) {
+                            JSONObject dto = null;
+                            try {
+                                dto = rj.getJSONObject("data").getJSONObject("idleTaskDTO");
+                            } catch (Throwable ignored) {
+                            }
+                            String idx = dto == null ? "" : pickAwardIndex(dto);
+                            int pts = awardRound(ctx, tidNum, tidStr, idx, title, sb, fish, gps);
+                            if (pts >= 0) {
+                                okCnt++;
+                                gain += pts;
+                                awardedThisRound = true;
+                            } else {
+                                failCnt++;
+                            }
+                        }
+                        // 本轮已领 → 下一轮还能再推；未领且状态已离开 ACCEPTED → 到头收手
+                        if (!awardedThisRound && !"ACCEPTED".equals(st)) break;
                     }
                     Thread.sleep(1500); // 防频控
                 }
@@ -609,7 +774,6 @@ public final class RhPondTask {
         }
 
         /* ---------- 3. AWARD 任务逐个领奖 ---------- */
-        int gain = 0, okCnt = 0, failCnt = 0;
         if (nAward > 0) sb.append("[3] 领奖:\n");
         for (int i = 0; i < tasks.length(); i++) {
             try {
@@ -781,6 +945,41 @@ public final class RhPondTask {
         } catch (Throwable ignored) {
         }
         return "1";
+    }
+
+    /** 领一档奖励（joy.community.activity.task.award）。成功返回获得的饲料克数，失败 -1。 */
+    private static int awardRound(Context ctx, long tidNum, String tidStr, String idx,
+                                  String title, RhReport sb, String fish, String gps) {
+        try {
+            JSONObject data = new JSONObject();
+            data.put("activityId", "104042");
+            data.put("awardIndexList", idx);
+            if (fish != null && fish.length() > 0) data.put("fishAdCode", fish);
+            if (gps != null && gps.length() > 0) data.put("gps", gps);
+            data.put("taskId", tidNum > 0 ? String.valueOf(tidNum) : tidStr);
+            String body = callAndWait(ctx,
+                    "mtop.taobao.idle.joy.community.activity.task.award", "1.0",
+                    data.toString(), "award", 6000);
+            JSONObject rj = parse(body);
+            if (rj == null || !hasSuccess(rj)) {
+                sb.append("      ✗ 领奖#").append(idx).append(' ').append(briefRet(body)).append('\n');
+                return -1;
+            }
+            int pts = 0;
+            try {
+                pts = Integer.parseInt(rj.getJSONObject("data")
+                        .getJSONObject("idleJoyTaskDTO")
+                        .getJSONObject("extend").optString("pointNum", "0"));
+            } catch (Throwable ignored) {
+            }
+            sb.append("      ✓ 领奖#").append(idx).append(' ').append(title)
+                    .append(" +").append(pts).append("g\n");
+            Thread.sleep(1200); // 防频控
+            return pts;
+        } catch (Throwable t) {
+            sb.append("      ! 领奖#").append(idx).append(" 异常: ").append(t).append('\n');
+            return -1;
+        }
     }
 
     private static void finish(Context ctx, RhReport sb, long t0) {

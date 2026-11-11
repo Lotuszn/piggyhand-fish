@@ -28,6 +28,8 @@ public class ConfigManager {
             "  \"maxScoutMethods\": 400,\n" +
             "  \"adSdkPresets\": true,\n" +
             "  \"noSplashAd\": true,\n" +
+            "  \"pond\": true,\n" +
+            "  \"pondFeed\": true,\n" +
             "  \"rules\": [\n" +
             "    {\n" +
             "      \"comment\": \"侦察完成后按日志填规则。示例:\",\n" +
@@ -54,8 +56,8 @@ public class ConfigManager {
     /** 🐟 鱼塘任务：打开闲鱼自动跑一次（AWARD 收割+签到气泡）；手动 POND 触发不受此开关限制 */
     public boolean pond = true;
     /** 🍚 自动投喂：打开闲鱼自动协议投喂，直到饲料余额耗尽（每次扣 10g 饲料）；手动 PONDFEED 触发不受此开关限制。
-     *  默认关 —— 投喂直接消耗饲料余额，交给用户自己决定 */
-    public boolean pondFeed = false;
+     *  默认开 —— 用户口径：饲料留在账上会过期，默认应投喂到剩余 0 */
+    public boolean pondFeed = true;
     /** 🏅 会员任务：打开闲鱼自动跑一次（会员经验值四条任务 上报+领取）；手动 OLIVER 触发不受此开关限制 */
     public boolean oliverTask = true;
     public boolean gameTask = true;      // 玩一玩游戏任务
@@ -197,7 +199,12 @@ public class ConfigManager {
             }
         }
 
-        return parse(DEFAULT_JSON, "builtin");
+        // 内置默认兜底：必须返回非 null 对象。
+        // 旧实现直接返回 parse(DEFAULT_JSON)，一旦内置 JSON 解析异常就是 null，
+        // 而各引擎的写法是 `cfg != null && cfg.xxx` → 整批功能静默关闭
+        // （2026-11-11 现场：pond/pondFeed 两个引擎因此一个多月没跑过）。
+        ConfigManager builtin = parse(DEFAULT_JSON, "builtin");
+        return builtin != null ? builtin : new ConfigManager();
     }
 
     public static ConfigManager parse(String json, String from) {
@@ -218,7 +225,7 @@ public class ConfigManager {
             c.toastNotify = o.optBoolean("toastNotify", true);
             c.fishMedia = o.optBoolean("fishMedia", true);
             c.pond = o.optBoolean("pond", true);
-            c.pondFeed = o.optBoolean("pondFeed", false);
+            c.pondFeed = o.optBoolean("pondFeed", true);
             c.oliverTask = o.optBoolean("oliverTask", true);
             c.gameTask = o.optBoolean("gameTask", true);
             c.coinGame = o.optBoolean("coinGame", true);

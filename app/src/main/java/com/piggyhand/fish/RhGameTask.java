@@ -111,6 +111,9 @@ public final class RhGameTask {
          }
 
          ArrayList var12 = new ArrayList();
+         // v1.5.2fix：AWARD 单独成表。旧实现只收 ACCEPTED，把「已转 AWARD 待领奖」的任务
+         // 直接丢掉（列表页显示"无可做"，领奖永远不发）—— 这正是"两项未领奖"的根因。
+         ArrayList var12a = new ArrayList();
          int var13 = 0;
 
          for (int var14 = 0; var14 < var11.length(); var14++) {
@@ -119,15 +122,45 @@ public final class RhGameTask {
                JSONObject var16 = var15.optJSONObject("task");
                if (var16 != null && var16.optString("taskId").length() != 0) {
                   var13++;
-                  if ("ACCEPTED".equals(var16.optString("taskStatus"))) {
+                  String varSt = var16.optString("taskStatus");
+                  if ("ACCEPTED".equals(varSt)) {
                      var12.add(var15);
+                  } else if ("AWARD".equals(varSt)) {
+                     var12a.add(var15);
                   }
                }
             }
          }
 
-         var3.append("[1] 清单: ").append(var11.length()).append(" 个游戏 / ").append(var13).append(" 个任务 / ").append(var12.size()).append(" 个可做\n");
-         if (var12.isEmpty()) {
+         var3.append("[1] 清单: ").append(var11.length()).append(" 个游戏 / ").append(var13)
+            .append(" 个任务 / 可做").append(var12.size())
+            .append(" / 待领奖").append(var12a.size()).append('\n');
+
+         /* 待领奖先用列表状态直接收割：center.query 已带 taskStatus=AWARD 与 appkey，
+            不必再走 detail/complete（那两步对 AWARD 只会返回"已是 AWARD，跳过"）。*/
+         if (!var12a.isEmpty()) {
+            for (int varA = 0; varA < var12a.size(); varA++) {
+               JSONObject varAg = (JSONObject)var12a.get(varA);
+               JSONObject varAt = varAg.optJSONObject("task");
+               String varAtId = varAt.optString("taskId");
+               String varAtKey = varAg.optString("appkey");
+               String varAtTitle = varAg.optString("title");
+               String varAtAmt = varAt.optString("rewardAmount", "0");
+               var3.append("[1.5] ").append(varAtTitle).append(" +").append(varAtAmt).append(" 币\n");
+               int[] varAr = awardGame(var0, varAtId, varAtKey);
+               if (varAr[0] > 0) {
+                  var6++;
+                  var8 += varAr[1];
+                  var3.append("     ✓ 领取成功 +").append(varAr[1]).append(" 闲鱼币\n");
+               } else {
+                  var7++;
+                  var3.append("     ✗ 领奖失败\n");
+               }
+               sleep(900L);
+            }
+         }
+
+         if (var12.isEmpty() && var12a.isEmpty()) {
             var3.append("[1] 无可做任务（可能今日已全部完成，或已领完）\n");
             finish(var0, var3, var1);
             return var3.toString();
@@ -287,8 +320,12 @@ public final class RhGameTask {
 
                for (int var44 = 0; var44 < var42.length(); var44++) {
                   JSONObject var45 = var42.optJSONObject(var44) == null ? null : var42.optJSONObject(var44).optJSONObject("task");
-                  if (var45 != null && "ACCEPTED".equals(var45.optString("taskStatus"))) {
-                     var43++;
+                  if (var45 != null) {
+                     String varSt2 = var45.optString("taskStatus");
+                     // AWARD 也算待做：领奖失败时下一轮还要再来一次
+                     if ("ACCEPTED".equals(varSt2) || "AWARD".equals(varSt2)) {
+                        var43++;
+                     }
                   }
                }
 
@@ -317,6 +354,37 @@ public final class RhGameTask {
          finish(var0, var3, var1);
          return var3.toString();
       }
+   }
+
+   /**
+    * 直接领奖（task.award）：返回 {是否成功, 实发币数}。
+    * 2026-11-11 米9 实测：{taskId,appkey} 两个字段即可，服务端返回
+    * data.awarded=true / rewardAmount / rewardUnit=IDLE_COIN。
+    */
+   private static int[] awardGame(Context var0, String varTaskId, String varAppkey) {
+      int[] varR = new int[]{0, 0};
+      try {
+         JSONObject var1 = new JSONObject();
+         var1.put("taskId", varTaskId);
+         var1.put("appkey", varAppkey);
+         // 多用户：asac 走本机动态捕获，无捕获省略字段
+         String varAsac = RhLocationContext.asac();
+         if (varAsac != null) var1.put("asac", varAsac);
+         String varRaw = RhPondTask.callAndWait(var0, API_AWARD, "1.0", var1.toString(), "award", 6000L);
+         JSONObject var2 = parse(varRaw);
+         if (var2 == null || !hasSuccess(var2)) {
+            RhFileLog.write("[game] award fail " + varTaskId + " " + briefRet(var2));
+            return varR;
+         }
+         JSONObject var3 = var2.optJSONObject("data");
+         if (var3 != null && var3.optBoolean("awarded", false)) {
+            varR[0] = 1;
+            varR[1] = parseInt(var3.optString("rewardAmount"), 0);
+         }
+      } catch (Throwable var4) {
+         RhFileLog.write("[game] award err " + varTaskId + ": " + var4);
+      }
+      return varR;
    }
 
    public static boolean isDoneToday(Context var0) {

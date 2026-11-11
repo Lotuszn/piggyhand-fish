@@ -1125,6 +1125,57 @@ public final class FishTaskAuto {
          log("task auto FAIL: " + var45);
       }
 
+      /* v1.5.2-fix：收尾兜底 —— 当日所有 AWARD 任务强制再收一遍。
+       * 现场（2026-11-11）：两单 CSJ 视频任务 106538/106181 全天挂在 AWARD 没被收，
+       * 原因有二：① 主循环先判 rejectedToday / lvlSkip 直接跳过；
+       * ② trigger 返回 SUCCESS 但状态不变（服务端只记"上报"，不改状态），
+       *    必须再跟一发 getolivertaskbenefit 才真正落库（106181 实测打了 3 次 trigger 无效，
+       *    补 benefit 后立刻变 COMPLETE）。
+       * 兜底不复用任何缓存 token：重拉列表取最新 fromToken+groupId 再打。 */
+      if (!this.abort) {
+         List<String> var21 = new ArrayList<String>();
+         List<String> var22 = new ArrayList<String>();
+         try {
+            List var100 = this.extractTasks(this.callApi("mtop.taobao.idle.task.queryolivertasklist", "2.0", "{\"sceneId\":496}", "收尾复查"));
+            if (var100 != null) {
+               for (Object var101o : var100) {
+                  JSONObject var101 = (JSONObject) var101o;
+                  if (!"AWARD".equals(str(var101, "idleTaskStatus"))) continue;
+                  String var102 = str(var101, "deliveryId");
+                  JSONObject var103 = var101.optJSONObject("materialDTO");
+                  String var104 = var103 == null ? "?" : optStr(var103, "title");
+                  JSONObject var105 = new JSONObject();
+                  try {
+                     var105.put("deliveryId", var102);
+                     var105.put("sceneId", 496);
+                     String var106 = str(var101, "fromToken");
+                     if (var106 != null && var106.length() > 0) {
+                        var105.put("fromToken", var106);
+                     }
+                     String var107 = str(var101, "groupId");
+                     if (var107 != null && var107.length() > 0) {
+                        try {
+                           var105.put("groupId", Long.parseLong(var107));
+                        } catch (Throwable var107e) {
+                           var105.put("groupId", var107);
+                        }
+                     }
+                  } catch (Throwable ignored) {
+                  }
+                  JSONObject var108 = this.callApi("mtop.taobao.idle.task.uploadolivertasktrigger", "1.0", var105.toString(), "收尾触发 " + var104);
+                  String var109 = firstRet(var108);
+                  this.report.append("[收尾] ").append(var104).append(" trigger=").append(var109).append('\n');
+                  sleep(1500L);
+                  this.claimOne(var102, var104, var21, var22);
+                  this.processed.add(var102);
+                  sleep(1000L);
+               }
+            }
+         } catch (Throwable var110) {
+            this.report.append("[收尾] 异常 ").append(var110).append('\n');
+         }
+      }
+
       this.finish(var2);
    }
 

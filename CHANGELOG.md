@@ -4,7 +4,68 @@
 
 ---
 
-## v1.5.1 → v1.5.2 · 修复
+## v1.5.2 修订（同版本号，2026-11-11 夜间现场修复）
+
+**2026-11-11**
+
+- 「赚更多」两项未领奖（根因）：`RhGameTask` 只把 `taskStatus=ACCEPTED` 收进可做队列，
+  已转 `AWARD`（可领奖）的任务在清单阶段就被丢掉，导致列表显示「无可做」、领奖永远不发。
+  现在 AWARD 单独成表，用 `center.query` 自带的 `appkey + taskId` 直发
+  `mini.game.task.award`，复核计数同步把 AWARD 算作待做。现场实测 3 项 +300 闲鱼币。
+- 神奇鱼塘「看视频赚饲料」卡在 1/3（根因）：多轮任务的正确节奏是「推一轮 → 立刻领一轮」，
+  推到 AWARD 后不领奖，状态卡死、下一发 `cube.task.trigger` 服务端直接拒绝。
+  `RhPondTask` 触发循环改为每轮 trigger 后用响应里的 `awardInfoDTOMap` 挑未领档位立即领奖，
+  循环结束时再把剩余 AWARD 统一收一遍。现场两个视频任务 1/3 → 3/3（+150g）。
+- 鱼塘「投喂」起不来（根因）：`feedId` 只认 `rh_resp_feed.json` / 持久档，用户从未在页面
+  投喂过就永远拿不到记录。新增三个来源：`forest.animal.list` 的 `feedInfo.feedId`（最权威）、
+  全量 `rh_resp_*.json` + `rh_apiproto.jsonl` 扫描、持久档。现场 630g → 0g 全部投完。
+- 投喂止损过严：服务端「服务开小差」是瞬时限流（连发 24 发后触发，冷却 15~20s 可继续），
+  旧逻辑连失败 2 发就收工，余额永久留账。改为 15s 退避重试、连续 8 次失败才停。
+- 「赚游戏币」页自动跳转（根因）：`RhCoinTask` 对 `jumpUrl` 含 `showAds` 的任务直接
+  `startActivity`，`fleamarket://showAds` 在当前闲鱼版本落到「当前闲鱼app已经是最新版」兜底页。
+  现在 `openTaskPage` 空实现（只记日志），逛一逛类改走纯协议
+  `play.ad.query → 等浏览时长 → event.query → event.push`；激励视频明确跳过（需真人观看）。
+- 新增游戏中心连续签到：[0.5] 段从旁档 `rh_apiproto.jsonl` 捞 App 自己发过的 `playId`
+  （`play.sign.in*` 必需且无法硬编码），落 `rh_playid.txt` 后自动 `play.sign.in.home → play.sign.in`。
+- `ConfigManager.load()` 不再可能返回 null：内置 JSON 解析失败时返回兜底对象，
+  避免各引擎 `cfg != null && cfg.xxx` 写法把整批功能静默关掉（现场 pond/pondFeed 因此一个多月没跑）。
+- `pondFeed` 默认改开（饲料留账会过期，用户口径：默认投喂到剩余 0）。
+
+---
+
+## v1.5.2 修订二（同版本号，2026-11-11 深夜现场复测）
+
+**2026-11-11 夜间 / 设备 MI9 (192.168.123.37)**
+
+- 「做任务赚游戏币」渠道游戏任务全程协议打通（本次最大修复）。
+  之前 27 项渠道任务里 22 项卡在 `ACCEPTED` 永远推不动，根因是 **`complete` 少了 `taskScene`**：
+  - 只发 `mini.game.task.complete{taskId,progressValue,reportId}` → `TASK_NOT_FOUND`
+  - 先发 `detail.query{taskId,appkey}`（不带场景）→ 仍 `TASK_NOT_FOUND`
+  - `detail.query{taskId,appkey,taskScene=GAME_CHANNEL}` → `SUCCESS / taskStatus=ACCEPTED`
+  - 随后同参数 `complete` → `completed=true / taskStatus=AWARD`
+  - 再同参数 `award` → `awarded=true / rewardAmount=300`
+  即 `detail.query` 不只是只读探针，它是「本会话登记这个 taskId」的开关；`taskScene` 必须三层全程一致。
+  现 `RhCoinTask` 渠道分支固定按 `detail.query → complete → award` 三步走，参数与任务自身
+  `taskScene/appkey` 对齐（缺省 GAME_CHANNEL）。现场 22 项一次性推完 20 项，余额 10050 → 16050。
+- 渠道清单 `TASK_PLATFORM_ERROR::任务服务繁忙` 不再直接判死：`channelTasks()` 最多 3 轮、
+  间隔 2s，第 3 轮退化成空 body（实测空 body 命中率反而高）。实测同一秒 PC 侧直调成功、
+  引擎内失败，属平台并发判重而非参数错，所以重试而不改参数。
+- 「从桌面进入游戏频道」这条 `channel_revisit` 任务：`revisit.complete` 原来固定报
+  `sourceId=TASK_RECOMMEND`，服务端返回 `result:true` 但任务停在 `ACCEPTED`（假成功）。
+  改为按任务的 `taskAction` 选 `sourceId`——`desktop_shortcut` 型必须报 `desktop_shortcut`，
+  换掉后立刻转 `AWARD`，再 `award` 得 +100。报告里会打印实际用的 sourceId，便于对表。
+  同时 `revisit.complete` 只对 `channel_revisit` 型发，别类不再误打（会污染 lastVisit）。
+- `RhPondTask.dailyFeedSign()` 上线：鱼塘「赚饲料中」的每日「领饲料」按钮＝
+  `play.sign.in{playId=101}`（不是 forest.* 接口，也不是鱼塘签到 playId）。
+  POND 报告首行 `[0] 领饲料 playId=101 → ...` 直接给结论。现场「今日已领（连签 3 天）」。
+- 游戏中心「点击签到」：`mini.game.sign.in{playId=4}` + `play.sign.in.home{playId=4}` 双打，
+  阶梯档位与签到记录都落。现场「连签 4 天 / 今日第 4 档 → 今日已签 +100」。
+- 复核基线（本轮收口后）：渠道 26/27 `COMPLETE`、`claimableCount=0`；中央任务 62/62 `COMPLETE`；
+  496 会员任务 `AWARD=0`（ACCEPTED 的 13 项是支付宝/淘宝/一淘等三方外跳任务，非可领取状态）；
+  鱼塘 23/23 `COMPLETE`、`AWARD=0`。仅剩两类需真人的任务：`commercial/rewardVideo`
+  （看 15s 激励视频，CSJ SDK 回传播放完成，协议无解）与三方外跳任务。
+
+---
 
 **2026-11-11**
 

@@ -36,9 +36,30 @@ import org.json.JSONObject;
  */
 public final class RhCoinTask {
    static final String API_CH_QUERY = "mtop.taobao.idle.mini.game.task.channel.query";
-   static final String API_CH_COMPLETE = "mtop.taobao.idle.mini.game.task.channel.complete";
+   /* v1.5.2-fix：渠道任务上报走通用 complete（channel.complete 这个接口在服务端根本不存在，
+    * 2026-11-11 抓包实证 59 次成功调用全是 mtop.taobao.idle.mini.game.task.complete +
+    * progressValue/action+payload + 客户端自生成 UUID reportId） */
+   static final String API_CH_COMPLETE = "mtop.taobao.idle.mini.game.task.complete";
+   /* v1.5.2-fix2：complete 前必须先打 detail.query，否则服务端认不出这个 taskId，
+    * 直接回 TASK_NOT_FOUND::任务不存在或已失效（2026-11-11 实测：
+    *   只发 complete           → TASK_NOT_FOUND
+    *   detail.query 不带 scene  → TASK_NOT_FOUND
+    *   detail.query 带 taskScene=GAME_CHANNEL + appkey → SUCCESS/ACCEPTED
+    *   随后 complete 同参数     → SUCCESS/completed=true/taskStatus=AWARD
+    *   再 award 同参数          → awarded=true/rewardAmount=300
+    * ）所以 detail.query 不是只读探针，它同时是"本会话登记这个任务"的开关。 */
+   static final String API_CH_DETAIL = "mtop.taobao.idle.mini.game.task.detail.query";
    static final String API_CH_REVISIT = "mtop.taobao.idle.mini.game.task.channel.revisit.complete";
    static final String API_CH_AWARD = "mtop.taobao.idle.mini.game.task.award";
+   /* 逛一逛（ecMall 广告位）三段式：查询发 token → 预检 → 推送 */
+   static final String API_AD_QUERY = "mtop.taobao.idle.play.ad.query";
+   static final String API_AD_EVT_Q = "mtop.taobao.idle.play.ad.event.query";
+   static final String API_AD_EVT_P = "mtop.taobao.idle.play.ad.event.push";
+   /* 游戏中心「点击签到」（连续签到阶梯，+50/80/100…游戏币） */
+   static final String API_GAME_SIGN = "mtop.taobao.idle.mini.game.sign.in";
+   static final String API_GAME_SIGN_Q = "mtop.taobao.idle.mini.game.sign.in.query";
+   static final String API_SIGN_HOME = "mtop.taobao.idle.play.sign.in.home";
+   static final String API_SIGN_DO = "mtop.taobao.idle.play.sign.in";
    static final String API_POINT = "mtop.taobao.idle.mini.game.point.withdraw.query";
    static final String REPORT_NAME = "rh_tasks_coin.txt";
    static final String MARK_FILE = "rh_coin_mark.txt";
@@ -153,6 +174,17 @@ public final class RhCoinTask {
       }
       sleep(600L);
 
+      /* ---------- [0.5] 游戏中心连续签到 ---------- */
+      // play.sign.in* 必须带 playId，而 playId 是每个「玩一玩」实例的数字 ID，源码里查不到、
+      // 也不能硬编码。做法：从旁档 rh_apiproto.jsonl 里捞 App 自己发过的 playId（用户打开一次
+      // 赚游戏币页就会留下），捞到就能全自动签到，捞不到报告里明说，不猜。
+      try {
+         rep.append("[0.5] ").append(playSign(ctx)).append('\n');
+      } catch (Throwable t) {
+         rep.append("[0.5] 签到异常 ").append(t).append('\n');
+      }
+      sleep(600L);
+
       /* ---------- [1] 中央游戏任务（复用 RhGameTask 引擎） ---------- */
       try {
          String gameRep = RhGameTask.run(ctx);
@@ -166,11 +198,9 @@ public final class RhCoinTask {
       int doneAward = 0;
       int failC = 0;
       try {
-         JSONObject cho = parse(RhPondTask.callAndWait(ctx, API_CH_QUERY, "1.0", baseBody().toString(), "chq", 8000L));
-         JSONArray tasks = cho != null && hasSuccess(cho) && cho.optJSONObject("data") != null
-                 ? cho.optJSONObject("data").optJSONArray("tasks") : null;
+         JSONArray tasks = channelTasks(ctx);
          if (tasks == null) {
-            rep.append("[2] 渠道清单拉取失败 ").append(briefRet(cho)).append('\n');
+            rep.append("[2] 渠道清单拉取失败（3 轮重试仍 TASK_PLATFORM_ERROR，稍后点本行复扫即可）\n");
          } else {
             int nAcc = 0;
             int nAward = 0;
@@ -208,26 +238,71 @@ public final class RhCoinTask {
                   continue;
                }
 
-               // ACCEPTED：先试协议 complete（channel_click 同款）
-               if (t.optString("jumpUrl", "").contains("showAds")) {
-                  // CSJ 浏览类：协议上报必被服务端会话对账拦掉，拉真实页面让 SDK 自己报
-                  if (opened < MAX_OPEN_PER_RUN) {
-                     opened++;
-                     openTaskPage(ctx, t.optString("jumpUrl"));
-                     rep.append("    ▶ ").append(label).append(" → 已拉起任务页，真实浏览≥20s 后由 SDK 自动上报，稍后自动复扫领奖\n");
-                  } else {
-                     rep.append("    … ").append(label).append(" → 浏览类待拉起（本轮额度用完，可再点一次本行）\n");
-                  }
-                  continue;
-               }
+      // ACCEPTED：先试协议 complete（channel_click 同款）
+      String jurl = t.optString("jumpUrl", "");
+      if (jurl.contains("showAds") && jurl.contains("adType=ecMall")) {
+         // 逛一逛类：走广告位协议（ad.query → 等浏览时长 → event.push），
+         // 不再 startActivity —— 拉起 fleamarket://showAds 会落到「闲鱼已是最新版」兜底页，
+         // 就是用户反馈的自动跳转（2026-11-11 现场取证）
+         int got = runEcMallAd(ctx, jurl, tid, label, rep);
+         if (got >= 0) {
+            doneAward++;
+            earned += got;
+         } else {
+            failC++;
+         }
+         continue;
+      }
+      if (jurl.contains("showAds") && jurl.contains("adType=rewardVideo")) {
+         // 激励视频：必须真人看完由 CSJ SDK 上报，协议无解，也不拉起页面
+         rep.append("    … ").append(label).append(" → 激励视频需真人观看，引擎跳过\n");
+         continue;
+      }
 
                try {
+                  // v1.5.2-fix2：按 2026-11-11 实证格式构造上报体
+                  //   level/visit 类 → progressValue=<taskValue>
+                  //   action 类     → action=<taskAction> + payload={"value":<taskValue>}
+                  //   reportId 客户端自生成 UUID 即可（服务端只做幂等去重）
+                  //   taskScene 必须带（值取任务自身的 taskScene，缺省 GAME_CHANNEL）——
+                  //   少了它服务端按默认场景找 taskId，找不到就 TASK_NOT_FOUND。
+                  JSONObject gm = t.optJSONObject("game");
+                  String appkey = gm != null ? gm.optString("appkey", "") : t.optString("appkey", "");
+                  String scene = t.optString("taskScene", "");
+                  if (scene.length() == 0) scene = "GAME_CHANNEL";
+
+                  // 前置登记：detail.query 带 appkey+taskScene 返回 SUCCESS/ACCEPTED，
+                  // 之后 complete 才认这个 taskId。失败不阻断，继续按原流程试（部分场景无需登记）。
+                  JSONObject db = baseBody();
+                  db.put("taskId", tid);
+                  db.put("taskScene", scene);
+                  if (appkey.length() > 0) db.put("appkey", appkey);
+                  JSONObject dobj = parse(RhPondTask.callAndWait(ctx, API_CH_DETAIL, "1.0", db.toString(), "chd", 6000L));
+                  boolean registered = dobj != null && hasSuccess(dobj);
+                  if (!registered) {
+                     RhFileLog.write("[coin] detail " + tid + " " + briefRet(dobj));
+                  }
+
                   JSONObject cb = baseBody();
                   cb.put("taskId", tid);
-                  cb.put("reportId", rid("click"));
+                  cb.put("taskScene", scene);
+                  cb.put("reportId", UUID.randomUUID().toString());
+                  if (appkey.length() > 0) cb.put("appkey", appkey);
+                  String ttype = t.optString("taskType", "");
+                  String taction = t.optString("taskAction", "");
+                  int tval = parseInt(t.optString("taskValue", "1"), 1);
+                  if ("action".equals(ttype) && taction.length() > 0) {
+                     cb.put("action", taction);
+                     cb.put("payload", "{\"value\":" + tval + "}");
+                  } else {
+                     cb.put("progressValue", tval);
+                  }
                   JSONObject co = parse(RhPondTask.callAndWait(ctx, API_CH_COMPLETE, "1.0", cb.toString(), "chc", 6000L));
-                  if (co != null && hasSuccess(co)) {
-                     int got = awardChannel(ctx, tid);
+                  boolean doneFlag = co != null && hasSuccess(co)
+                          && co.optJSONObject("data") != null
+                          && co.optJSONObject("data").optBoolean("completed", false);
+                  if (doneFlag) {
+                     int got = awardChannel(ctx, tid, appkey, scene);
                      if (got >= 0) {
                         doneAward++;
                         earned += got;
@@ -240,34 +315,36 @@ public final class RhCoinTask {
                      continue;
                   }
 
-                  // 回退 revisit.complete（进店/再访类）
-                  JSONObject rb = baseBody();
-                  rb.put("reportId", rid("revisit"));
-                  rb.put("sourceId", "TASK_RECOMMEND");
-                  JSONObject ro = parse(RhPondTask.callAndWait(ctx, API_CH_REVISIT, "1.0", rb.toString(), "chr", 6000L));
-                  if (ro != null && hasSuccess(ro)) {
-                     int got = awardChannel(ctx, tid);
-                     if (got >= 0) {
-                        doneAward++;
-                        earned += got;
-                        rep.append("    ✓ 再访+领奖 ").append(label).append(" +").append(got).append(" 币\n");
-                     } else {
-                        rep.append("    · 再访成功 ").append(label).append("，领奖未发放（复扫再收）\n");
+                  // 回退 revisit.complete（只对「再访/进店」类有意义，别类打了会污染 lastVisit）
+                  if ("channel_revisit".equals(ttype)) {
+                     // sourceId 决定服务端认定「从哪儿进来的」：
+                     //   desktop_shortcut 型任务必须报 desktop_shortcut，报 TASK_RECOMMEND 只会返回
+                     //   result:true 但任务仍停在 ACCEPTED（2026-11-11 实测：换 sourceId 后立刻转 AWARD）
+                     String src = "desktop_shortcut".equals(taction) ? "desktop_shortcut" : "TASK_RECOMMEND";
+                     JSONObject rb = baseBody();
+                     rb.put("taskId", tid);
+                     rb.put("taskScene", scene);
+                     rb.put("reportId", rid("revisit"));
+                     rb.put("sourceId", src);
+                     if (appkey.length() > 0) rb.put("appkey", appkey);
+                     JSONObject ro = parse(RhPondTask.callAndWait(ctx, API_CH_REVISIT, "1.0", rb.toString(), "chr", 6000L));
+                     if (ro != null && hasSuccess(ro)) {
+                        int got = awardChannel(ctx, tid, appkey, scene);
+                        if (got >= 0) {
+                           doneAward++;
+                           earned += got;
+                           rep.append("    ✓ 再访(").append(src).append(")+领奖 ").append(label).append(" +").append(got).append(" 币\n");
+                        } else {
+                           rep.append("    · 再访成功 ").append(label).append("，领奖未发放（复扫再收）\n");
+                        }
+                        sleep(700L);
+                        continue;
                      }
-                     sleep(700L);
-                     continue;
                   }
 
-                  // 协议全不通：带 jumpUrl 的拉真实页面兜底
-                  String ju = t.optString("jumpUrl", "");
-                  if (ju.length() > 0 && opened < MAX_OPEN_PER_RUN) {
-                     opened++;
-                     openTaskPage(ctx, ju);
-                     rep.append("    ▶ ").append(label).append(" → 协议不通，已拉起任务页手动完成\n");
-                  } else {
-                     failC++;
-                     rep.append("    ✗ 协议不通 ").append(label).append(' ').append(briefRet(co)).append('\n');
-                  }
+                  // 协议全不通：只记账，不拉起页面（拉起即跳「闲鱼已是最新版」兜底页）
+                  failC++;
+                  rep.append("    ✗ 协议不通 ").append(label).append(' ').append(briefRet(co)).append('\n');
                } catch (Throwable tt) {
                   failC++;
                   rep.append("    ! 上报异常 ").append(label).append(' ').append(tt).append('\n');
@@ -287,9 +364,7 @@ public final class RhCoinTask {
       /* ---------- [3] 复核 + 停止条件标记 ---------- */
       int remaining = -1;
       try {
-         JSONObject cho2 = parse(RhPondTask.callAndWait(ctx, API_CH_QUERY, "1.0", baseBody().toString(), "chq", 8000L));
-         JSONArray ts2 = cho2 != null && hasSuccess(cho2) && cho2.optJSONObject("data") != null
-                 ? cho2.optJSONObject("data").optJSONArray("tasks") : null;
+         JSONArray ts2 = channelTasks(ctx);
          if (ts2 != null) {
             int n = 0;
             for (int i = 0; i < ts2.length(); i++) {
@@ -335,15 +410,17 @@ public final class RhCoinTask {
                try {
                   Thread.sleep(BROWSE_RESCAN_DELAY);
                   StringBuilder sb = new StringBuilder("\n[4] 浏览复扫 @").append(System.currentTimeMillis()).append('\n');
-                  JSONObject cho3 = parse(RhPondTask.callAndWait(fc, API_CH_QUERY, "1.0", baseBody().toString(), "chq", 8000L));
-                  JSONArray ts3 = cho3 != null && hasSuccess(cho3) && cho3.optJSONObject("data") != null
-                          ? cho3.optJSONObject("data").optJSONArray("tasks") : null;
+                  JSONArray ts3 = channelTasks(fc);
                   int got3 = 0;
                   if (ts3 != null) {
                      for (int i = 0; i < ts3.length(); i++) {
                         JSONObject t = ts3.optJSONObject(i);
                         if (t == null || !"AWARD".equals(t.optString("taskStatus"))) continue;
-                        int g = awardChannel(fc, t.optString("taskId"));
+                        JSONObject g3 = t.optJSONObject("game");
+                        String ak3 = g3 != null ? g3.optString("appkey", "") : "";
+                        String sc3 = t.optString("taskScene", "");
+                        if (sc3.length() == 0) sc3 = "GAME_CHANNEL";
+                        int g = awardChannel(fc, t.optString("taskId"), ak3, sc3);
                         if (g >= 0) {
                            got3 += g;
                            sb.append("    ✓ ").append(taskLabel(t)).append(" +").append(g).append(" 币\n");
@@ -370,12 +447,45 @@ public final class RhCoinTask {
 
    /* ================= 渠道领奖 ================= */
 
-   /** task.award(taskScene=GAME_CHANNEL)；返回 rewardAmount，失败/未发放返回 -1 */
+   /**
+    * 拉渠道清单，最多 3 轮。
+    *
+    * 为什么必须重试：这个接口会回 TASK_PLATFORM_ERROR::任务服务繁忙，而且回得很随机
+    * （App 自己在游戏页轮询时尤其容易撞上）。实测同一秒里 PC 侧直调成功、引擎内调用失败，
+    * 说明是平台侧并发判重，不是参数问题 —— 参数三种写法（空 body / 只 gps / fishAdCode+gps）
+    * 现场都能拿到 SUCCESS。既然不是参数错，就别改参数，改成隔 2s 再打；
+    * 第 3 轮退化成空 body（少带上下文，命中率反而更高）。
+    */
+   private static JSONArray channelTasks(Context ctx) {
+      for (int round = 0; round < 3; round++) {
+         if (round > 0) sleep(2000L);
+         String body = round >= 2 ? "{}" : baseBody().toString();
+         JSONObject o = parse(RhPondTask.callAndWait(ctx, API_CH_QUERY, "1.0", body, "chq", 8000L));
+         if (o != null && hasSuccess(o) && o.optJSONObject("data") != null) {
+            JSONArray a = o.optJSONObject("data").optJSONArray("tasks");
+            if (a != null) return a;
+         }
+         RhFileLog.write("[coin] chq round" + round + " fail: " + briefRet(o));
+      }
+      return null;
+   }
+
+   /** 兼容旧调用：不带 appkey/场景，按 GAME_CHANNEL 领 */
    private static int awardChannel(Context ctx, String taskId) {
+      return awardChannel(ctx, taskId, "", "GAME_CHANNEL");
+   }
+
+   /**
+    * task.award；返回 rewardAmount，失败/未发放返回 -1。
+    * 参数必须与 complete 完全一致（taskScene + appkey），
+    * 否则服务端匹配到的不是同一条任务，会出现「awarded=true 但奖励没进账」。
+    */
+   private static int awardChannel(Context ctx, String taskId, String appkey, String scene) {
       try {
          JSONObject ab = baseBody();
          ab.put("taskId", taskId);
-         ab.put("taskScene", "GAME_CHANNEL");
+         ab.put("taskScene", scene == null || scene.length() == 0 ? "GAME_CHANNEL" : scene);
+         if (appkey != null && appkey.length() > 0) ab.put("appkey", appkey);
          JSONObject ao = parse(RhPondTask.callAndWait(ctx, API_CH_AWARD, "1.0", ab.toString(), "cha", 6000L));
          if (ao != null && hasSuccess(ao)) {
             JSONObject ad = ao.optJSONObject("data");
@@ -389,17 +499,262 @@ public final class RhCoinTask {
       return -1;
    }
 
-   /* ================= 拉起任务页 ================= */
+   /* ================= 游戏中心签到 ================= */
 
-   private static void openTaskPage(Context ctx, String jumpUrl) {
+   /**
+    * 连续签到的两步：home 查状态 → 未签则 play.sign.in。
+    * playId 来源：rh_apiproto.jsonl 里 App 自己发过的 play.sign.in* 请求参数，
+    * 命中后落 rh_playid.txt，之后不必再打开页面。
+    */
+   /**
+    * 游戏中心「点击签到」+「连续签到奖励」。
+    *
+    * playId 不再靠猜：2026-11-11 现场抓包确证——
+    *   playId=4   游戏中心 / 赚游戏币页（连续签到阶梯 +50/80/100… 游戏币）
+    *   playId=101 神奇鱼塘「赚饲料」面板（+10/+10/+20 g 饲料）
+    * 两个 playId 都是服务端固定的玩法实例 ID，不随账号变，所以直接内置；
+    * 若日后活动换 ID，改常量即可（也支持 rh_sign_playid.txt 覆盖，免重编译）。
+    *
+    * 两条链路都要打：
+    *   mini.game.sign.in  → 页面上的「点击签到」（阶梯奖励，幂等，已签返回 signed=true）
+    *   play.sign.in       → 游戏中心签到记录（signInDays 累加在这里）
+    */
+   private static String playSign(Context ctx) {
+      long pid = signPlayId(ctx);
+      StringBuilder out = new StringBuilder();
+
+      /* --- ① 阶梯签到：mini.game.sign.in{playId} --- */
+      JSONObject q = new JSONObject();
       try {
-         Intent it = new Intent(Intent.ACTION_VIEW, Uri.parse(jumpUrl));
-         it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-         it.setPackage("com.taobao.idlefish"); // 收敛到闲鱼内接 deeplink，防外溢到浏览器
-         ctx.startActivity(it);
+         q.put("playId", pid);
       } catch (Throwable t) {
-         RhFileLog.write("[coin] openTaskPage fail: " + t);
+         return "playId 非法";
       }
+      JSONObject qo = parse(RhPondTask.callAndWait(ctx, API_GAME_SIGN_Q, "1.0", q.toString(), "gsq", 6000L));
+      JSONObject qd = qo == null ? null : qo.optJSONObject("data");
+      String days = qd == null ? "" : qd.optString("continuousDays", "");
+      String today = qd == null ? "" : qd.optString("currentDay", "");
+      out.append("playId=").append(pid);
+      if (qd != null) {
+         out.append(" 连签").append(days).append("天/今日第").append(today).append("档");
+      } else {
+         out.append(" 状态查询失败(").append(briefRet(qo)).append(")");
+      }
+
+      JSONObject so = parse(RhPondTask.callAndWait(ctx, API_GAME_SIGN, "1.0", q.toString(), "gsd", 6000L));
+      if (so != null && hasSuccess(so)) {
+         JSONObject sd = so.optJSONObject("data");
+         boolean already = sd != null && "true".equals(sd.optString("signed", ""));
+         String amt = sd == null ? "" : (sd.optJSONObject("reward") == null
+                 ? "" : sd.optJSONObject("reward").optString("pointNum", ""));
+         out.append(already ? " → 今日已签" : " → 签到成功");
+         if (amt.length() > 0) out.append(" +").append(amt);
+      } else {
+         String r = briefRet(so);
+         out.append(" → ").append(r != null && r.contains("SIGNED") ? "今日已签" : "签到失败 " + r);
+      }
+
+      /* --- ② 签到记录：play.sign.in{playId, usertoken:""} --- */
+      JSONObject hb = new JSONObject();
+      try {
+         hb.put("playId", pid);
+         hb.put("usertoken", "");
+      } catch (Throwable ignored) {
+      }
+      JSONObject ho = parse(RhPondTask.callAndWait(ctx, API_SIGN_HOME, "1.0", hb.toString(), "sigh", 6000L));
+      if (ho != null && hasSuccess(ho) && ho.optJSONObject("data") != null) {
+         JSONObject hd = ho.optJSONObject("data");
+         out.append(" | 记录 signInDays=").append(hd.optString("signInDays", "?"))
+                 .append(" awarded=").append(hd.optString("signInAwarded", "?"));
+      }
+      return out.toString();
+   }
+
+   /** 签到 playId：rh_sign_playid.txt 覆盖（可选）→ 内置 4（游戏中心） */
+   private static long signPlayId(Context ctx) {
+      try {
+         File dir = ctx.getExternalFilesDir(null);
+         if (dir == null) dir = ctx.getFilesDir();
+         File f = new File(dir, "rh_sign_playid.txt");
+         if (f.exists() && f.length() > 0) {
+            byte[] b = new byte[(int) f.length()];
+            java.io.FileInputStream in = new java.io.FileInputStream(f);
+            in.read(b);
+            in.close();
+            String s = new String(b, "UTF-8").trim();
+            if (s.length() > 0) return Long.parseLong(s);
+         }
+      } catch (Throwable ignored) {
+      }
+      return 4L;
+   }
+
+   /** playId 解析：持久档 → 旁档 jsonl 里最近的 play.sign.in 请求 */
+   private static String playIdOf(Context ctx) {
+      try {
+         File dir = ctx.getExternalFilesDir(null);
+         if (dir == null) dir = ctx.getFilesDir();
+         File f = new File(dir, "rh_playid.txt");
+         if (f.exists() && f.length() > 0) {
+            byte[] b = new byte[(int) f.length()];
+            java.io.FileInputStream in = new java.io.FileInputStream(f);
+            in.read(b);
+            in.close();
+            String s = new String(b, "UTF-8").trim();
+            if (s.length() > 0) return s;
+         }
+      } catch (Throwable ignored) {
+      }
+      // 旁档：/storage/emulated/0/Android/data/com.taobao.idlefish/files/rh_apiproto.jsonl
+      String found = "";
+      try {
+         File pf = new File(ConfigManager.fishExternal("files"), "rh_apiproto.jsonl");
+         if (pf.exists() && pf.length() > 0) {
+            java.io.RandomAccessFile raf = new java.io.RandomAccessFile(pf, "r");
+            long len = raf.length();
+            long from = Math.max(0, len - 2L * 1024 * 1024); // 只扫尾部 2MB，够覆盖当天
+            raf.seek(from);
+            byte[] b = new byte[(int) (len - from)];
+            raf.readFully(b);
+            raf.close();
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("\"playId\"\\s*:\\s*\"?(\\d{3,})\"?")
+                    .matcher(new String(b, "UTF-8"));
+            while (m.find()) found = m.group(1); // 取最后一个（最新）
+         }
+      } catch (Throwable ignored) {
+      }
+      if (found.length() > 0) {
+         try {
+            File dir = ctx.getExternalFilesDir(null);
+            if (dir == null) dir = ctx.getFilesDir();
+            File tmp = new File(dir, "rh_playid.txt.tmp");
+            FileWriter w = new FileWriter(tmp, false);
+            w.write(found);
+            w.close();
+            File dst = new File(dir, "rh_playid.txt");
+            if (dst.exists()) dst.delete();
+            tmp.renameTo(dst);
+         } catch (Throwable ignored) {
+         }
+      }
+      return found;
+   }
+
+   /* ================= 逛一逛（ecMall 广告位，纯协议） ================= */
+
+   /**
+    * 逛一逛类渠道任务：play.ad.query 取 token → 等够 browse.rewardDuration →
+    * play.ad.event.query 预检 → play.ad.event.push（最多 5 发，30s 间隔）。
+    * 2026-11-11 米9 日志实证：ecMall push 成功过三次（去浏览福利好物 / 逛逛商城领超值优惠券 /
+    * 搜一搜推荐好物），说明这条路能打通；拉起 fleamarket://showAds 反而只会落到
+    * 「当前闲鱼app已经是最新版」兜底页。返回获得游戏币数，失败 -1。
+    */
+   private static int runEcMallAd(Context ctx, String jumpUrl, String taskId,
+                                  String label, RhReport rep) {
+      try {
+         Uri u = Uri.parse(jumpUrl);
+         String code = u.getQueryParameter("adPositionCode");
+         String scene = u.getQueryParameter("scenarioId");
+         String src = u.getQueryParameter("sourceType");
+         if (code == null || code.length() == 0) {
+            rep.append("    ✗ ").append(label).append(" 无 adPositionCode\n");
+            return -1;
+         }
+         JSONObject extra = new JSONObject();
+         extra.put("scenarioId", scene == null ? "" : scene);
+         extra.put("sourceType", src == null ? "FEEDS_SLOT" : src);
+         JSONObject qb = new JSONObject();
+         qb.put("code", code);
+         qb.put("extra", extra.toString());
+         JSONObject qo = parse(RhPondTask.callAndWait(ctx, API_AD_QUERY, "1.0", qb.toString(), "adq", 6000L));
+         if (qo == null || !hasSuccess(qo)) {
+            rep.append("    ✗ ").append(label).append(" ad.query ").append(briefRet(qo)).append('\n');
+            return -1;
+         }
+         JSONObject d = qo.optJSONObject("data");
+         String token = d == null ? "" : d.optString("token");
+         String implId = d == null ? "" : d.optString("implId");
+         int dur = 20;
+         try {
+            JSONObject attrs = new JSONObject(d.optString("attributes", "{}"));
+            JSONObject cfg = attrs.optJSONObject("taskConfig");
+            JSONObject br = cfg == null ? null : cfg.optJSONObject("browse");
+            int rd = br == null ? 20 : parseInt(briefNum(br, "rewardDuration"), 20);
+            if (rd > 0) dur = rd;
+         } catch (Throwable ignored) {
+         }
+         if (token.length() == 0) {
+            rep.append("    ✗ ").append(label).append(" 未下发 token\n");
+            return -1;
+         }
+         rep.append("    · ").append(label).append(" token=").append(token)
+            .append(" 浏览 ").append(dur).append("s\n");
+         sleep((long) dur * 1000L + 2000L);
+
+         JSONObject eb = new JSONObject();
+         eb.put("adPositionCode", code);
+         eb.put("eventType", "award");
+         eb.put("token", token);
+         eb.put("implId", implId);
+         String pre = briefRet(parse(RhPondTask.callAndWait(ctx, API_AD_EVT_Q, "1.0", eb.toString(), "adqp", 6000L)));
+         rep.append("    · 预检 ").append(pre).append('\n');
+
+         String last = null;
+         for (int i = 0; i < 5; i++) {
+            JSONObject po = parse(RhPondTask.callAndWait(ctx, API_AD_EVT_P, "1.0", eb.toString(), "adpp", 6000L));
+            last = briefRet(po);
+            if (last != null && (last.contains("SUCCESS") || last.contains("TOKEN_MISMATCH"))) break;
+            sleep(30000L);
+         }
+         rep.append("    · push ").append(last).append('\n');
+         sleep(1500L);
+
+         // 复核：任务转 AWARD 才发奖
+         JSONObject cho = parse(RhPondTask.callAndWait(ctx, API_CH_QUERY, "1.0", baseBody().toString(), "chq2", 8000L));
+         String st = null;
+         if (cho != null && hasSuccess(cho) && cho.optJSONObject("data") != null) {
+            JSONArray ts = cho.optJSONObject("data").optJSONArray("tasks");
+            for (int i = 0; ts != null && i < ts.length(); i++) {
+               JSONObject x = ts.optJSONObject(i);
+               if (x != null && taskId.equals(x.optString("taskId"))) {
+                  st = x.optString("taskStatus");
+                  break;
+               }
+            }
+         }
+         if (!"AWARD".equals(st)) {
+            rep.append("    · ").append(label).append(" 未推进（status=").append(st).append("）\n");
+            return -1;
+         }
+         int got = awardChannel(ctx, taskId);
+         if (got >= 0) rep.append("    ✓ 领奖 ").append(label).append(" +").append(got).append(" 币\n");
+         return got;
+      } catch (Throwable t) {
+         rep.append("    ! ").append(label).append(" 逛一逛异常 ").append(t).append('\n');
+         return -1;
+      }
+   }
+
+   /** 取 JSON 字段并压成字符串（rewardDuration 可能是数字或字符串） */
+   private static String briefNum(JSONObject o, String k) {
+      try {
+         return o.has(k) ? String.valueOf(o.get(k)) : "";
+      } catch (Throwable t) {
+         return "";
+      }
+   }
+
+   /* ================= 拉起任务页（已停用） ================= */
+
+   /**
+    * 2026-11-11 起不再拉起任何任务页：fleamarket://showAds 深链在当前闲鱼版本会落到
+    * 「当前闲鱼app已经是最新版」兜底页（用户反馈的自动跳转），且浏览进度由 CSJ SDK
+    * 会话对账，拉起也报不上去。保留空实现只为让历史调用点编译通过。
+    */
+   private static void openTaskPage(Context ctx, String jumpUrl) {
+      RhFileLog.write("[coin] openTaskPage suppressed (showAds 会跳兜底页): "
+              + (jumpUrl == null ? "null" : jumpUrl.substring(0, Math.min(80, jumpUrl.length()))));
    }
 
    /* ================= 标记 / 计数文件 ================= */
