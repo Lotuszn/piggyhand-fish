@@ -254,8 +254,18 @@ public final class RhCoinTask {
          continue;
       }
       if (jurl.contains("showAds") && jurl.contains("adType=rewardVideo")) {
-         // 激励视频：必须真人看完由 CSJ SDK 上报，协议无解，也不拉起页面
-         rep.append("    … ").append(label).append(" → 激励视频需真人观看，引擎跳过\n");
+         // 激励视频：协议可通，不必真播 —— 见 runRewardVideoAd 的方法注释（2026-11-12 实证）
+         JSONObject gmv = t.optJSONObject("game");
+         String akv = gmv != null ? gmv.optString("appkey", "") : t.optString("appkey", "");
+         String scv = t.optString("taskScene", "");
+         if (scv.length() == 0) scv = "GAME_CHANNEL";
+         int got = runRewardVideoAd(ctx, jurl, tid, akv, scv, label, rep);
+         if (got >= 0) {
+            doneAward++;
+            earned += got;
+         } else {
+            failC++;
+         }
          continue;
       }
 
@@ -641,7 +651,82 @@ public final class RhCoinTask {
       return found;
    }
 
-   /* ================= 逛一逛（ecMall 广告位，纯协议） ================= */
+   /* ================= 广告位纯协议（rewardVideo 激励视频 / ecMall 逛一逛） ================= */
+
+   /**
+    * 激励视频（CSJ rewardVideo）—— 协议可通，不需要真播。
+    *
+    * 关键在 jumpUrl 自带的 adEventPush 参数：它就是服务端下发给客户端的「观看完成上报描述」。
+    *   例：adEventPush={"adPositionCode":"xyGameTask_bidding","eventType":"firstEvent","countdown":15}
+    * 把这个 JSON 原样展开成 play.ad.event.push 的入参推回去，服务端即认定观看完成：
+    *     push firstEvent  → 任务 ACCEPTED → AWARD（实测 5s 内翻转，claimableCount 0→1）
+    *     task.award       → awarded=true / rewardAmount=100 / taskStatus=COMPLETE
+    * 2026-11-12 02:5x 实测：渠道最后一项「看视频赚游戏币」(1047271694) 由 ACCEPTED 直达 COMPLETE，
+    * 27/27 清零，余额 +100。之前判「必须真人播放」是误判 —— 服务端只认这次 push，不校验 CSJ 会话。
+    *
+    * 两个坑：
+    *   ① 同一 adPositionCode 当日额度一发即满，重复推返回
+    *      FAIL_BIZ_reach_upper_limit_error::任务已达上限 —— 要当「已达成」处理，不能当失败。
+    *   ② 少了 adPositionCode 会 FAIL_SYS_BIZPARAM_MISSED；eventType/countdown 缺省也能过，
+    *      但按服务端下发的原值推最稳（客户端本来就是这么读的）。
+    */
+   private static int runRewardVideoAd(Context ctx, String jumpUrl, String taskId,
+                                       String appkey, String scene, String label, RhReport rep) {
+      try {
+         android.net.Uri u = android.net.Uri.parse(jumpUrl);
+         String spec = u.getQueryParameter("adEventPush");
+         if (spec == null || spec.length() == 0) {
+            rep.append("    … ").append(label).append(" 无 adEventPush，跳过\n");
+            return -1;
+         }
+         JSONObject sp = new JSONObject(spec);
+         String code = sp.optString("adPositionCode", "");
+         String etype = sp.optString("eventType", "firstEvent");
+         int cd = sp.optInt("countdown", 0);
+         if (code.length() == 0) {
+            rep.append("    … ").append(label).append(" adEventPush 缺 adPositionCode\n");
+            return -1;
+         }
+
+         JSONObject pb = new JSONObject();
+         pb.put("adPositionCode", code);
+         pb.put("eventType", etype);
+         if (cd > 0) pb.put("countdown", cd);
+         JSONObject po = parse(RhPondTask.callAndWait(ctx, API_AD_EVT_P, "1.0", pb.toString(), "adpv", 6000L));
+         String ret = briefRet(po);
+         boolean ok = po != null && hasSuccess(po);
+         boolean capped = ret != null && ret.contains("reach_upper_limit");
+         rep.append("    · ").append(label).append(" push ").append(code).append('/').append(etype)
+            .append(" → ").append(ok ? "SUCCESS" : capped ? "已达上限（按已达成处理）" : ret).append('\n');
+         if (!ok && !capped) return -1;
+
+         sleep(2000L);
+
+         // 复核：服务端翻转不是同步返回的，要重新拉清单看 taskStatus
+         JSONArray ts = channelTasks(ctx);
+         String st = null;
+         for (int i = 0; ts != null && i < ts.length(); i++) {
+            JSONObject x = ts.optJSONObject(i);
+            if (x != null && taskId.equals(x.optString("taskId"))) {
+               st = x.optString("taskStatus");
+               break;
+            }
+         }
+         if ("COMPLETE".equals(st)) return 0;
+         if (!"AWARD".equals(st)) {
+            rep.append("    · ").append(label).append(" 未推进（status=").append(st).append("），下次复扫再收\n");
+            return -1;
+         }
+         int got = awardChannel(ctx, taskId, appkey, scene);
+         if (got >= 0) {
+            rep.append("    ✓ 领奖 ").append(label).append(" +").append(got).append(" 币\n");
+         }
+         return got;
+      } catch (Throwable t) {
+         rep.append("    ! ").append(label).append(" 激励视频异常 ").append(t).append('\n');
+         return -1;
+      }
+   }
 
    /**
     * 逛一逛类渠道任务：play.ad.query 取 token → 等够 browse.rewardDuration →

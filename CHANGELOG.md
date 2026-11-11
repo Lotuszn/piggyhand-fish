@@ -33,7 +33,33 @@
 
 ---
 
-## v1.5.2 修订二（同版本号，2026-11-11 深夜现场复测）
+## v1.5.2 修订三（同版本号，2026-11-12 凌晨：激励视频协议打通）
+
+**2026-11-12 02:5x / 设备 MI9 (192.168.123.37)**
+
+- 「做任务赚游戏币」最后一项「看视频赚游戏币」(`commercial` / CSJ `rewardVideo`, taskId `1047271694`)
+  协议打通，判定「必须真人播放」是误判。
+  关键在任务 `jumpUrl` 自带的 `adEventPush` 参数——那是服务端下发给客户端的「观看完成上报描述」：
+  ```
+  adEventPush={"adPositionCode":"xyGameTask_bidding","eventType":"firstEvent","countdown":15}
+  ```
+  把这个 JSON 原样展开推回 `mtop.taobao.idle.play.ad.event.push` 即可：
+  | 请求 | 结果 |
+  |---|---|
+  | `play.ad.event.push{adPositionCode,eventType:firstEvent,countdown:15}` | **SUCCESS** |
+  | 再推一次（同 adPositionCode） | `FAIL_BIZ_reach_upper_limit_error::任务已达上限` |
+  | 复扫 `channel.query` | 任务 `ACCEPTED → AWARD`，`claimableCount 0 → 1` |
+  | `task.award{taskId,taskScene=GAME_CHANNEL}` | `awarded=true / rewardAmount=100` |
+  服务端只认这次 push，不校验 CSJ 播放会话，15s 倒计时是展示层的事。
+  现场 27/27 全 COMPLETE、`claimableCount=0`，余额 16150 → 16250。
+- `RhCoinTask.runRewardVideoAd()` 落地：解析 `adEventPush` → push → 2s 后复扫状态 → AWARD 则领奖。
+  `reach_upper_limit` 按「已达成」处理（不是失败），否则每日复扫会天天报红。
+  原来 `adType=rewardVideo` 直接 `continue` 跳过的分支删掉。
+- 顺带确认这条路对「赚更多」里的 CSJ 视频任务（`106538`/`106181` 那类）不通用：
+  那些走 oliver 体系（`deliveryId + sceneId`），`getolivertaskbenefit` 返回 SUCCESS 但状态不动，
+  不带 adPositionCode，无法套用本链路；服务端已下架，列表里不再出现。
+
+---
 
 **2026-11-11 夜间 / 设备 MI9 (192.168.123.37)**
 
