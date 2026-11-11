@@ -5,10 +5,12 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.animation.ValueAnimator.AnimatorUpdateListener;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
@@ -105,6 +107,8 @@ public class MainActivity extends Activity {
    private View rowUpdate;
    private View rowCoolapk;
    private View rowQQGroup;
+   // v1.5.3 清除今日任务标记（通用卡内，确认后 socket 清标记 + root 重启闲鱼）
+   private View rowClearMarks;
    private View drawerHead;
    private View drawerContent;
    private TextView tvDrawerArrow;
@@ -230,6 +234,7 @@ public class MainActivity extends Activity {
       this.rowUpdate = this.findViewById(R.id.rowUpdate);
       this.rowCoolapk = this.findViewById(R.id.rowCoolapk);
       this.rowQQGroup = this.findViewById(R.id.rowQQGroup);
+      this.rowClearMarks = this.findViewById(R.id.rowClearMarks);
       this.swAutoRun = (LiquidSwitch)this.findViewById(R.id.swAutoRun);
       this.swMtop = (LiquidSwitch)this.findViewById(R.id.swMtop);
       this.swAds = (LiquidSwitch)this.findViewById(R.id.swAds);
@@ -1057,6 +1062,30 @@ public class MainActivity extends Activity {
                   Toast.makeText(MainActivity.this, "未安装 QQ 且无可用浏览器", 0).show();
                }
             }
+         }
+      });
+      // v1.5.3 清除今日任务标记：确认 → socket CLEAR_MARKS（闲鱼进程自己清，含 LVL 0/1/2 内存态）
+      //       → root force-stop → monkey 拉起。拉起后引擎波次（40s/45s/50s/240s）自动重跑当日任务。
+      //       root 不可用时降级：标记照清（socket 不依赖 root），提示手动重启。
+      this.rowClearMarks.setOnClickListener(new OnClickListener() {
+         public void onClick(View var1) {
+            new AlertDialog.Builder(MainActivity.this)
+               .setTitle("清除今日任务标记")
+               .setMessage("将清除全部 0/1/2 当日标识与 done/try/date 标记文件，"
+                  + "并自动重启闲鱼，重启后各引擎将自动重跑今日任务。\n\n"
+                  + "注意：\n· 自动投喂重跑会真实消耗饲料余额（投到耗尽为止）\n"
+                  + "· 兑换类任务会再次尝试（服务端有每日限额兜底）\n\n确定执行？")
+               .setPositiveButton("清除并重启", new DialogInterface.OnClickListener() {
+                  public void onClick(DialogInterface d, int w) {
+                     new Thread(new Runnable() {
+                        public void run() {
+                           MainActivity.this.execClearMarksAndRestart();
+                        }
+                     }, "rh-clearmarks").start();
+                  }
+               })
+               .setNegativeButton("取消", null)
+               .show();
          }
       });
       OnClickListener var11 = new OnClickListener() {
@@ -2888,6 +2917,90 @@ public class MainActivity extends Activity {
       }
 
       return (String)var3;
+   }
+
+   /**
+    * v1.5.3 清标记 + 重启闲鱼执行链（后台线程调用）：
+    * ① socket CLEAR_MARKS（闲鱼进程自己清 LVL 内存态 + 删标记文件，root 无关；同步等回显——
+    *    force-stop 会杀掉 socket 服务端，必须先拿完整回显再杀，否则命令可能没执行完）；
+    * ② su force-stop（杀主进程+全部子进程+定时任务，冷启动路径与覆盖装机验证一致）；
+    * ③ sleep 1.5s 等 force-stop 落定；
+    * ④ monkey 拉起（无 root 也可发）。拉起后引擎波次自动重跑，无需用户操作。
+    * root 不可用时：标记已清，降级提示手动杀进程重启。
+    */
+   private void execClearMarksAndRestart() {
+      // ① 清标记（同步回显）
+      final String marks = socketCmd("CLEAR_MARKS");
+      final boolean cleared = marks != null && marks.contains("DONE @");
+      runOnUiThread(new Runnable() {
+         public void run() {
+            Toast.makeText(MainActivity.this,
+               cleared ? "标记已清除，正在重启闲鱼…" : "标记清除失败：闲鱼未启动或通道不通（先打开一次闲鱼）",
+               Toast.LENGTH_LONG).show();
+         }
+      });
+      if (!cleared) return;
+      // ② root 杀进程
+      String[] stop = suExecDetail("am force-stop com.taobao.idlefish", 8);
+      if (stop[0] == null) {
+         toastMain("标记已清，但自动重启失败（" + stop[1] + "）——请手动杀掉闲鱼后重新打开");
+         return;
+      }
+      // ③ 落定间隔
+      try {
+         Thread.sleep(1500);
+      } catch (InterruptedException e) {
+         return;
+      }
+      // ④ 重新拉起
+      suExecDetail("monkey -p com.taobao.idlefish -c android.intent.category.LAUNCHER 1", 10);
+      toastMain("闲鱼已重启，引擎将在 40s~240s 波次自动重跑今日任务");
+   }
+
+   private void toastMain(final String msg) {
+      runOnUiThread(new Runnable() {
+         public void run() {
+            Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show();
+         }
+      });
+   }
+
+   /**
+    * v1.5.3 root 执行一条命令：返回 {stdout, error}；stdout 非空视为成功。
+    * 与既有 suExec(String,int)（返回 stdout、null=失败）的区别：force-stop 等命令
+    * 成功时 stdout 为空串，旧实现无法区分「成功无输出」与「失败」——本版带错误详情。
+    * 超时按失败返回（root 管理器授权弹窗未确认时的典型态，与 readViaSu 同款处理）。
+    */
+   private static String[] suExecDetail(String cmd, int timeoutSec) {
+      Process p = null;
+      try {
+         p = Runtime.getRuntime().exec(new String[]{"su", "-c", cmd});
+         boolean done = p.waitFor(timeoutSec, TimeUnit.SECONDS);
+         if (!done) {
+            p.destroy();
+            return new String[]{null, "授权超时（root 管理器未放行咸鱼小猪手——去 Magisk/APatch 超级用户里允许）"};
+         }
+         String out = readAll(p.getInputStream());
+         String err = readAll(p.getErrorStream());
+         int code;
+         try {
+            code = p.exitValue();
+         } catch (Throwable t) {
+            code = -1;
+         }
+         if (code != 0 && out.length() == 0) {
+            String e = err == null ? "" : err.trim();
+            return new String[]{null, e.length() > 0 ? e : "exit " + code};
+         }
+         return new String[]{out, null};
+      } catch (Throwable t) {
+         return new String[]{null, t.getClass().getSimpleName() + (t.getMessage() != null ? ": " + t.getMessage() : "")};
+      } finally {
+         try {
+            if (p != null) p.destroy();
+         } catch (Throwable ignored) {
+         }
+      }
    }
 
    private static String[] readViaSocket() {

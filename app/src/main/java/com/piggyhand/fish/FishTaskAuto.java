@@ -346,6 +346,81 @@ public final class FishTaskAuto {
       }
    }
 
+   /** v1.5.3 各引擎当日标记文件名：done=完成标记 / try=尝试计数 / date=当日已跑标记 */
+   private static final String[] DAILY_MARK_FILES = {
+         "rh_task_lvl.json",        // LVL 门（0/1/2 计数，含 @signin/@playSignin/@dailyReward/@pondTask/@pondFeed 等）
+         "rh_game_done.txt", "rh_game_try.txt",       // 游戏任务
+         "rh_oliver_done.txt", "rh_oliver_try.txt",   // 会员任务
+         "rh_pond_date.txt",                            // 鱼塘赚饲料
+         "rh_pondfeed_date.txt",                        // 自动投喂（重跑会真实消耗饲料）
+         "rh_cash_done.txt", "rh_cash_claim.txt",       // 现金瓜分
+         "rh_coin_try.txt", "rh_coin_mark.txt",         // 币任务尝试计数 + 当日标记
+         "rh_coin_exch.txt",                            // 兑换每日 1 次标记（清除后会再尝试兑换，服务端限额兜底）
+         "rh_cycle_claim.txt",                          // 圈数挑战本地领取档
+   };
+
+   /**
+    * v1.5.3 清除全部当日任务标记（socket CLEAR_MARKS 调用，必须由闲鱼进程自己执行：
+    * lvlMap 是本进程 static 内存缓存，App 进程删文件会被 lvlSave 回写——见 RhGameTask.doneFile 注释同因）。
+    * 引擎运行中（RUNNING）拒绝执行，避免边跑边清 bump 把 0 写回。
+    * @return 逐项结果清单（回显给 UI）
+    */
+   public static String clearDailyMarks() {
+      StringBuilder out = new StringBuilder();
+      if (RUNNING.get()) {
+         return "拒绝：引擎正在运行中（RUNNING=true），等本轮跑完再清，否则计数会被写回";
+      }
+      Context ctx = appCtx != null ? appCtx : FishMtopHook.appCtx;
+      if (ctx == null) {
+         return "失败：上下文未就绪（闲鱼进程未完成初始化）";
+      }
+      // ① 内存 LVL 缓存清零 + 落盘空表（lvlSave 原子写）
+      synchronized (LVL_SHARED_LOCK) {
+         int n = lvlMap.size();
+         lvlMap.clear();
+         lvlDay = "";
+         lvlSave();
+         out.append("LVL 内存计数: 已清 ").append(n).append(" 项并落盘\n");
+      }
+      // ② 标记文件：在 4 个候选目录里找到即删（各引擎目录选择不一，逐个尝试不漏）
+      File[] dirs;
+      try {
+         File ef = ctx.getExternalFilesDir(null);
+         File ec = ctx.getExternalCacheDir();
+         dirs = new File[]{ctx.getFilesDir(), ctx.getCacheDir(), ef, ec};
+      } catch (Throwable t) {
+         dirs = new File[]{new File("/data/data/com.taobao.idlefish/files")};
+      }
+      int deleted = 0, absent = 0, failed = 0;
+      for (String name : DAILY_MARK_FILES) {
+         boolean gone = false, found = false;
+         if (dirs != null) {
+            for (File d : dirs) {
+               if (d == null) continue;
+               File f = new File(d, name);
+               if (!f.exists()) continue;
+               found = true;
+               // .tmp 伴生文件一并清（原子写残留）
+               File tmp = new File(d, name + ".tmp");
+               if (tmp.exists()) tmp.delete();
+               gone = f.delete() || !f.exists();
+               if (!gone) failed++;
+               break;
+            }
+         }
+         if (!found) absent++;
+         else if (gone) deleted++;
+      }
+      out.append("标记文件: 删除 ").append(deleted)
+            .append(" · 本就不存在 ").append(absent)
+            .append(failed > 0 ? " · 删除失败 " + failed : "")
+            .append('\n');
+      out.append("rejectedToday/内存探针态: 随进程重启复位\n");
+      out.append("DONE @").append(new SimpleDateFormat("HH:mm:ss", Locale.US).format(new Date()));
+      log("[marks] cleared: del=" + deleted + " absent=" + absent + " fail=" + failed);
+      return out.toString();
+   }
+
    private static String cacheDirPath(Context var0) {
       File var1 = FishMtopHook.cacheDir();
       return var1 != null ? var1.getAbsolutePath() : ConfigManager.fishExternal("cache");

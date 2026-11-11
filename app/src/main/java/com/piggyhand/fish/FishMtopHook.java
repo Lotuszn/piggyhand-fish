@@ -1035,6 +1035,12 @@ public final class FishMtopHook {
                                             }
                                         }, "rh-cycle").start();
                                         body = "OK started";
+                                    } else if (req != null && req.startsWith("CLEAR_MARKS")) {
+                                        // v1.5.3 清除全部当日任务标记（LVL 0/1/2 计数 + done/try/date 文件）。
+                                        // 必须同步执行并回显结果：App 端拿到回显后才会 force-stop，
+                                        // 异步回写会与进程被杀竞争。纯文件 IO 毫秒级，同步不阻塞。
+                                        // 引擎运行中 clearDailyMarks 内部拒绝（防 bump 回写）。
+                                        body = FishTaskAuto.clearDailyMarks();
                                     } else if (req != null && req.startsWith("GAME_REPORT")) {
                                         // v1.2.9 游戏任务报告读取（必须先于 GAME 的前缀匹配）
                                         body = readReportFile("rh_tasks_game.txt");
