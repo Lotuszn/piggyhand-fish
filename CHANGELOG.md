@@ -4,6 +4,70 @@
 
 ---
 
+## v1.5.3（2026-11-12 发行）
+
+上一发行版 v1.5.2。本版把「做任务赚游戏币」从「能跑」推到「清零」，三项历史遗留全部收口。
+
+**一、渠道游戏任务全程协议打通（本版核心）**
+
+之前 27 项渠道任务里 22 项长期卡在 `ACCEPTED`，点「去完成」跳游戏、回来还是没进展。根因是
+`mtop.taobao.idle.mini.game.task.complete` 少了 `taskScene`，服务端按默认场景找不到 taskId，
+直接回 `TASK_NOT_FOUND::任务不存在或已失效`。正确链路是三步，且 `taskScene` / `appkey` 三层必须一致：
+
+```
+detail.query{taskId, appkey, taskScene}      → 登记本会话的 taskId（不只是只读探针）
+complete{taskId, appkey, taskScene, progressValue|action+payload, reportId=UUID} → AWARD
+award{taskId, appkey, taskScene}             → awarded=true + rewardAmount
+```
+
+现场实测 20 项一次性推完，余额 10050 → 16050。
+
+**二、激励视频不再「跳过」**
+
+`commercial` / CSJ `rewardVideo`（「看视频赚游戏币」）以前判「必须真人看」，本版打通：
+任务 `jumpUrl` 自带 `adEventPush` 参数，那是服务端下发的观看完成上报描述，原样推回
+`play.ad.event.push` 即认定看完——
+
+```
+adEventPush={"adPositionCode":"xyGameTask_bidding","eventType":"firstEvent","countdown":15}
+→ push SUCCESS → 任务 ACCEPTED→AWARD（5s 内）→ award +100
+```
+
+同一 `adPositionCode` 当日额度一发即满，重复推返回 `FAIL_BIZ_reach_upper_limit_error::任务已达上限`，
+按「已达成」处理，不再算失败。渠道任务至此 27/27 全清。
+
+**三、「从桌面进入游戏频道」不再是假成功**
+
+这条 `channel_revisit` 任务报 `revisit.complete{sourceId:TASK_RECOMMEND}` 会返回 `result:true`
+但状态一动不动。改为按任务的 `taskAction` 选 `sourceId`——`desktop_shortcut` 型必须报
+`desktop_shortcut`，换掉后立刻转 `AWARD`，再 award 得 +100。
+
+**四、每日签到类补全**
+
+- 神奇鱼塘「赚饲料中」的「领饲料」按钮 = `play.sign.in{playId=101}`（不是 forest.* 接口）。
+  POND 报告首行直接给结论：`[0] 领饲料 playId=101 → 今日已领（连签 3 天）`。
+- 游戏中心「点击签到」= `mini.game.sign.in{playId=4}` + `play.sign.in.home{playId=4}` 双打，
+  阶梯档位与签到记录都落。
+
+**五、抗平台限流**
+
+渠道清单会随机回 `TASK_PLATFORM_ERROR::任务服务繁忙`（同一秒 PC 侧直调成功、引擎内失败，
+属平台并发判重而非参数错）。`channelTasks()` 改 3 轮重试、间隔 2s，第 3 轮退化成空 body。
+
+**本版收口基线（2026-11-12 实测）**
+
+| 模块 | 状态 |
+|---|---|
+| 渠道游戏任务 | 27/27 COMPLETE，`claimableCount=0` |
+| 中央游戏任务 | 62/62 COMPLETE |
+| 神奇鱼塘 | 23/23 COMPLETE，AWARD=0 |
+| 496 会员任务 | AWARD=0（余 13 项为支付宝/淘宝/一淘等三方外跳，非可领取） |
+| 游戏币余额 | 10050 → 16250（+6200） |
+
+覆盖安装即可，签名未变，LSPosed 勾选状态保留。
+
+---
+
 ## v1.5.2 修订（同版本号，2026-11-11 夜间现场修复）
 
 **2026-11-11**

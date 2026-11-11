@@ -14,7 +14,9 @@
         android:label="@string/app_name"
         android:icon="@drawable/fish_logo"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
-        android:allowBackup="true">
+        android:allowBackup="false">
+        <!-- allowBackup 关：模块配置都落在 /sdcard/Android/data/<包名>/ 外部目录，
+             本来就不进 autoBackup；开着的唯一效果是把私有目录（含缓存响应档）同步到云端备份。 -->
 
         <meta-data android:name="xposedmodule" android:value="true" />
         <meta-data android:name="xposeddescription" android:value="@string/module_desc" />

@@ -1,6 +1,6 @@
 {
-  "latest": "1.5.2",
+  "latest": "1.5.3",
   "url": "https://github.com/Lotuszn/piggyhand-fish/releases/latest",
   "cnUrl": "https://drive.uc.cn/s/df475a5e0ad94",
-  "notes": "v1.5.2 修复+新功能（上一发行版 v1.5.1）：一、修复「游戏任务不生效」——打开闲鱼自动跑游戏任务时清单拉取失败，直调响应丢失；现失败自动重发一轮、网关拒绝原文落盘带回报告、并补 ApiCallBack 响应旁路捕获；二、修复圈数挑战请求体坏 JSON（尾逗号导致参数解析失败）；三、新增「关于 → 通用 → 清除今日任务标记」按钮：一键清空当日 0/1/2 标识与 done/try/date 标记文件并自动重启闲鱼重跑（引擎运行中会拒绝清除防止计数写回）；四、构建兼容性修复。覆盖安装即可，签名未变，LSPosed 勾选状态保留。"
+  "notes": "v1.5.3（上一发行版 v1.5.2）把「做任务赚游戏币」从能跑推到清零，三项历史遗留全部收口。一、渠道游戏任务全程协议打通：之前 27 项里 22 项长期卡在 ACCEPTED，根因是 mini.game.task.complete 少传 taskScene 导致服务端找不到 taskId（TASK_NOT_FOUND）；正确链路是 detail.query 登记 → complete 上报 → award 领奖，三层 taskScene/appkey 必须一致，现场 20 项一次性推完。二、激励视频不再跳过：任务 jumpUrl 自带 adEventPush（服务端下发的观看完成上报描述），原样推回 play.ad.event.push 即认定看完，任务 5 秒内转 AWARD，渠道 27/27 全清。三、「从桌面进入游戏频道」改了 sourceId（desktop_shortcut 型必须报 desktop_shortcut，报 TASK_RECOMMEND 是假成功）。四、补全每日签到：鱼塘「领饲料」playId=101、游戏中心「点击签到」playId=4，引擎首行直接给结论。五、渠道清单遇 TASK_PLATFORM_ERROR 改 3 轮重试，不再一撞限流就整天作废。本版收口基线：渠道 27/27、中央 62/62、鱼塘 23/23、496 场景 AWARD=0，余额 10050→16250。覆盖安装即可，签名未变，LSPosed 勾选状态保留。"
 }
