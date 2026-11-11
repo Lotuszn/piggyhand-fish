@@ -49,6 +49,13 @@ public final class FishTaskAuto {
    private static final String PLAY_SIGN_API = "mtop.taobao.idle.play.sign.in";
    private static final String MAP_INIT_API = "mtop.taobao.idle.treasure.hunt.map.init";
    private static final String MAP_ROLL_API = "mtop.taobao.idle.treasure.hunt.map.roll";
+   // 圈数挑战每日步数奖励领取（11-10 抓包：宿主走到目标后弹领取按钮时发的就是这个）
+   private static final String MAP_DAILY_REWARD_API = "mtop.taobao.idle.treasure.hunt.map.daily.reward";
+   // 7天圈数挑战（11-10 实抓）：info 查档位状态，tierList[].status==AWARD 即可领；reward 按 cycle+recordId 领取
+   private static final String CYCLE_INFO_API = "mtop.idle.interact.cycle.challenge.info";
+   private static final String CYCLE_REWARD_API = "mtop.idle.interact.cycle.challenge.reward";
+   // 探针发现「无任务可跑但圈数挑战有 AWARD 档」时置位，launch 切 claim_only 迷你跑批（跳浏览）
+   private static volatile boolean cycleClaimOnly = false;
    private static final String PROP_LIST_API = "mtop.taobao.idle.play.prop.list";
    private static final String PROP_USE_API = "mtop.taobao.idle.play.prop.use";
    private static final String POLISH_API = "mtop.taobao.idle.item.polish";
@@ -79,6 +86,7 @@ public final class FishTaskAuto {
    private static final String LVL_FILE = "rh_task_lvl.json";
    private static final String K_SIGNIN = "@signin";
    private static final String K_PLAY_SIGN = "@playSignin";
+   private static final String K_DAILY_REWARD = "@dailyReward";
    private static final int LVL_MAX = 2;
    private static volatile String lvlDay = "";
    private static volatile String lvlDir = null;
@@ -198,7 +206,7 @@ public final class FishTaskAuto {
 
                   while (var7.hasNext()) {
                      String var8 = (String)var7.next();
-                     lvlMap.put(var8, var6.optInt(var8, -1));
+                     lvlMap.put(var8, var6.optInt(var8, 0));
                   }
                }
 
@@ -267,8 +275,10 @@ public final class FishTaskAuto {
    }
 
    private static int lvlGet(String var0) {
+      // v1.4.1 修复：缺省 -1 会让 lvlBump 首次计数写成 0（-1+1），实际放行 3 次而非上限 2 次。
+      // 缺省 0 与「未记录」等效：lvlSkip(0>=2=false)、lvlReset(0!=0=false) 行为均不变，bump 首次正确写 1。
       Integer var1 = lvlMap.get(var0);
-      return var1 == null ? -1 : var1;
+      return var1 == null ? 0 : var1;
    }
 
    private static boolean lvlSkip(String var0) {
@@ -297,6 +307,42 @@ public final class FishTaskAuto {
             lvlMap.put(var1, 0);
             lvlSave();
          }
+      }
+   }
+
+   /* ---------- 共享 LVL 门（v1.4.1）：RhPondTask 的自动赚饲料/自动投喂复用同一份 rh_task_lvl.json ----------
+    * 语义与实例版一致：当日计数 >=2 跳过（lvlSkip），每次引擎运行计一次。
+    * 鱼塘两引擎的 bump 只在自动调度线程里调用（每调度一轮 bump 一次），手动 socket 触发不经过这里
+    * —— 与 POND/OLIVER 手动语义对齐。跨天由 lvlEnsure 自动清零。 */
+   private static final Object LVL_SHARED_LOCK = new Object();
+
+   /** 共享 LVL 查询：当日该键已计满（>=2）→ 自动跑跳过 */
+   public static boolean lvlSkipShared(Context ctx, String key) {
+      try {
+         lvlLoadOnce(ctx != null ? ctx : appCtx);
+         lvlEnsure(dayOf(System.currentTimeMillis()));
+         return lvlSkip(key);
+      } catch (Throwable t) {
+         return false; // LVL 存档坏了不拦业务
+      }
+   }
+
+   /** 共享 LVL 计数 +1：每次引擎运行调用一次，当日累计到 2 后 lvlSkipShared 开始返回 true */
+   public static void lvlBumpShared(Context ctx, String key) {
+      try {
+         if (key == null || key.length() == 0) return;
+         synchronized (LVL_SHARED_LOCK) {
+            lvlLoadOnce(ctx != null ? ctx : appCtx);
+            lvlEnsure(dayOf(System.currentTimeMillis()));
+            int v = lvlGet(key);
+            if (v < 2) {
+               lvlMap.put(key, v + 1);
+               lvlSave();
+               log("[lvl] shared bump " + key + " -> " + (v + 1));
+            }
+         }
+      } catch (Throwable t) {
+         log("[lvl] shared bump fail: " + t);
       }
    }
 
@@ -336,12 +382,74 @@ public final class FishTaskAuto {
                }
             }
 
+            // 圈数挑战 AWARD 探测（11-10）：任务无可跑但挑战到档时仍要 launch（claim_only 迷你跑批）
+            // UI 开关关闭时不探测不置位，迷你跑批保持沉默
+            ConfigManager var14 = ConfigManager.load();
+            int var13 = (var14 == null || var14.cycleChallenge) ? probeCycleAward(var3) : 0;
+            if (var6 == 0 && var13 > 0) {
+               cycleClaimOnly = true;
+               var6 = 1;
+            } else {
+               cycleClaimOnly = false;
+            }
+
             return var6;
          }
       } catch (Throwable var12) {
          log("[probe] error: " + var12);
          return -1;
       }
+   }
+
+   /** 圈数挑战 tierList 里 status==AWARD 的档位数；info 不可用/通道撞车返回 0 */
+   private static int probeCycleAward(FishTaskAuto var0) {
+      try {
+         JSONObject var1 = var0.callApi(CYCLE_INFO_API, "1.0", RhLocationContext.jsonPairObj(), "探测圈数");
+         if (var1 == null || !CYCLE_INFO_API.equals(var1.optString("api"))) {
+            return 0;
+         }
+         JSONObject var2 = var1.optJSONObject("data");
+         JSONArray var3 = var2 == null ? null : var2.optJSONArray("tierList");
+         if (var3 == null) {
+            return 0;
+         }
+         int var4 = 0;
+         java.util.Set<String> var7 = var0.readCycleClaimed();
+         for (int var5 = 0; var5 < var3.length(); var5++) {
+            JSONObject var6 = var3.optJSONObject(var5);
+            if (var6 != null && "AWARD".equalsIgnoreCase(var6.optString("status", ""))
+                  && !var7.contains(cycleDay() + "|" + parseNum(var6.optString("cycle", "0")))) {
+               var4++;
+            }
+         }
+         return var4;
+      } catch (Throwable var7) {
+         return 0;
+      }
+   }
+
+   /**
+    * 手动触发（模块 App「7天圈数挑战」行点击）：独立实例查档+领取一轮，结果落持久报告文件供 CYCLE_REPORT 读取。
+    * 报告头部带 @13位时间戳 runId，App 侧 pollCycleReport 按 runId 过滤旧报告。
+    * 与自动路径共用 maybeClaimCycleReward（含本地去重档），不会重复领取。
+    */
+   public static void runCycleClaimOnce(Context var0) {
+      FishTaskAuto var1 = new FishTaskAuto(var0.getClassLoader(), cacheDirPath(var0));
+      try {
+         var1.report.append("圈数挑战报告 @").append(System.currentTimeMillis()).append('\n');
+         ConfigManager var2 = ConfigManager.load();
+         if (var2 != null && !var2.cycleChallenge) {
+            var1.report.append("[圈数挑战] 开关已关闭，先在常用功能里打开\n");
+         } else {
+            var1.maybeClaimCycleReward();
+         }
+      } catch (Throwable var3) {
+         var1.report.append("[圈数挑战] 异常 ").append(var3).append('\n');
+      }
+      // 报告落持久区 files/（lvlDirPath 同源），冷启动不被清；写 cache 会被系统回收
+      String var4 = lvlDirPath(var0 != null ? var0 : appCtx);
+      var1.writeFile((var4 != null ? var4 : cacheDirPath(var0)) + "/rh_tasks_cycle.txt", var1.report.toString());
+      log("[cycle-manual] report written");
    }
 
    public static void launch(Context var0, String var1) {
@@ -547,7 +655,13 @@ public final class FishTaskAuto {
 
                         FishTaskAuto.log("[probe] runnable=" + var6 + (var8 && !var7 ? " (force)" : "") + " -> launch");
                         var4 = System.currentTimeMillis();
-                        FishTaskAuto.launch(var0, "{}");
+                        // 圈数挑战独占可领时切 claim_only：跳过浏览段，只做签到+掷骰+圈数/奖桶领取
+                        String var13x = cycleClaimOnly ? "{\"claim_only\":true,\"polish\":false}" : "{}";
+                        if (cycleClaimOnly) {
+                           FishTaskAuto.log("[probe] cycle award pending -> claim_only run");
+                        }
+                        cycleClaimOnly = false;
+                        FishTaskAuto.launch(var0, var13x);
                         var3 = 3;
                         var1 = 300000L;
                      }
@@ -619,6 +733,7 @@ public final class FishTaskAuto {
 
          if (opt(var4, "mapRoll", true)) {
             this.doMapRoll();
+            this.maybeClaimCycleReward(); // 掷骰推进圈数后查 AWARD 档位并领取
          }
 
          if (opt(var4, "bagUse", true)) {
@@ -1439,6 +1554,8 @@ public final class FishTaskAuto {
       try {
          JSONObject var1 = this.callApi("mtop.taobao.idle.treasure.hunt.map.init", "1.0", "{" + RhLocationContext.jsonPair() + "\"version\":4}", "地图状态");
          JSONObject var2 = var1 == null ? null : var1.optJSONObject("data");
+         // 圈数挑战日奖：init 拿到 data 就顺手查一次可领状态（todayHasIssue=false 且服务端判定到点才发）
+         this.maybeClaimDailyReward(var2);
          JSONObject var3 = var2 == null ? null : var2.optJSONObject("userInfo");
          if (var3 == null) {
             this.report.append("[前进钓鱼] 地图状态获取失败，跳过\n");
@@ -1582,6 +1699,150 @@ public final class FishTaskAuto {
       }
    }
 
+   /**
+    * 圈数挑战每日步数奖励：map.init 的 data.dailyReward 携带今日发放状态。
+    * todayHasIssue=true → 今日已发，跳过；否则打一发 daily.reward 让服务端判定
+    * （未到点服务端回 FAIL，无副作用）。主跑批 + finish 收尾各有一次 init，天然一日最多两次尝试。
+    * LVL 机制（@dailyReward）：领取成功 / 已发放各记一次，累计 2 次后当日所有后续批次直接跳过；
+    * FAIL 不记档，后续批次照常重试（步数可能晚点才达标）。
+    */
+   private void maybeClaimDailyReward(JSONObject var0) {
+      try {
+         // LVL 闸门：今日累计判定 2 次（领取成功 / 已发放）后整天不再尝试，省掉每轮跑批的重复调用
+         if (this.lvlOnRun && lvlSkip(K_DAILY_REWARD)) {
+            return;
+         }
+         JSONObject var1 = var0 == null ? null : var0.optJSONObject("dailyReward");
+         if (var1 == null) {
+            return; // 老版本页面无此字段，直接跳过
+         }
+         if ("true".equalsIgnoreCase(var1.optString("todayHasIssue", "false"))) {
+            // 今日已发放 = 服务端判定完成，记一次 LVL（与 signin 的 SIGNED 分支同款语义）
+            if (this.lvlOnRun) {
+               this.lvlBump(K_DAILY_REWARD);
+            }
+            return;
+         }
+         String var2 = RhLocationContext.jsonPairObj();
+         JSONObject var3 = this.callApi(MAP_DAILY_REWARD_API, "1.0", var2, "圈数日奖");
+         String var4 = firstRet(var3);
+         boolean var5 = var4 != null && var4.contains("SUCCESS");
+         int var6 = parseNum(var1.optString("todayNum", "0"));
+         if (var5) {
+            this.report.append("[圈数日奖] SUCCESS +").append(var6).append("币\n");
+            toast("✓ 圈数挑战日奖 +" + var6 + "币");
+            log("[daily-reward] claimed +" + var6);
+            // 领取成功记一次 LVL；FAIL（未到点/步数不足）不记，后续跑批继续重试
+            if (this.lvlOnRun) {
+               this.lvlBump(K_DAILY_REWARD);
+            }
+         } else {
+            // 未到点/无可领，只落日志不进报告，避免噪音
+            log("[daily-reward] not claimable: " + (var4 == null ? "无响应" : var4));
+         }
+      } catch (Throwable var7) {
+         this.report.append("[圈数日奖] 异常 ").append(var7).append('\n');
+      }
+   }
+
+   /**
+    * 7天圈数挑战奖励：cycle.challenge.info 返回 tierList，status==AWARD 的档位逐个领。
+    * 请求体 {cycle, recordId, fishAdCode, gps}；响应 {rewardTitle, success}。
+    * 调用时机：doMapRoll 之后（掷骰推进圈数后查才有新 AWARD）+ finish 收尾。
+    * 注意：info 尾段与 treasure.layout.info 同落 rh_resp_info.json，用响应自带 api 字段校验防误读。
+    */
+   private void maybeClaimCycleReward() {
+      try {
+         // UI 开关（常用功能「7天圈数挑战」）：关了就不查档不领取
+         ConfigManager var15 = ConfigManager.load();
+         if (var15 != null && !var15.cycleChallenge) {
+            log("[cycle-challenge] 开关关闭，跳过");
+            return;
+         }
+         JSONObject var0 = this.callApi(CYCLE_INFO_API, "1.0", RhLocationContext.jsonPairObj(), "圈数挑战");
+         if (var0 == null || !CYCLE_INFO_API.equals(var0.optString("api"))) {
+            log("[cycle-challenge] info 不可用（超时或通道撞车）");
+            return;
+         }
+         JSONObject var1 = var0.optJSONObject("data");
+         if (var1 == null) {
+            log("[cycle-challenge] info 无 data（活动未开启）");
+            return;
+         }
+         String var2 = var1.optString("recordId", "");
+         int var3 = parseNum(var1.optString("currentCycle", "0"));
+         JSONArray var4 = var1.optJSONArray("tierList");
+         if (var4 == null || var2.length() == 0) {
+            log("[cycle-challenge] tierList/recordId 缺失");
+            return;
+         }
+         // 本地领取去重：服务端发奖异步，status 短时间仍显示 AWARD，必须按档记档防重复领取
+         java.util.Set<String> var14 = readCycleClaimed();
+         for (int var5 = 0; var5 < var4.length(); var5++) {
+            JSONObject var6 = var4.optJSONObject(var5);
+            // v1.4.4 修复（2026-11-11 主机侧）：REACHED（已到达未领）也算可领——
+            // 实测 cycle=18 REACHED 2000 币手动 CALL reward 成功到账，原逻辑只认 AWARD 漏领
+            if (var6 != null && ("AWARD".equalsIgnoreCase(var6.optString("status", ""))
+                    || "REACHED".equalsIgnoreCase(var6.optString("status", "")))) {
+               int var7 = parseNum(var6.optString("cycle", "0"));
+               if (var14.contains(cycleDay() + "|" + var7)) {
+                  log("[cycle-challenge] cycle=" + var7 + " 今日已领（本地档），跳过");
+                  continue;
+               }
+               String var8 = var6.optString("rewardTitle", "");
+               String var9 = "{\"cycle\":" + var7
+                  + "," + RhLocationContext.jsonPair()
+                  + "\"recordId\":\"" + var2 + "\"}";
+               JSONObject var10 = this.callApi(CYCLE_REWARD_API, "1.0", var9, "圈数奖励");
+               String var11 = firstRet(var10);
+               boolean var12 = var10 != null && var11 != null && var11.contains("SUCCESS");
+               if (var12) {
+                  markCycleClaimed(var7);
+                  this.report.append("[圈数挑战] 领取 第").append(var7).append("圈 ")
+                     .append(var8).append("（当前").append(var3).append("圈）\n");
+                  toast("✓ 圈数挑战 " + var8);
+                  log("[cycle-challenge] claimed cycle=" + var7 + " " + var8);
+               } else {
+                  log("[cycle-challenge] claim fail cycle=" + var7 + ": " + (var11 == null ? "无响应" : var11));
+               }
+            }
+         }
+      } catch (Throwable var13) {
+         this.report.append("[圈数挑战] 异常 ").append(var13).append('\n');
+      }
+   }
+
+   /** 本地领取档 key：yyMMdd|cycle，文件 cacheDir/rh_cycle_claim.txt，跨天自然失效（读时按 day 前缀过滤） */
+   private static String cycleDay() {
+      java.text.SimpleDateFormat var0 = new java.text.SimpleDateFormat("yyMMdd");
+      return var0.format(new java.util.Date());
+   }
+
+   private java.util.Set<String> readCycleClaimed() {
+      java.util.Set<String> var0 = new java.util.HashSet<>();
+      try {
+         String var1 = this.readFile(this.cacheDir + "/rh_cycle_claim.txt");
+         if (var1 != null) {
+            for (String var3 : var1.split("\n")) {
+               if (var3.startsWith(cycleDay() + "|")) {
+                  var0.add(var3.trim());
+               }
+            }
+         }
+      } catch (Throwable ignored) {
+      }
+      return var0;
+   }
+
+   private void markCycleClaimed(int var0) {
+      try {
+         String var1 = this.readFile(this.cacheDir + "/rh_cycle_claim.txt");
+         String var2 = (var1 == null ? "" : var1.trim() + "\n") + cycleDay() + "|" + var0 + "\n";
+         this.writeFile(this.cacheDir + "/rh_cycle_claim.txt", var2);
+      } catch (Throwable ignored) {
+      }
+   }
+
    private void doBagUse() {
       try {
          ConfigManager var1 = ConfigManager.load();
@@ -1595,7 +1856,8 @@ public final class FishTaskAuto {
             {"SURFACE12_DICE", var1.bag12On, var1.bag12Num, "十二面骰"},
             {"ROCKET_DICE", var1.bagRocketOn, var1.bagRocketNum, "火箭骰子"},
             {"DOUBLE_DICE", var1.bagDoubleOn, var1.bagDoubleNum, "双倍骰子"},
-            {"BENEFIT_GGK", var1.bagGgkOn, var1.bagGgkNum, "刮刮卡"}
+            {"BENEFIT_GGK", var1.bagGgkOn, var1.bagGgkNum, "刮刮卡"},
+            {"BENEFIT_DZP_SPRING", var1.bagDzpOn, var1.bagDzpNum, "大转盘"}
          };
          boolean var3 = false;
 
@@ -1648,6 +1910,8 @@ public final class FishTaskAuto {
                int var23 = 0;
                String var24 = null;
                String var25 = null;
+               // 大转盘每张独立 propId（amount 各 1），逐张核销必须按张取 id；GGK 仍沿用首个 id
+               java.util.ArrayList<String> varIds = new java.util.ArrayList<String>();
 
                for (int var26 = 0; var26 < var41.length(); var26++) {
                   JSONObject var27 = var41.optJSONObject(var26);
@@ -1660,6 +1924,10 @@ public final class FishTaskAuto {
                      if (var25 == null) {
                         var25 = var27.optString("id", null);
                      }
+
+                     if (var27.optString("id", null) != null) {
+                        varIds.add(var27.optString("id"));
+                     }
                   }
                }
 
@@ -1668,7 +1936,8 @@ public final class FishTaskAuto {
                   if (var23 <= var43) {
                      this.report.append("[背包] ").append(var22).append(" 已达目标（剩 ").append(var23).append("）\n");
                   } else {
-                     boolean var44 = !"BENEFIT_GGK".equals(var19);
+                     // GGK 与 DZP 走 prop.use 直兑；其余（骰子）走地图掷骰，需地图状态可用
+                     boolean var44 = !"BENEFIT_GGK".equals(var19) && !"BENEFIT_DZP_SPRING".equals(var19);
                      if (var44 && !var10) {
                         this.report.append("[背包] ").append(var22).append(" 地图状态不可用，跳过\n");
                      } else {
@@ -1711,12 +1980,18 @@ public final class FishTaskAuto {
                               var42 += (long)var37;
                               var31 += rollCoins(var36);
                            } else {
+                              // DZP：第 var29 次使用取第 var29 张的 id（快照序）；GGK 沿用首个 id
+                              String varUseId = var25;
+                              if ("BENEFIT_DZP_SPRING".equals(var19) && varIds.size() > 0) {
+                                 varUseId = (String)varIds.get(Math.min(var29, varIds.size() - 1));
+                              }
+
                               JSONObject var34 = this.callApi(
                                  "mtop.taobao.idle.play.prop.use",
                                  "1.0",
                                  objJson(
                                     "id",
-                                    var25,
+                                    varUseId,
                                     "bizCode",
                                     "coinMap",
                                     "configId",
@@ -1728,7 +2003,7 @@ public final class FishTaskAuto {
                                     "gps",
                                     RhLocationContext.gps()
                                  ),
-                                 "背包刮卡"
+                                 "背包" + ("BENEFIT_DZP_SPRING".equals(var19) ? "转盘" : "刮卡")
                               );
                               String var35 = firstRet(var34);
                               if (var35 == null || !var35.contains("SUCCESS")) {
@@ -2016,7 +2291,26 @@ public final class FishTaskAuto {
       }
 
       boolean var11 = var6 != null && var6.contains("SUCCESS");
+      // v1.4.4 修复（2026-11-11 主机侧）：SUCCESS ≠ 领到。实测 6 个任务（106456 等）
+      // getolivertaskbenefit 返回 SUCCESS 但 taskBenefitDTO.needBenefit 仍 "true"、rewards 空——
+      // 服务端没发奖。此场景按失败记账且【不 lvlBump】，把当日 2 次名额留给下一轮引擎重试；
+      // 只有 needBenefit 变 false / 缺失（或 rewards 非空）才判真领到并 bump。
+      boolean claimedReal = var11;
       if (var11) {
+         try {
+            JSONObject var8r = var5.optJSONObject("data");
+            JSONObject var9r = var8r == null ? null : var8r.optJSONObject("taskDTO");
+            if (var9r != null) {
+               JSONObject var10b = var9r.optJSONObject("taskBenefitDTO");
+               JSONArray var10rw = var9r.optJSONArray("rewards");
+               boolean nbStill = var10b != null && "true".equals(var10b.optString("needBenefit", ""))
+                     && (var10rw == null || var10rw.length() == 0);
+               if (nbStill) claimedReal = false;
+            }
+         } catch (Throwable ignored) {
+         }
+      }
+      if (claimedReal) {
          var3.add(var2 + "(" + var1 + ")");
          this.report.append("[领取] ").append(var2).append(" -> ").append(var6).append(" rewards=").append(var7).append('\n');
          toast("✓ " + var2 + coinSuffix(var7));
@@ -2025,7 +2319,13 @@ public final class FishTaskAuto {
          }
       } else {
          var4.add(var2 + "(" + var1 + ")");
-         this.report.append("[领取] ").append(var2).append(" -> ").append(var6 == null ? "无响应" : var6).append('\n');
+         if (var11) {
+            // SUCCESS 但未生效：明示原因，不 bump，下一轮重试（服务端幂等，无重复风险）
+            this.report.append("[领取] ").append(var2).append(" -> 未生效（needBenefit 仍 true，下轮重试）\n");
+            log("[claim] not-effective: " + var2 + " (" + var1 + ")");
+         } else {
+            this.report.append("[领取] ").append(var2).append(" -> ").append(var6 == null ? "无响应" : var6).append('\n');
+         }
       }
    }
 
@@ -2189,6 +2489,7 @@ public final class FishTaskAuto {
 
    private void finish(long var1) {
       this.doMapRoll();
+      this.maybeClaimCycleReward(); // 收尾再查一次：跑批期间浏览/游戏攒的步数可能又过档
       this.report.append("耗时 ").append((System.currentTimeMillis() - var1) / 1000L).append("s\n");
       String var3 = this.report.toString();
       this.writeFile(this.reportDir + "/rh_tasks_result.txt", var3);

@@ -1,6 +1,8 @@
 package com.piggyhand.fish;
 
+import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -10,9 +12,15 @@ import de.robv.android.xposed.XposedBridge;
  * 闲鱼自有高层协议栈直调通道：不走 mtopsdk 借壳，直接调闲鱼自己的高层协议栈
  *   XModuleCenter.moduleForProtocol(PApiContext) -> sender
  *   ApiProtocol.newInstance().apiNameAndVersion(api, ver).paramMap(map)
- *   sender.send(request, null)
+ *   sender.send(request, callback)
  * 登录态/签名/wua 全部由闲鱼自己的协议栈处理。
- * 响应复用全局 MtopFinishEvent 监听落盘（rh_resp_<api>.json）。
+ * 响应捕获双通道：
+ *   ① 全局 MtopFinishEvent 监听落盘（rh_resp_<api>.json）——主通道；
+ *   ② v1.5.1 补：send 挂动态 Proxy 万能 callback（原实现 callback=null，
+ *      部分 ROM/时序下 MtopLauncher 依赖 callback 才派发响应——2026-11-11 日志实证
+ *      13:10/13:20/15:49 三轮直调请求进构建层但响应零到达）。callback 参数对象
+ *      统一喂 FishMtopHook.feedRespCandidate，内部有 MtopResponse 校验，
+ *      匹配即落盘，不匹配丢弃，安全。
  *
  * 调用链定位自闲鱼 7.25.31 dex 静态分析。
  */
@@ -20,7 +28,7 @@ public final class ApiDirect {
 
     private ApiDirect() {}
 
-    /** 尝试直调；成功返回 true（响应由全局监听落盘），失败返回 false（调用方回落借壳） */
+    /** 尝试直调；成功返回 true（响应由全局监听/Proxy callback 落盘），失败返回 false（调用方回落借壳） */
     public static boolean send(ClassLoader hostCl, String api, String version, String jsonParams) {
         try {
             /* 1. sender = XModuleCenter.moduleForProtocol(PApiContext.class) */
@@ -66,14 +74,19 @@ public final class ApiDirect {
                 }
             }
 
-            /* 4. sender.send(req, null) —— callback 传 null 合法 */
+            /* 4. sender.send(req, callback)
+             *    callback 不再传 null：第二参数是接口时用 Proxy 造万能监听，
+             *    所有方法的所有参数都喂 feedRespCandidate（响应对象）。
+             *    feedRespCandidate 有类名校验兜底，喂进非响应对象会静默丢弃。 */
             for (Method m : sender.getClass().getMethods()) {
                 if ("send".equals(m.getName()) && m.getParameterTypes().length == 2) {
                     // 兼容版自检：先标记再发送——setApiName 在 send 内部同步触发，
                     // 若 send 之后才标记，清除逻辑永远追不上导致 WARN 恒误报（一加用户日志实证）
                     FishMtopHook.noteDirectSent(api);
-                    m.invoke(sender, req, null);
-                    log("[direct] sent: " + api + " v" + version + " via " + sender.getClass().getName());
+                    Object cb = buildProxyCallback(hostCl, m.getParameterTypes()[1], api);
+                    m.invoke(sender, req, cb);
+                    log("[direct] sent: " + api + " v" + version + " via "
+                            + sender.getClass().getName() + (cb != null ? " +proxy-cb" : ""));
                     return true;
                 }
             }
@@ -82,6 +95,93 @@ public final class ApiDirect {
         } catch (Throwable t) {
             log("[direct] FAIL: " + t);
             return false;
+        }
+    }
+
+    /** ApiCallBack 类级 hook 武装标记（进程内一次性） */
+    private static volatile boolean cbHookArmed = false;
+
+    /**
+     * v1.5.1 直调响应旁路：
+     *  - callback 类型是接口 → Proxy 万能监听（当前 ROM 未命中，保留作兼容路径）；
+     *  - callback 类型是具体类（MI9 实证 com.taobao.idlefish.protocol.net.ApiCallBack）
+     *    → 对该类做一次性类级 hook（构造器 + 全部方法 after），所有参数喂
+     *    FishMtopHook.feedRespCandidate（isMtopResp 校验兜底），send 仍传 null。
+     *    这是响应旁路捕获的真正主路径：页面请求与直调请求的回调都经过 ApiCallBack。
+     */
+    private static Object buildProxyCallback(final ClassLoader hostCl, Class<?> cbCls, final String api) {
+        try {
+            if (cbCls == null) return null;
+            if (cbCls.isInterface()) {
+                return buildInterfaceProxy(hostCl, cbCls);
+            }
+            armCallbackClassHook(cbCls);
+            return null;
+        } catch (Throwable t) {
+            log("[direct] callback capture setup fail: " + t);
+            return null;
+        }
+    }
+
+    /** 接口路径：Proxy 万能监听（所有方法所有参数喂 feedRespCandidate） */
+    private static Object buildInterfaceProxy(final ClassLoader hostCl, Class<?> cbCls) {
+        return Proxy.newProxyInstance(hostCl, new Class<?>[]{cbCls}, new InvocationHandler() {
+            @Override
+            public Object invoke(Object proxy, Method method, Object[] args) {
+                try {
+                    if (args != null) {
+                        for (Object a : args) {
+                            if (a != null) FishMtopHook.feedRespCandidate(a, "direct-proxy");
+                        }
+                    }
+                } catch (Throwable ignored) {
+                }
+                // 回调方法若有返回值：boolean→false / int→0，其余 null（unboxing 安全）
+                Class<?> rt = method.getReturnType();
+                if (rt == boolean.class) return Boolean.FALSE;
+                if (rt == int.class) return Integer.valueOf(0);
+                if (rt == long.class) return Long.valueOf(0L);
+                return null;
+            }
+        });
+    }
+
+    /** 具体类路径：ApiCallBack 构造器 + 全部实例方法挂观察 hook（一次性，只读不改流程） */
+    private static void armCallbackClassHook(final Class<?> cbCls) {
+        if (cbHookArmed) return;
+        synchronized (ApiDirect.class) {
+            if (cbHookArmed) return;
+            try {
+                de.robv.android.xposed.XC_MethodHook feeder =
+                        new de.robv.android.xposed.XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(
+                                    de.robv.android.xposed.XC_MethodHook.MethodHookParam param) {
+                                try {
+                                    if (param.args == null) return;
+                                    for (Object a : param.args) {
+                                        if (a != null) FishMtopHook.feedRespCandidate(a, "direct-callback");
+                                    }
+                                } catch (Throwable ignored) {
+                                }
+                            }
+                        };
+                Reflect.hookAllConstructors(cbCls, feeder);
+                int mArmed = 0;
+                for (Method m : cbCls.getDeclaredMethods()) {
+                    try {
+                        Reflect.hookAllMethods(cbCls, m.getName(), feeder);
+                        mArmed++;
+                    } catch (Throwable ignored) {
+                    }
+                }
+                cbHookArmed = true;
+                log("[direct] ApiCallBack class hook armed on " + cbCls.getName()
+                        + " (" + mArmed + " methods)");
+            } catch (Throwable t) {
+                cbHookArmed = true; // 失败也置位防反复重挂刷屏
+                log("[direct] ApiCallBack hook fail: " + t);
+            }
         }
     }
 

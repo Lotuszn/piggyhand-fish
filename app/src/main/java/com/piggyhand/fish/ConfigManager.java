@@ -53,22 +53,33 @@ public class ConfigManager {
     public boolean fishMedia = true;
     /** 🐟 鱼塘任务：打开闲鱼自动跑一次（AWARD 收割+签到气泡）；手动 POND 触发不受此开关限制 */
     public boolean pond = true;
+    /** 🍚 自动投喂：打开闲鱼自动协议投喂，直到饲料余额耗尽（每次扣 10g 饲料）；手动 PONDFEED 触发不受此开关限制。
+     *  默认关 —— 投喂直接消耗饲料余额，交给用户自己决定 */
+    public boolean pondFeed = false;
     /** 🏅 会员任务：打开闲鱼自动跑一次（会员经验值四条任务 上报+领取）；手动 OLIVER 触发不受此开关限制 */
     public boolean oliverTask = true;
     public boolean gameTask = true;      // 玩一玩游戏任务
+    /** 🪙 赚游戏币任务：打开闲鱼自动跑一轮（中央+渠道任务收口 + 浏览类拉起）；手动 COIN 触发不受此开关限制 */
+    public boolean coinGame = true;
+    /** 🧧 自动兑换：赚币标识2后每日一次（>=10:00 且攒满 100000 自动兑支付宝现金红包，exchangebenefit）；
+     *  每日查询/兑换仅 1 次落盘标记；手动 COINEX 触发不受限 */
+    public boolean coinExchange = true;
+    /** 🎯 7天圈数挑战：到档自动领取闲鱼币奖励（常用功能抽屉可切；关掉后主流程/收尾/迷你跑批都不再查档） */
+    public boolean cycleChallenge = true;
     public boolean cashClaim = true;     // 瓜分现金红包
     public boolean cashJoin = true;      // 瓜分现金报名
     /** 💬 禁用聊天页左滑进对方主页手势（RhChatHook 双层拦截：容器触摸+主页跳转） */
     public boolean noChatSwipe = false;
     /** 🖥 不显示桌面图标：禁用 LauncherAlias（桌面图标没了，MainActivity 仍可被显式拉起） */
     public boolean hideIcon = false;
-    /* 🎒 背包自动使用（FishTaskAuto.doBagUse）：骰子走 map.roll 地图掷骰，刮刮卡走 prop.use；数量 -1=用到 0 */
+    /* 🎒 背包自动使用（FishTaskAuto.doBagUse）：骰子走 map.roll 地图掷骰，刮刮卡/大转盘走 prop.use；数量 -1=用到 0 */
     public boolean bagLuckOn = false;    public int bagLuckNum = 0;      // 好运骰 LUCKY_DICE
     public boolean bag8On = false;       public int bag8Num = 0;         // 八面骰 SURFACE8_DICE
     public boolean bag12On = false;      public int bag12Num = 0;        // 十二面骰 SURFACE12_DICE
     public boolean bagRocketOn = false;  public int bagRocketNum = 0;    // 火箭骰 ROCKET_DICE
     public boolean bagDoubleOn = false;  public int bagDoubleNum = 0;    // 双倍骰 DOUBLE_DICE
     public boolean bagGgkOn = false;     public int bagGgkNum = 0;       // 刮刮卡 BENEFIT_GGK
+    public boolean bagDzpOn = false;     public int bagDzpNum = 0;       // 大转盘 BENEFIT_DZP_SPRING（每张独立 propId，逐张核销）
     /** 🖼 显示更多商品：首页瀑布流列数覆盖（RhFeedCols 改 vlayout StaggeredGrid 列数）。
      *  cols = 列数，2~4；2 = 原样（闲鱼默认双列） */
     public boolean feedColsOn = false;
@@ -207,8 +218,12 @@ public class ConfigManager {
             c.toastNotify = o.optBoolean("toastNotify", true);
             c.fishMedia = o.optBoolean("fishMedia", true);
             c.pond = o.optBoolean("pond", true);
+            c.pondFeed = o.optBoolean("pondFeed", false);
             c.oliverTask = o.optBoolean("oliverTask", true);
             c.gameTask = o.optBoolean("gameTask", true);
+            c.coinGame = o.optBoolean("coinGame", true);
+            c.coinExchange = o.optBoolean("coinExchange", true);
+            c.cycleChallenge = o.optBoolean("cycleChallenge", true);
             c.cashClaim = o.optBoolean("cashClaim", true);
             c.cashJoin = o.optBoolean("cashJoin", true);
             c.noChatSwipe = o.optBoolean("noChatSwipe", false);
@@ -219,6 +234,7 @@ public class ConfigManager {
             c.bagRocketOn = o.optBoolean("bagRocketOn", false);   c.bagRocketNum = o.optInt("bagRocketNum", 0);
             c.bagDoubleOn = o.optBoolean("bagDoubleOn", false);   c.bagDoubleNum = o.optInt("bagDoubleNum", 0);
             c.bagGgkOn = o.optBoolean("bagGgkOn", false);         c.bagGgkNum = o.optInt("bagGgkNum", 0);
+            c.bagDzpOn = o.optBoolean("bagDzpOn", false);         c.bagDzpNum = o.optInt("bagDzpNum", 0);
             c.feedColsOn = o.optBoolean("feedColsOn", false);
             c.feedCols = Math.max(2, Math.min(4, o.optInt("feedCols", 3)));
             c.uiScaleOn = o.optBoolean("uiScaleOn", false);
@@ -226,8 +242,8 @@ public class ConfigManager {
             c.pondFishAdCode = o.optString("pondFishAdCode", "");
             c.pondGps = o.optString("pondGps", "");
             // 1.1.2 迁移：旧版内置默认值（重庆）视为未配置，改走动态定位
-            if ("500107".equals(c.pondFishAdCode)) c.pondFishAdCode = "";
-            if ("29.524374,106.471423".equals(c.pondGps)) c.pondGps = "";
+            if ("500107".equals(c.pondFishAdCode)) c.pondFishAdCode = ""; // AUDIT-ALLOW 迁移清理：识别旧测试区码并清除，非提交参数
+            if ("29.524374,106.471423".equals(c.pondGps)) c.pondGps = ""; // AUDIT-ALLOW 迁移清理：识别旧测试坐标并清除，非提交参数
         c.polish = o.optBoolean("polish", true);
             c.scoutPattern = o.optString("scoutPattern", "reward|bonus|coin");
             c.maxScoutMethods = o.optInt("maxScoutMethods", 400);

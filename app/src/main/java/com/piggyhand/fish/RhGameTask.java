@@ -19,7 +19,6 @@ public final class RhGameTask {
    static final String API_DETAIL = "mtop.taobao.idle.mini.game.task.detail.query";
    static final String API_COMPLETE = "mtop.taobao.idle.mini.game.task.complete";
    static final String API_AWARD = "mtop.taobao.idle.mini.game.task.award";
-   static final String ASAC = "3A25C04LLN0E7ABPUJN79L";
    static final String REPORT_FILE = "rh_tasks_game.txt";
    static final String DONE_FILE = "rh_game_done.txt";
    static final String TRY_FILE = "rh_game_try.txt";
@@ -145,17 +144,19 @@ public final class RhGameTask {
                int var23 = parseInt(var40.optString("taskValue"), 1);
                var3.append("[2] ").append(var18).append(" (").append(var20).append(' ').append(var23).append(") +").append(var22).append(" 币\n");
 
-               try {
-                  JSONObject var24 = new JSONObject();
-                  var24.put("taskId", var19);
-                  var24.put("appkey", var17);
-                  JSONObject var25 = parse(
-                     RhPondTask.callAndWait(var0, "mtop.taobao.idle.mini.game.task.detail.query", "1.0", var24.toString(), "query", 6000L)
-                  );
-                  if (var25 == null || !hasSuccess(var25)) {
-                     var3.append("     · 详情查询失败，跳过 ").append(briefRet(var25)).append('\n');
-                     continue;
-                  }
+                  try {
+                     JSONObject var24 = new JSONObject();
+                     var24.put("taskId", var19);
+                     var24.put("appkey", var17);
+                     String varDetailRaw = RhPondTask.callAndWait(var0, "mtop.taobao.idle.mini.game.task.detail.query", "1.0", var24.toString(), "query", 6000L);
+                     JSONObject var25 = parse(varDetailRaw);
+                     if (var25 == null || !hasSuccess(var25)) {
+                        var3.append("     · 详情查询失败，跳过 ").append(briefRet(var25)).append('\n');
+                        if (var25 == null && varDetailRaw != null) {
+                           var3.append("       响应原文: ").append(snippet(varDetailRaw, 100)).append('\n');
+                        }
+                        continue;
+                     }
 
                   String var26 = "";
 
@@ -188,10 +189,14 @@ public final class RhGameTask {
                      var47.put("progressValue", var23);
                   }
 
-                  JSONObject var49 = parse(RhPondTask.callAndWait(var0, "mtop.taobao.idle.mini.game.task.complete", "1.0", var47.toString(), "complete", 6000L));
+                  String varCompleteRaw = RhPondTask.callAndWait(var0, "mtop.taobao.idle.mini.game.task.complete", "1.0", var47.toString(), "complete", 6000L);
+                  JSONObject var49 = parse(varCompleteRaw);
                   if (var49 == null || !hasSuccess(var49)) {
                      var5++;
                      var3.append("     ✗ 上报失败 ").append(briefRet(var49)).append('\n');
+                     if (var49 == null && varCompleteRaw != null) {
+                        var3.append("       响应原文: ").append(snippet(varCompleteRaw, 100)).append('\n');
+                     }
                      sleep(1000L);
                      continue;
                   }
@@ -227,8 +232,11 @@ public final class RhGameTask {
                      JSONObject var48 = new JSONObject();
                      var48.put("taskId", var19);
                      var48.put("appkey", var17);
-                     var48.put("asac", "3A25C04LLN0E7ABPUJN79L");
-                     JSONObject var50 = parse(RhPondTask.callAndWait(var0, "mtop.taobao.idle.mini.game.task.award", "1.0", var48.toString(), "award", 6000L));
+                     // 多用户：asac 走本机动态捕获，无捕获省略字段
+                     String varAsac = RhLocationContext.asac();
+                     if (varAsac != null) var48.put("asac", varAsac);
+                     String varAwardRaw = RhPondTask.callAndWait(var0, "mtop.taobao.idle.mini.game.task.award", "1.0", var48.toString(), "award", 6000L);
+                     JSONObject var50 = parse(varAwardRaw);
                      if (var50 != null && hasSuccess(var50)) {
                         JSONObject var51 = var50.optJSONObject("data");
                         boolean var52 = var51 != null && var51.optBoolean("awarded", false);
@@ -244,6 +252,9 @@ public final class RhGameTask {
                      } else {
                         var7++;
                         var3.append("     ✗ 领奖失败 ").append(briefRet(var50)).append('\n');
+                        if (var50 == null && varAwardRaw != null) {
+                           var3.append("       响应原文: ").append(snippet(varAwardRaw, 100)).append('\n');
+                        }
                      }
                   } catch (Throwable var33) {
                      var7++;
@@ -299,6 +310,10 @@ public final class RhGameTask {
          }
       } else {
          var3.append("[1] 任务清单拉取失败 ").append(briefRet(var10)).append('\n');
+         // v1.5.1 非 JSON 响应原文带回（网关拒绝原因定性）：callAndWait 返回 raw 时 parse 必为 null
+         if (var10 == null && var9 != null) {
+            var3.append("    响应原文: ").append(snippet(var9, 120)).append('\n');
+         }
          finish(var0, var3, var1);
          return var3.toString();
       }
@@ -448,6 +463,16 @@ public final class RhGameTask {
             return "ret解析失败";
          }
       }
+   }
+
+   /** v1.5.1 非 JSON 响应原文摘要：压平空白、截断（报告可读性） */
+   private static String snippet(String raw, int max) {
+      if (raw == null) return "";
+      String one = raw.trim().replaceAll("\\s+", " ");
+      if (one.length() > max) {
+         return one.substring(0, max) + "...";
+      }
+      return one;
    }
 
    private static void finish(Context var0, RhReport var1, long var2) {

@@ -73,6 +73,18 @@ public final class RhLocationContext {
         return sb.toString();
     }
 
+    /**
+     * 完整 JSON 对象体："{"fishAdCode":"..","gps":".."}"（无尾逗号），两值都缺时 "{}"。
+     * v1.5.1 修复：MI9 日志实证 cycle.challenge.info 请求体 "{" + jsonPair() + "}"
+     * 因 jsonPair 尾逗号直接接 } 产生非法 JSON（Expected literal value at char 51），
+     * 纯 pair 收尾的调用点一律改用本方法。
+     */
+    public static String jsonPairObj() {
+        String p = jsonPair();
+        if (p.endsWith(",")) p = p.substring(0, p.length() - 1);
+        return "{" + p + "}";
+    }
+
     private static String clean(String v) {
         if (v == null) return null;
         v = v.trim();

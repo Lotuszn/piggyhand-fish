@@ -104,6 +104,7 @@ public class MainActivity extends Activity {
    private View scoutArgs;
    private View rowUpdate;
    private View rowCoolapk;
+   private View rowQQGroup;
    private View drawerHead;
    private View drawerContent;
    private TextView tvDrawerArrow;
@@ -120,6 +121,21 @@ public class MainActivity extends Activity {
    private View drawerContent4;
    private TextView tvDrawerArrow4;
    private boolean drawerOpen4 = false;
+   // v1.4.1 「神奇鱼塘」一级菜单抽屉
+   private View drawerHeadPond;
+   private View drawerContentPond;
+   private TextView tvDrawerArrowPond;
+   private boolean drawerOpenPond = false;
+   private final AtomicBoolean drawerBusyPond = new AtomicBoolean(false);
+   // v1.4.6 「赚闲鱼币提现」一级菜单抽屉
+   private View drawerHeadCoin;
+   private View drawerContentCoin;
+   private TextView tvDrawerArrowCoin;
+   private boolean drawerOpenCoin = false;
+   private final AtomicBoolean drawerBusyCoin = new AtomicBoolean(false);
+   private LiquidSwitch swCoinGame;
+   private LiquidSwitch swCoinExchange;
+   private LiquidSwitch swPondFeed;
    private final AtomicBoolean drawerBusy = new AtomicBoolean(false);
    private final AtomicBoolean drawerBusy2 = new AtomicBoolean(false);
    private final AtomicBoolean drawerBusy3 = new AtomicBoolean(false);
@@ -142,18 +158,21 @@ public class MainActivity extends Activity {
    private LiquidSwitch swNoSplash;
    private LiquidSwitch swOlivertask;
    private LiquidSwitch swGameTask;
+   private LiquidSwitch swCycleChallenge;
    private EditText etBagLuck;
    private EditText etBag8;
    private EditText etBag12;
    private EditText etBagRocket;
    private EditText etBagDouble;
    private EditText etBagGgk;
+   private EditText etBagDzp;
    private LiquidSwitch swBagLuck;
    private LiquidSwitch swBag8;
    private LiquidSwitch swBag12;
    private LiquidSwitch swBagRocket;
    private LiquidSwitch swBagDouble;
    private LiquidSwitch swBagGgk;
+   private LiquidSwitch swBagDzp;
    private EditText etFeedCols;
    private LiquidSwitch swFeedCols;
    private EditText etUiScale;
@@ -210,6 +229,7 @@ public class MainActivity extends Activity {
       this.scoutArgs = this.findViewById(R.id.scoutArgs);
       this.rowUpdate = this.findViewById(R.id.rowUpdate);
       this.rowCoolapk = this.findViewById(R.id.rowCoolapk);
+      this.rowQQGroup = this.findViewById(R.id.rowQQGroup);
       this.swAutoRun = (LiquidSwitch)this.findViewById(R.id.swAutoRun);
       this.swMtop = (LiquidSwitch)this.findViewById(R.id.swMtop);
       this.swAds = (LiquidSwitch)this.findViewById(R.id.swAds);
@@ -237,6 +257,7 @@ public class MainActivity extends Activity {
       this.swPondTask = (LiquidSwitch)this.findViewById(R.id.swPondTask);
       this.swOlivertask = (LiquidSwitch)this.findViewById(R.id.swOlivertask);
       this.swGameTask = (LiquidSwitch)this.findViewById(R.id.swGameTask);
+      this.swCycleChallenge = (LiquidSwitch)this.findViewById(R.id.swCycleChallenge);
       this.swNoChatSwipe = (LiquidSwitch)this.findViewById(R.id.swNoChatSwipe);
       this.swHideIcon = (LiquidSwitch)this.findViewById(R.id.swHideIcon);
       this.etBagLuck = (EditText)this.findViewById(R.id.etBagLuck);
@@ -251,18 +272,24 @@ public class MainActivity extends Activity {
       this.swBagDouble = (LiquidSwitch)this.findViewById(R.id.swBagDouble);
       this.etBagGgk = (EditText)this.findViewById(R.id.etBagGgk);
       this.swBagGgk = (LiquidSwitch)this.findViewById(R.id.swBagGgk);
+      this.etBagDzp = (EditText)this.findViewById(R.id.etBagDzp);
+      this.swBagDzp = (LiquidSwitch)this.findViewById(R.id.swBagDzp);
       this.etFeedCols = (EditText)this.findViewById(R.id.etFeedCols);
       this.swFeedCols = (LiquidSwitch)this.findViewById(R.id.swFeedCols);
       this.etUiScale = (EditText)this.findViewById(R.id.etUiScale);
       this.swUiScale = (LiquidSwitch)this.findViewById(R.id.swUiScale);
-      TextView var2 = (TextView)this.findViewById(R.id.tvPondWarn);
-      String var3 = var2.getText().toString();
-      SpannableString var4 = new SpannableString(var3);
-      int var5 = var3.indexOf("未完善，谨慎开启");
-      if (var5 >= 0) {
-         var4.setSpan(new ForegroundColorSpan(-1754827), var5, var5 + 8, 33);
-         var2.setText(var4);
-      }
+      // v1.4.1 「神奇鱼塘」一级菜单：自动赚饲料沿用 rowPondTask/swPondTask（布局已迁入新卡片），
+      // 自动投喂新增 rowPondFeed/swPondFeed；tvPondWarn 警示语随旧布局一并移除
+      this.drawerHeadPond = this.findViewById(R.id.drawerHeadPond);
+      this.drawerContentPond = this.findViewById(R.id.drawerContentPond);
+      this.tvDrawerArrowPond = (TextView)this.findViewById(R.id.tvDrawerArrowPond);
+      this.swPondFeed = (LiquidSwitch)this.findViewById(R.id.swPondFeed);
+      // v1.4.6 「赚闲鱼币提现」一级菜单
+      this.drawerHeadCoin = this.findViewById(R.id.drawerHeadCoin);
+      this.drawerContentCoin = this.findViewById(R.id.drawerContentCoin);
+      this.tvDrawerArrowCoin = (TextView)this.findViewById(R.id.tvDrawerArrowCoin);
+      this.swCoinGame = (LiquidSwitch)this.findViewById(R.id.swCoinGame);
+      this.swCoinExchange = (LiquidSwitch)this.findViewById(R.id.swCoinExchange);
 
       this.etPattern = (EditText)this.findViewById(R.id.etPattern);
       this.etMax = (EditText)this.findViewById(R.id.etMax);
@@ -348,6 +375,9 @@ public class MainActivity extends Activity {
          @Override
          public void onToggle(boolean var1) {
             MainActivity.this.put("pond", var1);
+            Toast.makeText(MainActivity.this, var1
+                    ? "\ud83c\udf3e 自动赚饲料已开启：每天打开闲鱼自动领取"
+                    : "\ud83c\udf3e 自动赚饲料已关闭", 0).show();
          }
       });
       this.swOlivertask.setOnSilent(var7.optBoolean("oliverTask", true));
@@ -364,6 +394,14 @@ public class MainActivity extends Activity {
             MainActivity.this.put("gameTask", var1);
          }
       });
+      this.swCycleChallenge.setOnSilent(var7.optBoolean("cycleChallenge", true));
+      this.swCycleChallenge.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+         @Override
+         public void onToggle(boolean var1) {
+            MainActivity.this.put("cycleChallenge", var1);
+            Toast.makeText(MainActivity.this, var1 ? "\ud83c\udfaf 圈数挑战已开启：到档自动领取" : "\ud83c\udfaf 圈数挑战已关闭", 0).show();
+         }
+      });
       this.swCashJoin.setOnSilent(var7.optBoolean("cashJoin", true));
       this.swCashJoin.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
          @Override
@@ -378,6 +416,27 @@ public class MainActivity extends Activity {
          public void onToggle(boolean var1) {
             MainActivity.this.put("cashClaim", var1);
             Toast.makeText(MainActivity.this, var1 ? "\ud83e\udde7 自动开红包已开启：开奖当天自动领取" : "\ud83e\udde7 自动开红包已关闭", 0).show();
+         }
+      });
+      this.swCoinGame.setOnSilent(var7.optBoolean("coinGame", true));
+      this.swCoinGame.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+         @Override
+         public void onToggle(boolean var1) {
+            MainActivity.this.put("coinGame", var1);
+            Toast.makeText(MainActivity.this, var1
+                    ? "\ud83e\ude99 赚游戏币任务已开启：每天打开闲鱼自动赚币"
+                    : "\ud83e\ude99 赚游戏币任务已关闭", 0).show();
+         }
+      });
+      // v1.4.9 自动兑换：标识 2 后每日一次（≥10:00 且攒满即兑），手动点行不受限
+      this.swCoinExchange.setOnSilent(var7.optBoolean("coinExchange", true));
+      this.swCoinExchange.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+         @Override
+         public void onToggle(boolean var1) {
+            MainActivity.this.put("coinExchange", var1);
+            Toast.makeText(MainActivity.this, var1
+                    ? "\ud83e\udde7 自动兑换已开启：赚币标识2后每日一次，≥10:00 且攒满 100000 自动兑支付宝红包"
+                    : "\ud83e\udde7 自动兑换已关闭", 0).show();
          }
       });
       this.swNoChatSwipe.setOnSilent(var7.optBoolean("noChatSwipe", false));
@@ -404,6 +463,7 @@ public class MainActivity extends Activity {
       this.installBag(var7, this.etBagRocket, this.swBagRocket, "bagRocketOn", "bagRocketNum", "火箭骰子");
       this.installBag(var7, this.etBagDouble, this.swBagDouble, "bagDoubleOn", "bagDoubleNum", "双倍骰子");
       this.installBag(var7, this.etBagGgk, this.swBagGgk, "bagGgkOn", "bagGgkNum", "刮刮卡");
+      this.installBag(var7, this.etBagDzp, this.swBagDzp, "bagDzpOn", "bagDzpNum", "大转盘");
       this.btnSaveBag.setOnClickListener(new OnClickListener() {
          public void onClick(View var1) {
             MainActivity.this.saveBagConfig(true);
@@ -411,6 +471,7 @@ public class MainActivity extends Activity {
       });
       this.installFeedCols(var7);
       this.installUiScale(var7);
+      this.installPondFeed(var7);
       this.findViewById(R.id.rowPondTask).setOnClickListener(new OnClickListener() {
          public void onClick(View var1) {
             Toast.makeText(MainActivity.this, "\ud83d\udc1f 已触发鱼塘任务引擎…", 0).show();
@@ -451,6 +512,138 @@ public class MainActivity extends Activity {
                   }
                }
             }, "rh-pond-ui").start();
+         }
+      });
+      // v1.4.1 「神奇鱼塘 → 自动投喂」行点击：走 PONDFEED → PONDFEED_REPORT 轮询（投喂自动进行到饲料耗尽）
+      this.findViewById(R.id.rowPondFeed).setOnClickListener(new OnClickListener() {
+         public void onClick(View var1) {
+            MainActivity.this.clearInputFocusAndKeyboard();
+            MainActivity.this.toastUi("\ud83c\udf5a 正在自动投喂至饲料耗尽…");
+            new Thread(new Runnable() {
+               @Override
+               public void run() {
+                  String var1 = MainActivity.socketCmd("PONDFEED");
+                  if (var1 != null && var1.length() != 0) {
+                     String var2 = null;
+
+                     for (int var3 = 0; var3 < 150; var3++) {
+                        try {
+                           Thread.sleep(2000L);
+                        } catch (InterruptedException var5) {
+                        }
+
+                        String var4 = MainActivity.socketCmd("PONDFEED_REPORT");
+                        if (var4 != null && var4.contains("投喂报告")) {
+                           var2 = var4;
+                           break;
+                        }
+                     }
+
+                     final String var2f = var2;
+                     MainActivity.this.runUi(new Runnable() {
+                        @Override
+                        public void run() {
+                           MainActivity.this.showPondFeedReport(var2f);
+                        }
+                     });
+                  } else {
+                     MainActivity.this.runUi(new Runnable() {
+                        @Override
+                        public void run() {
+                           Toast.makeText(MainActivity.this, "触发失败：闲鱼未运行或 socket 不通", 1).show();
+                        }
+                     });
+                  }
+               }
+            }, "rh-pondfeed-ui").start();
+         }
+      });
+      // v1.4.6 「赚闲鱼币提现 → 赚游戏币任务」行点击：走 COIN → COIN_REPORT 轮询
+      // （浏览类任务会自动拉起任务页，浏览 ≥20s 返回后引擎 100s 复扫自动领奖）
+      this.findViewById(R.id.rowCoinGame).setOnClickListener(new OnClickListener() {
+         public void onClick(View var1) {
+            Toast.makeText(MainActivity.this, "\ud83e\ude99 已触发赚游戏币任务引擎…", 0).show();
+            new Thread(new Runnable() {
+               @Override
+               public void run() {
+                  String var1 = MainActivity.socketCmd("COIN");
+                  if (var1 != null && var1.length() != 0) {
+                     String var2 = null;
+
+                     for (int var3 = 0; var3 < 60; var3++) {
+                        try {
+                           Thread.sleep(2000L);
+                        } catch (InterruptedException var5) {
+                        }
+
+                        String var4 = MainActivity.socketCmd("COIN_REPORT");
+                        if (var4 != null && var4.contains("游戏币任务报告")) {
+                           var2 = var4;
+                           break;
+                        }
+                     }
+
+                     final String var2f = var2;
+                     MainActivity.this.runUi(new Runnable() {
+                        @Override
+                        public void run() {
+                           MainActivity.this.showCoinReport(var2f);
+                        }
+                     });
+                  } else {
+                     MainActivity.this.runUi(new Runnable() {
+                        @Override
+                        public void run() {
+                           Toast.makeText(MainActivity.this, "触发失败：闲鱼未运行或 socket 不通", 1).show();
+                        }
+                     });
+                  }
+               }
+            }, "rh-coin-ui").start();
+         }
+      });
+      // v1.4.9 「自动兑换」行点击：手动执行一次检查+兑换（manual，不受每日 1 次/时间窗限制），
+      // 自动流程由 RhCoinTask 标识 2 挂点触发
+      this.findViewById(R.id.rowCoinExchange).setOnClickListener(new OnClickListener() {
+         public void onClick(View var1) {
+            Toast.makeText(MainActivity.this, "\ud83e\udde7 正在执行兑换检查（查余额→攒满判定→兑换）…", 0).show();
+            new Thread(new Runnable() {
+               @Override
+               public void run() {
+                  String var1 = MainActivity.socketCmd("COINEX");
+                  if (var1 != null && var1.length() != 0) {
+                     String var2 = null;
+
+                     for (int var3 = 0; var3 < 45; var3++) {
+                        try {
+                           Thread.sleep(2000L);
+                        } catch (InterruptedException var5) {
+                        }
+
+                        String var4 = MainActivity.socketCmd("COINEX_REPORT");
+                        if (var4 != null && var4.contains("自动兑换报告")) {
+                           var2 = var4;
+                           break;
+                        }
+                     }
+
+                     final String var2f = var2;
+                     MainActivity.this.runUi(new Runnable() {
+                        @Override
+                        public void run() {
+                           MainActivity.this.showCoinExchReport(var2f);
+                        }
+                     });
+                  } else {
+                     MainActivity.this.runUi(new Runnable() {
+                        @Override
+                        public void run() {
+                           Toast.makeText(MainActivity.this, "触发失败：闲鱼未运行或 socket 不通", 1).show();
+                        }
+                     });
+                  }
+               }
+            }, "rh-coinex-ui").start();
          }
       });
       this.findViewById(R.id.rowOlivertask).setOnClickListener(new OnClickListener() {
@@ -538,6 +731,52 @@ public class MainActivity extends Activity {
             }, "rh-game-ui").start();
          }
       });
+      this.findViewById(R.id.rowCycleChallenge).setOnClickListener(new OnClickListener() {
+         public void onClick(View var1) {
+            final long var2 = System.currentTimeMillis() - 3000L;
+            MainActivity.this.toastUi("\ud83c\udfaf 正在查领圈数挑战…");
+            new Thread(new Runnable() {
+               @Override
+               public void run() {
+                  String var1 = MainActivity.socketCmd("CYCLE");
+                  boolean var2x = var1 != null && var1.contains("OK");
+                  if (!var2x) {
+                     MainActivity.this.toastUi("闲鱼未唤醒，正在打开闲鱼执行…");
+                     MainActivity.this.openFishFront();
+
+                     for (int var3 = 0; var3 < 8 && !var2x; var3++) {
+                        MainActivity.sleepQuiet(1500L);
+                        String var4 = MainActivity.socketCmd("CYCLE");
+                        var2x = var4 != null && var4.contains("OK");
+                     }
+                  }
+
+                  // 圈数链路只有 info+领取两三发请求，轮询上限给短些
+                  String var5 = var2x ? MainActivity.pollCycleReport(var2, 12) : null;
+                  if (var5 == null && var2x) {
+                     MainActivity.this.toastUi("闲鱼不在前台，正在打开闲鱼执行…");
+                     MainActivity.this.openFishFront();
+
+                     for (int var6 = 0; var6 < 5; var6++) {
+                        MainActivity.sleepQuiet(2000L);
+                        if (MainActivity.socketCmd("CYCLE_REPORT") != null) {
+                           break;
+                        }
+                     }
+
+                     MainActivity.socketCmd("CYCLE");
+                     var5 = MainActivity.pollCycleReport(var2, 10);
+                  }
+
+                  if (var5 == null && !var2x) {
+                     MainActivity.this.toastUi("\ud83c\udfaf 未连通：先打开闲鱼（引擎随进程加载）再点");
+                  } else {
+                     MainActivity.this.toastUi(MainActivity.summarizeCycle(var5));
+                  }
+               }
+            }, "rh-cycle-ui").start();
+         }
+      });
       this.drawerHead
          .setOnClickListener(
             new OnClickListener() {
@@ -598,6 +837,40 @@ public class MainActivity extends Activity {
                         .setDuration(MainActivity.this.drawerOpen4 ? 260L : 200L)
                         .start();
                      MainActivity.this.animateDrawer((ViewGroup)MainActivity.this.drawerContent4, MainActivity.this.drawerOpen4, MainActivity.this.drawerBusy4);
+                  }
+               }
+            }
+         );
+      // v1.4.1 「神奇鱼塘」抽屉展开/收起（与组①~④同一套动画）
+      this.drawerHeadPond
+         .setOnClickListener(
+            new OnClickListener() {
+               public void onClick(View var1) {
+                  if (!MainActivity.this.drawerBusyPond.get()) {
+                     MainActivity.this.drawerOpenPond = !MainActivity.this.drawerOpenPond;
+                     MainActivity.this.tvDrawerArrowPond
+                        .animate()
+                        .rotation(MainActivity.this.drawerOpenPond ? 0.0F : -90.0F)
+                        .setDuration(MainActivity.this.drawerOpenPond ? 260L : 200L)
+                        .start();
+                     MainActivity.this.animateDrawer((ViewGroup)MainActivity.this.drawerContentPond, MainActivity.this.drawerOpenPond, MainActivity.this.drawerBusyPond);
+                  }
+               }
+            }
+         );
+      // v1.4.6 「赚闲鱼币提现」抽屉展开/收起（与鱼塘同一套动画）
+      this.drawerHeadCoin
+         .setOnClickListener(
+            new OnClickListener() {
+               public void onClick(View var1) {
+                  if (!MainActivity.this.drawerBusyCoin.get()) {
+                     MainActivity.this.drawerOpenCoin = !MainActivity.this.drawerOpenCoin;
+                     MainActivity.this.tvDrawerArrowCoin
+                        .animate()
+                        .rotation(MainActivity.this.drawerOpenCoin ? 0.0F : -90.0F)
+                        .setDuration(MainActivity.this.drawerOpenCoin ? 260L : 200L)
+                        .start();
+                     MainActivity.this.animateDrawer((ViewGroup)MainActivity.this.drawerContentCoin, MainActivity.this.drawerOpenCoin, MainActivity.this.drawerBusyCoin);
                   }
                }
             }
@@ -761,6 +1034,27 @@ public class MainActivity extends Activity {
                   MainActivity.this.startActivity(new Intent("android.intent.action.VIEW", Uri.parse("https://www.coolapk.com/u/2206962")));
                } catch (Throwable var4) {
                   Toast.makeText(MainActivity.this, "无可用浏览器", 0).show();
+               }
+            }
+         }
+      });
+      // 加入我们🐧：三级回退——1) mqqapi 直拉 QQ 群资料卡（已装 QQ 时不经浏览器）
+      // 2) qm.qq.com 链接系统分发（QQ 注册了 https 接管时接住）3) 都不行提示无浏览器
+      // 注：Android 11+ 包可见性需 manifest <queries> 声明 com.tencent.mobileqq（已加）
+      this.rowQQGroup.setOnClickListener(new OnClickListener() {
+         public void onClick(View var1) {
+            // 群资料卡：uin=群号，直接拉起 QQ 的群卡片页（可申请加群）
+            Intent var2 = new Intent("android.intent.action.VIEW",
+               Uri.parse("mqqapi://card/show_pslcard?src_type=internal&version=1&uin=250616876&card_type=group&source=qrcode"));
+            var2.setPackage("com.tencent.mobileqq");
+
+            try {
+               MainActivity.this.startActivity(var2);
+            } catch (Throwable var5) {
+               try {
+                  MainActivity.this.startActivity(new Intent("android.intent.action.VIEW", Uri.parse("https://qm.qq.com/q/UZNnW17Nqs")));
+               } catch (Throwable var4) {
+                  Toast.makeText(MainActivity.this, "未安装 QQ 且无可用浏览器", 0).show();
                }
             }
          }
@@ -1556,6 +1850,34 @@ public class MainActivity extends Activity {
       this.showReportCard("\ud83d\udc1f 鱼塘任务报告", var1, "稍后重新点击「鱼塘任务」查看。");
    }
 
+   private void showPondFeedReport(String var1) {
+      this.showReportCard("\ud83c\udf5a 自动投喂报告", var1, "稍后重新点击「自动投喂」查看。");
+   }
+
+   private void showCoinReport(String var1) {
+      this.showReportCard("\ud83e\ude99 游戏币任务报告", var1, "稍后重新点击「赚游戏币任务」查看。");
+   }
+
+   private void showCoinExchReport(String var1) {
+      this.showReportCard("\ud83e\udde7 自动兑换报告", var1, "稍后重新点击「自动兑换」查看。");
+   }
+
+   /* ---------- v1.4.1 自动投喂开关 ---------- */
+
+   /** 开关状态安装；投喂量固定语义：进行到饲料余额耗尽，无次数自定义 */
+   private void installPondFeed(JSONObject var1) {
+      this.swPondFeed.setOnSilent(var1.optBoolean("pondFeed", false));
+      this.swPondFeed.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+         @Override
+         public void onToggle(boolean var1x) {
+            MainActivity.this.put("pondFeed", var1x);
+            Toast.makeText(MainActivity.this, var1x
+                    ? "\ud83c\udf5a 自动投喂已开启：每天打开闲鱼自动投喂至饲料耗尽"
+                    : "\ud83c\udf5a 自动投喂已关闭", 0).show();
+         }
+      });
+   }
+
    private static String summarizeOliver(String var0) {
       if (var0 == null) {
          return "\ud83c\udfc5 没拿到会员任务结果：先打开闲鱼再来点";
@@ -1662,6 +1984,62 @@ public class MainActivity extends Activity {
             return "\ud83c\udfae 已执行，详情见日志" + var1;
          }
       }
+   }
+
+   /** 圈数挑战手动触发结果轮询：按报告内 @13位runId 过滤，只认晚于点击时刻的新报告 */
+   private static String pollCycleReport(long var0, int var2) {
+      for (int var3 = 0; var3 < var2; var3++) {
+         sleepQuiet(1500L);
+         String var4 = socketCmd("CYCLE_REPORT");
+         if (var4 == null) {
+            return null;
+         }
+
+         if (var4.contains("圈数挑战报告")) {
+            long var5 = parseCycleRunId(var4);
+            if (var5 <= 0L || var5 >= var0) {
+               return var4;
+            }
+         }
+      }
+
+      return null;
+   }
+
+   private static long parseCycleRunId(String var0) {
+      try {
+         Matcher var1 = Pattern.compile("@(\\d{13})").matcher(var0);
+         return !var1.find() ? 0L : Long.parseLong(var1.group(1));
+      } catch (Throwable var2) {
+         return 0L;
+      }
+   }
+
+   private static String summarizeCycle(String var0) {
+      if (var0 == null) {
+         return "\ud83c\udfaf 没拿到结果：先打开闲鱼再来点";
+      } else if (var0.contains("开关已关闭")) {
+         return "\ud83c\udfaf 圈数挑战开关未开，先打开开关";
+      }
+
+      String var1 = "";
+      Matcher var2 = Pattern.compile("领取 第(\\d+)圈 (\\S+)").matcher(var0);
+      while (var2.find()) {
+         var1 = var1 + " 第" + var2.group(1) + "圈" + var2.group(2);
+      }
+      if (var1.length() > 0) {
+         return "\ud83c\udfaf 已领取：" + var1.trim();
+      }
+      if (var0.contains("tierList/recordId 缺失") || var0.contains("info 无 data")) {
+         return "\ud83c\udfaf 圈数挑战暂未开启或数据异常";
+      }
+      if (var0.contains("info 不可用")) {
+         return "\ud83c\udfaf 接口暂不可用，隔一分钟再点";
+      }
+      if (var0.contains("今日已领") || var0.contains("已领（本地档）")) {
+         return "\ud83c\udfaf 可领档位今日已领过，无新增";
+      }
+      return "\ud83c\udfaf 已执行：当前无可领档位";
    }
 
    private boolean kickEngine(String var1) {
@@ -2070,6 +2448,7 @@ public class MainActivity extends Activity {
             var3 += this.bagCommitOne(var4, "bagRocketNum", this.etBagRocket, "火箭骰", var2);
             var3 += this.bagCommitOne(var4, "bagDoubleNum", this.etBagDouble, "双倍骰", var2);
             var3 += this.bagCommitOne(var4, "bagGgkNum", this.etBagGgk, "刮刮卡", var2);
+            var3 += this.bagCommitOne(var4, "bagDzpNum", this.etBagDzp, "大转盘", var2);
             if (var3 > 0) {
                this.persistSilent(var4);
             }
