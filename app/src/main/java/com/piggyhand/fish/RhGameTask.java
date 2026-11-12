@@ -29,6 +29,45 @@ public final class RhGameTask {
    private RhGameTask() {
    }
 
+   /**
+    * 清单数组容错取法（P0-2）。
+    *
+    * 依据：2026-11-12 用户日志里 3 份出现「清单结构异常: No value for games」——
+    * 响应 ret SUCCESS 但 data 下没有 games 这个键。旧实现 getJSONArray 直接抛，
+    * 整轮游戏任务被判失败、连领奖都不试。
+    *
+    * 策略：先按名字取 games；取不到就按形状找 —— data 下第一个「元素是对象且带 task 子对象」
+    * 的数组当清单（结构与 games 同构），命中的键名回写进 log 供后续兼容表固化。
+    * 复杂度 O(data 键数)，data 一般 20 个键以内。
+    */
+   static JSONArray gamesArray(JSONObject var0, RhReport varLog) {
+      JSONObject var1 = var0 == null ? null : var0.optJSONObject("data");
+      if (var1 == null) {
+         return null;
+      }
+
+      JSONArray var2 = var1.optJSONArray("games");
+      if (var2 != null) {
+         return var2;
+      }
+
+      java.util.Iterator<String> var3 = var1.keys();
+
+      while (var3.hasNext()) {
+         String var4 = var3.next();
+         JSONArray var5 = var1.optJSONArray(var4);
+         if (var5 != null && var5.length() > 0 && var5.optJSONObject(0) != null && var5.optJSONObject(0).optJSONObject("task") != null) {
+            if (varLog != null) {
+               varLog.append("    清单键名=").append(var4).append("（非 games，按形状兜底命中）\n");
+            }
+
+            return var5;
+         }
+      }
+
+      return null;
+   }
+
    public static void autoRunDaily(final Context var0) {
       try {
          String var1 = null;
@@ -101,11 +140,9 @@ public final class RhGameTask {
       String var9 = RhPondTask.callAndWait(var0, "mtop.taobao.idle.mini.game.task.center.query", "1.0", "{}", "query", 8000L);
       JSONObject var10 = parse(var9);
       if (var10 != null && hasSuccess(var10)) {
-         JSONArray var11;
-         try {
-            var11 = var10.getJSONObject("data").getJSONArray("games");
-         } catch (Throwable var31) {
-            var3.append("[1] 清单结构异常: ").append(var31).append('\n');
+         JSONArray var11 = gamesArray(var10, var3);
+         if (var11 == null) {
+            var3.append("[1] 清单为空：data 下既无 games 也无同构数组\n");
             finish(var0, var3, var1);
             return var3.toString();
          }
@@ -315,7 +352,10 @@ public final class RhGameTask {
             int var41 = -1;
 
             try {
-               JSONArray var42 = var39.getJSONObject("data").getJSONArray("games");
+               JSONArray var42 = gamesArray(var39, null);
+               if (var42 == null) {
+                  throw new IllegalArgumentException("data.games 缺失且无同构数组");
+               }
                int var43 = 0;
 
                for (int var44 = 0; var44 < var42.length(); var44++) {
@@ -523,12 +563,12 @@ public final class RhGameTask {
 
    private static String briefRet(JSONObject var0) {
       if (var0 == null) {
-         return "无响应";
+         return Diag.tag("无响应");
       } else {
          try {
-            return var0.getJSONArray("ret").getString(0);
+            return Diag.tag(var0.getJSONArray("ret").getString(0));
          } catch (Throwable var2) {
-            return "ret解析失败";
+            return Diag.tag("ret解析失败");
          }
       }
    }

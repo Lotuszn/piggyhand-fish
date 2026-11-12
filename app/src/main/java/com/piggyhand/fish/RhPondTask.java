@@ -1052,7 +1052,14 @@ public final class RhPondTask {
             String fp0 = fp(f);                       // 发之前拍指纹快照
             String rawFp0 = fp(raw);
             boolean sent = ApiDirect.send(ctx.getClassLoader(), api, version, data);
-            if (!sent) return null;
+            if (!sent) {
+                // 发送就没成功 = 通路断了，不是"无响应"。把原因做成伪响应体返回，
+                // 上层 briefRet 会显示 [NO_PATH] xxx，避免用户日志里又是一句"无响应"。
+                String d = ApiDirect.lastDiag;
+                RhFileLog.write("[pond] direct send FAIL " + api + " diag=" + d);
+                if (d == null) return null;
+                return "{\"ret\":[\"" + d.replace("\\", "/").replace("\"", "'") + "\"]}";
+            }
             long deadline = t0 + maxWaitMs;
             while (System.currentTimeMillis() < deadline) {
                 Thread.sleep(200);
@@ -1131,16 +1138,16 @@ public final class RhPondTask {
     }
 
     private static String briefRet(String body) {
-        if (body == null) return "无响应";
+        if (body == null) return Diag.tag("无响应");
         String t = body.trim();
-        if (t.length() == 0) return "空响应";
+        if (t.length() == 0) return Diag.tag("空响应");
         if (t.charAt(0) == '{' || t.charAt(0) == '[') {
             JSONObject j = parse(body);
-            if (j == null) return "响应异常";
+            if (j == null) return Diag.tag("响应异常");
             try {
-                return j.getJSONArray("ret").getString(0);
+                return Diag.tag(j.getJSONArray("ret").getString(0));
             } catch (Throwable e) {
-                return "ret解析失败";
+                return Diag.tag("ret解析失败");
             }
         }
         // v1.5.1 非 JSON：展示原文前 100 字符——网关拒绝原因（风控/签名/参数）可直接定性

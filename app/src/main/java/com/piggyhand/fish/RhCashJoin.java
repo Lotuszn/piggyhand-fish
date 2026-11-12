@@ -605,12 +605,12 @@ public final class RhCashJoin {
 
    private static String briefRet(JSONObject var0) {
       if (var0 == null) {
-         return "无响应";
+         return Diag.tag("无响应");
       } else {
          try {
-            return var0.getJSONArray("ret").getString(0);
+            return Diag.tag(var0.getJSONArray("ret").getString(0));
          } catch (Throwable var2) {
-            return "ret解析失败";
+            return Diag.tag("ret解析失败");
          }
       }
    }

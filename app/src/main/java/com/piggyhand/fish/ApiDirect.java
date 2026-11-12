@@ -28,20 +28,31 @@ public final class ApiDirect {
 
     private ApiDirect() {}
 
+    /** 最近一次 send 失败的原因。调用方只拿到 boolean 时无法归因，必须能读到这里 */
+    public static volatile String lastDiag = null;
+
     /** 尝试直调；成功返回 true（响应由全局监听/Proxy callback 落盘），失败返回 false（调用方回落借壳） */
     public static boolean send(ClassLoader hostCl, String api, String version, String jsonParams) {
         try {
-            /* 1. sender = XModuleCenter.moduleForProtocol(PApiContext.class) */
-            Class<?> xmc = Reflect.findClass("com.taobao.idlefish.xmc.XModuleCenter", hostCl);
-            Class<?> papi = Reflect.findClass("com.taobao.idlefish.protocol.net.PApiContext", hostCl);
-            Object sender = Reflect.callStaticMethod(xmc, "moduleForProtocol", papi);
-            if (sender == null) {
-                log("[direct] moduleForProtocol -> null");
+            /* 1. sender = 协议中心.moduleForProtocol(PApiContext.class)
+             *    候选表 + 形状校验在 Symbols（COMPAT_RULES 规则 10）：类名漂移时自动换候选，
+             *    返回对象必须能 send(2 参) 才认，防止撞上同名异义方法。 */
+            Class<?> papi = Symbols.papiClass(hostCl);
+            Symbols.Hit hit = Symbols.protocolCenter(hostCl, papi);
+            if (!hit.ok()) {
+                lastDiag = Diag.NO_PATH + ": " + hit.diag;
+                log("[direct] NO_PATH " + hit.diag);
                 return false;
             }
+            Object sender = hit.obj;
 
             /* 2. req = new ApiProtocol().apiNameAndVersion(api, version) */
-            Class<?> apiCls = Reflect.findClass("com.taobao.idlefish.protocol.net.api.ApiProtocol", hostCl);
+            Class<?> apiCls = Symbols.apiProtocolClass(hostCl);
+            if (apiCls == null) {
+                lastDiag = Diag.NO_PATH + ": ApiProtocol not found";
+                log("[direct] NO_PATH ApiProtocol not found");
+                return false;
+            }
             Object apiObj = Reflect.newInstance(apiCls);
             Object req = null;
             for (Method m : apiCls.getMethods()) {
@@ -82,6 +93,7 @@ public final class ApiDirect {
                 if ("send".equals(m.getName()) && m.getParameterTypes().length == 2) {
                     // 兼容版自检：先标记再发送——setApiName 在 send 内部同步触发，
                     // 若 send 之后才标记，清除逻辑永远追不上导致 WARN 恒误报（一加用户日志实证）
+                    lastDiag = null;
                     FishMtopHook.noteDirectSent(api);
                     Object cb = buildProxyCallback(hostCl, m.getParameterTypes()[1], api);
                     m.invoke(sender, req, cb);

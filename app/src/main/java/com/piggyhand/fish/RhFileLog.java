@@ -56,8 +56,12 @@ public final class RhFileLog {
                 }
                 if (fos == null) fos = new java.io.FileOutputStream(f, true);
                 if (firstToday) {                   // 当天首行：环境头（适配排查第一现场）
-                    // pkgver = 当前进程宿主包版本（闲鱼进程=闲鱼版本 / App 进程=小猪手版本）
-                    String head = "# xiaozhushou=" + BuildInfo.VERSION
+                    // 三个版本字段各管一件事，别混：
+                    //   xiaozhushou = 模块自身版本（构建期注入，两端一致）
+                    //   fish        = 闲鱼 versionName(versionCode)，跨版本排查的第一索引（走 PMS，不依赖 root）
+                    //   pkgver      = 当前进程宿主包版本（闲鱼进程=闲鱼版本 / App 进程=小猪手版本）
+                    String head = "# xiaozhushou=" + BuildInfo.VERSION + "(" + BuildInfo.CODE + ")"
+                            + " fish=" + FishVer.label(ctx)
                             + " pkgver=" + pkgVersion(ctx)
                             + " model=" + Build.MODEL
                             + " brand=" + Build.BRAND

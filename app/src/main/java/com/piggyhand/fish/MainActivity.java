@@ -1366,48 +1366,96 @@ public class MainActivity extends Activity {
       }
    }
 
+   /**
+    * 导出运行日志到内部存储根目录。
+    *
+    * 相比旧版的改动：
+    *  1. 闲鱼版本走 PackageManager（manifest 已声明 <queries>），不再 su + dumpsys + grep。
+    *     su 未授权/超时/输出被截时旧实现一律写 "?"，而这恰恰是导出日志最该有用的场景。
+    *  2. 头部逐字段独立成行，带 versionCode，机器可读也人可读：
+    *     # 小猪手=1.5.4(48) / # 闲鱼=7.29.10(529)
+    *  3. 正文合并今天/昨天/前天三份（RhFileLog 本来就保留 3 天），一个文件覆盖 3 天现场。
+    *  4. 末尾附 rh_caps.json 能力矩阵（符号命中/进程归属/engine_ok），省掉再来一轮问版本。
+    *  5. 没有运行日志也照样出文件（只带环境头）；su 全挂则退回 App 私有外部目录，
+    *     保证"闲鱼版本 + 设备"这两条信息一定能落到磁盘。
+    */
    private void exportRunLog() {
       new Thread(
             new Runnable() {
                @Override
                public void run() {
-                  SimpleDateFormat var1 = new SimpleDateFormat("yyyy.MM.dd", Locale.US);
-                  String var2 = var1.format(new Date());
-                  String var3 = ConfigManager.fishExternal("files") + "/zhushou_run_" + var2 + ".log";
-                  String var4 = ConfigManager.storageRoot() + "/xiaozhushou" + var2 + ".log";
-                  String var5 = MainActivity.suExec("ls -la '" + var3 + "' 2>/dev/null");
-                  final String var6;
-                  if (var5 != null && !var5.trim().isEmpty()) {
-                     String var7 = MainActivity.this.queryFishVersion();
-                     String var8 = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date());
-                     String var9 = "# 导出时间="
-                        + var8
-                        + " 小猪手="
-                        + BuildInfo.VERSION
-                        + " 闲鱼="
-                        + var7
-                        + " 安卓="
-                        + VERSION.RELEASE
-                        + "("
-                        + VERSION.SDK_INT
-                        + ") 设备="
-                        + Build.BRAND
-                        + " "
-                        + Build.MODEL;
-                     var9 = var9.replace("'", "").replace("`", "").replace("$", "");
-                     String var10 = MainActivity.suExec(
-                        "{ printf '%s\\n' '" + var9 + "'; cat '" + var3 + "'; } > '" + var4 + "' 2>&1; chmod 644 '" + var4 + "' 2>/dev/null"
-                     );
-                     boolean var11 = var10 != null && !var10.contains("No such") && !var10.contains("denied") && !var10.contains("Permission");
-                     var6 = var11 ? "已导出到 sd 卡根目录：xiaozhushou" + var2 + ".log" : "导出失败：" + var10;
+                  SimpleDateFormat dayFmt = new SimpleDateFormat("yyyy.MM.dd", Locale.US);
+                  SimpleDateFormat tsFmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
+                  long now = System.currentTimeMillis();
+                  String today = dayFmt.format(new Date(now));
+                  String fish = FishVer.label(MainActivity.this);
+                  // 文件名不用括号：adb / 终端 / 部分文件管理器会把括号当 shell 元字符，_ 更省事
+                  String outName = "xiaozhushou" + today + "_" + safeName(FishVer.name(MainActivity.this))
+                     + "_" + FishVer.code(MainActivity.this) + ".log";
+                  String outPath = ConfigManager.storageRoot() + "/" + outName;
+                  String fishFiles = ConfigManager.fishExternal("files");
+                  String[] src = new String[]{
+                     fishFiles + "/zhushou_run_" + dayFmt.format(new Date(now)) + ".log",
+                     fishFiles + "/zhushou_run_" + dayFmt.format(new Date(now - 86400000L)) + ".log",
+                     fishFiles + "/zhushou_run_" + dayFmt.format(new Date(now - 172800000L)) + ".log"
+                  };
+                  String fishCache = ConfigManager.fishExternal("cache");
+                  String caps = fishCache + "/rh_caps.json";
+
+                  StringBuilder h = new StringBuilder();
+                  h.append("# 导出时间=").append(tsFmt.format(new Date(now))).append('\n');
+                  h.append("# 小猪手=").append(BuildInfo.VERSION).append('(').append(BuildInfo.CODE).append(")\n");
+                  h.append("# 闲鱼=").append(fish).append('\n');
+                  h.append("# 安卓=").append(VERSION.RELEASE).append('(').append(VERSION.SDK_INT)
+                     .append(") 设备=").append(Build.BRAND).append(' ').append(Build.MODEL).append('\n');
+                  h.append("# 导出端包名=").append(MainActivity.this.getPackageName()).append('\n');
+
+                  // 一条 sh 里完成：写头 -> 拼 3 天日志 -> 追加 caps -> 追加网关拒绝原文档 -> 落盘 -> 回传统计
+                  // 用 n/size 自报家门，不再靠 grep 输出里的 "No such" 猜成功与否（那套判断会被日志正文误伤）
+                  // v1.5.5 改进 A：raw/.bad 是网关拒绝响应原文（各截 400B）——没有它 219B 拒绝页无法定性
+                  String cmd = "n=0; { printf '%s' " + shq(h.toString())
+                     + "; for f in " + shq(src[0]) + " " + shq(src[1]) + " " + shq(src[2])
+                     + "; do if [ -f \"$f\" ]; then n=$((n+1)); printf '\\n===== %s =====\\n' \"$f\"; cat \"$f\"; fi; done"
+                     + "; if [ -f " + shq(caps) + " ]; then printf '\\n===== caps =====\\n'; cat " + shq(caps) + "; fi"
+                     + "; for f in " + shq(fishCache) + "/rh_resp_*.json.raw " + shq(fishCache) + "/rh_resp_*.json.bad"
+                     + "; do if [ -f \"$f\" ]; then printf '\\n===== raw %s =====\\n' \"${f##*/}\"; head -c 400 \"$f\"; printf '\\n'; fi; done"
+                     + "; } > " + shq(outPath) + " 2>&1; chmod 644 " + shq(outPath)
+                     + "; printf 'RHSTAT n=%s size=%s\\n' \"$n\" \"$(stat -c %s " + shq(outPath) + ")\"";
+
+                  String res = MainActivity.suExec(cmd, 25);
+                  int cnt = -1;
+                  long size = -1L;
+                  int at = res == null ? -1 : res.indexOf("RHSTAT");
+                  if (at >= 0) {
+                     String[] toks = res.substring(at).trim().split("\\s+");
+                     for (int i = 0; i < toks.length; i++) {
+                        try {
+                           if (toks[i].startsWith("n=")) cnt = Integer.parseInt(toks[i].substring(2));
+                           else if (toks[i].startsWith("size=")) size = Long.parseLong(toks[i].substring(5));
+                        } catch (Throwable ignored) {
+                        }
+                     }
+                  }
+
+                  final String msg;
+                  if (size > 0) {
+                     // 媒体库扫描：否则 MTP / 部分文件管理器要等重启才看得到新文件
+                     MainActivity.suExec("am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://" + outPath + " >/dev/null 2>&1", 8);
+                     msg = cnt > 0
+                        ? "已导出：" + outName + "\n" + cnt + " 天日志 · 闲鱼 " + fish
+                        : "已导出环境信息（近期无运行日志）：" + outName + "\n闲鱼 " + fish;
                   } else {
-                     var6 = "今天还没有运行日志（引擎运行后自动产生）";
+                     // su 不可用（未授权/超时/Magisk 未放行）：退到 App 私有外部目录，至少把版本信息交出来
+                     String fb = writeFallback(outName, h.toString());
+                     msg = fb != null
+                        ? "无 root，已导出环境信息到：\n" + fb + "\n闲鱼 " + fish
+                        : "导出失败：" + (res == null ? "su 无响应" : res.trim());
                   }
 
                   MainActivity.this.runOnUiThread(new Runnable() {
                      @Override
                      public void run() {
-                        Toast.makeText(MainActivity.this, var6, 1).show();
+                        Toast.makeText(MainActivity.this, msg, 1).show();
                      }
                   });
                }
@@ -1417,19 +1465,37 @@ public class MainActivity extends Activity {
          .start();
    }
 
-   private String queryFishVersion() {
-      String var1 = suExec("dumpsys package com.taobao.idlefish 2>/dev/null | grep -m1 versionName");
-      if (var1 != null) {
-         int var2 = var1.indexOf("versionName=");
-         if (var2 >= 0) {
-            String var3 = var1.substring(var2 + "versionName=".length()).trim();
-            if (var3.length() > 0) {
-               return var3;
-            }
-         }
+   /** 无 root 兜底：写 App 自己的外部目录（不需要任何权限），返回绝对路径；失败返回 null */
+   private String writeFallback(String name, String content) {
+      try {
+         File dir = getExternalFilesDir(null);
+         if (dir == null) return null;
+         if (!dir.exists() && !dir.mkdirs()) return null;
+         File f = new File(dir, name);
+         OutputStream os = new java.io.FileOutputStream(f, false);
+         os.write(content.getBytes("UTF-8"));
+         os.close();
+         return f.getAbsolutePath();
+      } catch (Throwable t) {
+         return null;
       }
+   }
 
-      return "?";
+   /** 文件名里不能出现的字符换成下划线（版本号本身是安全的，这里只防异常返回值） */
+   private static String safeName(String s) {
+      if (s == null || s.length() == 0) return "na";
+      StringBuilder b = new StringBuilder(s.length());
+      for (int i = 0; i < s.length(); i++) {
+         char c = s.charAt(i);
+         b.append(c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"'
+            || c == '<' || c == '>' || c == '|' || c == ' ' || c == '\n' ? '_' : c);
+      }
+      return b.toString();
+   }
+
+   /** 单引号包裹给 sh 用；内容里的单引号直接剔除（路径与头部都不该带它） */
+   private static String shq(String s) {
+      return "'" + (s == null ? "" : s.replace("'", "")) + "'";
    }
 
    private static String suExec(String var0) {
@@ -2818,11 +2884,20 @@ public class MainActivity extends Activity {
                                        @Override
                                        public void run() {
                                           if (var1x.text != null) {
-                                             MainActivity.this.tvReport.setText("· 读取通道: " + var1x.via + "\n\n" + var1x.text);
+                                             MainActivity.this.tvReport
+                                                .setText(
+                                                   "· 读取通道: "
+                                                      + var1x.via
+                                                      + "\n· 闲鱼 "
+                                                      + FishVer.label(MainActivity.this)
+                                                      + "\n\n"
+                                                      + var1x.text
+                                                );
                                           } else if (var1 >= 2) {
                                              MainActivity.this.tvReport
                                                 .setText(
-                                                   var1x.diag
+                                                   "闲鱼版本：" + FishVer.label(MainActivity.this) + "\n\n"
+                                                      + var1x.diag
                                                       + "\n\n解决步骤：\n1. root 授权：打开 Magisk / APatch → 超级用户 → 允许「咸鱼小猪手」，回本页点「刷新报告」\n2. MIUI 联网放行：安全中心 → 应用管理 → 咸鱼小猪手 → 联网控制 → 允许 WLAN 与数据\n3. 保持闲鱼在后台运行（报告服务随闲鱼进程启动，端口按用户自动分配）\n4. 最近一次钓鱼结果也会推送在通知栏"
                                                 );
                                           } else {

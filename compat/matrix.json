@@ -1,0 +1,62 @@
+{
+  "schema": 2,
+  "updated": "2026-11-12",
+  "note": "版本兼容矩阵。state: supported=探针必须绿且阻断发布 / degraded=探针只警告 / dropped=明确不支持。verified: device=装机跑过引擎 / static-symbol=仅离线符号扫描（只能算观察，不足以构成对用户的支持承诺）。floor 是硬下界，永远不随最新版上移。",
+  "floor": {
+    "host": "7.29.10",
+    "host_code": 530,
+    "fixed_on": "2026-11-12",
+    "policy": "承诺范围 = [floor, 最新已验证版本]。闲鱼以后发到 8.x 也不动 floor：floor 之上只增不减，floor 之下不承诺、不为它加任何分支。",
+    "module_at_floor": "1.5.4",
+    "module_code_at_floor": 48
+  },
+  "baseline": {
+    "declared": "2026-11-12",
+    "contract": "基线不是某个 APK，而是下面四条方法签名 + 五项 caps。签名变了才算破坏兼容；APK 换了不算。",
+    "frozen_signatures": [
+      "XModuleCenter.moduleForProtocol(Class)->Object",
+      "ApiProtocol.apiNameAndVersion()->String[]",
+      "ApiProtocol.paramMap()->Map",
+      "ApiCallBack.onFailed(int,String,Object)->void"
+    ],
+    "frozen_caps": [
+      "protocol_center",
+      "papi_context",
+      "api_protocol",
+      "api_callback",
+      "mtop_launcher"
+    ]
+  },
+  "supported": [
+    {
+      "host": "7.29.10",
+      "code": 530,
+      "state": "supported",
+      "verified": "device",
+      "caps": {
+        "protocol_center": "ok#0",
+        "api_protocol": "ok",
+        "api_callback": "ok",
+        "engine_ok": true
+      },
+      "note": "12 dex / 99.2MB。2026-11-12 用 1.5.4 实机验证：CAPS engine_ok=true，COIN 全链路返回真实数据。"
+    }
+  ],
+  "below_floor": [
+    {
+      "host": "7.28.86.1",
+      "code": null,
+      "state": "below-floor",
+      "verified": "static-symbol",
+      "caps": {
+        "protocol_center": "ok",
+        "papi_context": "ok",
+        "api_protocol": "ok",
+        "api_callback": "ok",
+        "mtop_launcher": "ok"
+      },
+      "note": "低于 floor(7.29.10)，不在承诺范围。符号与 7.29.10 逐字一致，实机大概率可用，但不做保证、不出适配分支。该包为 Play split base（requiredSplitTypes=base__abi,base__density），无法单包安装，2026-11-12 装机尝试失败后回滚。11 dex / 92.8MB。六个关键符号在 dex 中全部存在；协议链四个方法签名与 7.29.10 逐字一致（moduleForProtocol / apiNameAndVersion / paramMap / ApiCallBack.onFailed）。差异集中在 Lanet/efs/dxv4 等第三方 SDK，不在协议栈。未装机跑引擎。"
+    }
+  ],
+  "dropped": []
+}

@@ -74,6 +74,14 @@ public final class FishTaskAuto {
    private final Set<String> processed = new HashSet<>();
    private final RhReport report = new RhReport();
    private volatile boolean abort = false;
+   /** 触发毒化记忆：key=任务类型，value=连续 PARAM 类失败次数。
+    *  实例字段而不是静态——FishTaskAuto 每次跑批新 new 一个，天然按轮清零，
+    *  避免单例态跨轮残留把本来能跑的任务永久封锁（见 optimization 2026-11-12）。 */
+   private final java.util.HashMap<String, Integer> triggerPoison = new java.util.HashMap<String, Integer>();
+   /** v1.5.5 改进 D：map.init 60s 结果缓存（静态——coinBalanceLogger 每 30s 新建实例）。
+    *  只缓存 SUCCESS 响应；GATEWAY_REJECT/失败不缓存，失败立刻可重试。 */
+   private static volatile JSONObject MAP_INIT_CACHE = null;
+   private static final long[] MAP_INIT_TS = new long[]{0L};
    private static Context appCtx;
    private static volatile boolean toastOn = true;
    private static volatile boolean polishOn = true;
@@ -283,6 +291,32 @@ public final class FishTaskAuto {
 
    private static boolean lvlSkip(String var0) {
       return lvlGet(var0) >= 2;
+   }
+
+   /* ---------- 496 场景人民币风控锁（v1.5.4-fix，2026-11-12 日志取证） ----------
+    * 证据：单次会话 25 分钟内对 6 个任务打 44 次 getolivertaskbenefit，
+    *       73 条配对回包 100% 是 FAIL_BIZ_IDL_COIN_TASK_RMB_CHECK_ERROR::服务器繁忙请稍后再试~。
+    * 该请求的【线上形态】已经和 App 手动领完全一致——模块传字符串 "106538"，
+    *       经闲鱼协议栈 paramMap 序列化后落地为 int 106538，asac 也由协议栈自动补齐
+    *       （日志 [mtop-req] 里两条路径的参数逐字相同）。所以这不是参数问题，
+    *       是服务端「真实广告曝光 / 真实浏览行为」凭证闸：没有凭证，重试多少次都是同一码。
+    * 危害：高频重打会把账号钉进当日风控窗口，导致 App 内手动领也一起失败（用户实测现象）。
+    * 处理：当日一次判定即上锁，主循环与收尾一律不再打该 deliveryId，把名额留给手动。
+    * 存储：复用 rh_task_lvl.json（跨进程持久、跨天由 lvlEnsure 自动清空）。 */
+   private static final String RMB_LOCK_PREFIX = "rmb:";
+
+   private static boolean rmbLocked(String var0) {
+      return var0 != null && var0.length() != 0 && lvlMap.containsKey(RMB_LOCK_PREFIX + var0);
+   }
+
+   private void rmbLock(String var0) {
+      if (var0 == null || var0.length() == 0) return;
+      String var1 = RMB_LOCK_PREFIX + var0;
+      if (!lvlMap.containsKey(var1)) {
+         lvlMap.put(var1, 1);
+         lvlSave();
+         log("[rmb-lock] " + var0 + " 上锁（人民币风控，需真实行为）");
+      }
    }
 
    private boolean lvlCountedThisRun(String var1) {
@@ -696,6 +730,19 @@ public final class FishTaskAuto {
          new Thread(new Runnable() {
             @Override
             public void run() {
+               // v1.5.5 P0-3 就绪门：先等引擎通道就绪（报告服务 bind 成功 ≈ hook 链尾部完成），
+               // 就绪即走（通常远早于 45s）；45s 兜底照旧开跑，不因信号缺失卡死。
+               // (2) 号日志「探测 timeout ×10」里有一部分是引擎未就绪时的白打探针。
+               long varWait0 = System.currentTimeMillis();
+
+               while (!FishMtopHook.ENGINE_LISTENING && System.currentTimeMillis() - varWait0 < var12) {
+                  try {
+                     Thread.sleep(500L);
+                  } catch (InterruptedException varW) {
+                     return;
+                  }
+               }
+
                long var1 = var12;
                int var3 = 0;
                long var4 = var16;
@@ -903,10 +950,13 @@ public final class FishTaskAuto {
                            && !"VISIT".equals(var31)
                            && !"SYSTEM_SWITCH".equals(var31)) {
                         if ("ACCEPTED".equals(var30) && "idleCoinFeesAnchor".equals(var31)) {
-                           var20 = new String[]{var27, var34 == null ? "496" : var34};
+                           // 带上列表里同一行的 fromToken/groupId（P0-1）：浏览上报属于 496 场景，
+                           // 旧代码只发 sceneId+implId+deliveryId，7 份日志里 28 次全 PARAM_ILLEGAL。
+                           var20 = new String[]{var27, var34 == null ? "496" : var34, str(var26, "fromToken"), str(var26, "groupId")};
                         }
                      } else {
-                        var56.add(new String[]{var27, var32, str(var26, "fromToken"), str(var26, "groupId")});
+                        // 第 5 列带上 materialDTO.actionType：触发毒化按任务类型聚合（按标题聚合永远只 1 次）
+                        var56.add(new String[]{var27, var32, str(var26, "fromToken"), str(var26, "groupId"), var31});
                      }
                   } else {
                      var55.add(new String[]{var27, var32});
@@ -990,27 +1040,22 @@ public final class FishTaskAuto {
                break;
             }
 
-            JSONObject var72 = new JSONObject();
+            // 字段闸：缺 fromToken/groupId 的触发请求云端必回 PARAM_ILLEGAL，直接不发（P0-1）
+            JSONObject var72 = this.triggerBody("496", var70[0], var70[2], var70[3], null);
+            String var71k = "触发|" + (var70.length > 4 && var70[4] != null ? var70[4] : var70[1]);
+            if (var72 == null) {
+               this.report.append("[触发] ").append(var70[1]).append(" 跳过（列表未下发 fromToken/groupId，发也必回 PARAM_ILLEGAL）\n");
+               continue;
+            }
 
-            try {
-               var72.put("sceneId", 496);
-               var72.put("deliveryId", var70[0]);
-               if (var70[2] != null && var70[2].length() > 0) {
-                  var72.put("fromToken", var70[2]);
-               }
-
-               if (var70[3] != null && var70[3].length() > 0) {
-                  try {
-                     var72.put("groupId", Long.parseLong(var70[3]));
-                  } catch (Throwable var42) {
-                     var72.put("groupId", var70[3]);
-                  }
-               }
-            } catch (Throwable var43) {
+            if (this.triggerBlocked(var71k)) {
+               this.report.append("[触发] ").append(var70[1]).append(" 跳过（同类 ").append(var70.length > 4 ? var70[4] : "?").append(" 本轮已连败 2 次，停发待下一轮）\n");
+               continue;
             }
 
             JSONObject var74 = this.callApi("mtop.taobao.idle.task.uploadolivertasktrigger", "1.0", var72.toString(), "触发任务 " + var70[1]);
             String var76 = firstRet(var74);
+            this.triggerNote(var71k, var76);
             if (var74 != null && var76 != null) {
                if (!var76.contains("SUCCESS")) {
                   this.report.append("[触发] ").append(var70[1]).append(" -> ").append(var76).append("（云控判定需真实行为，协议跳过）\n");
@@ -1088,8 +1133,10 @@ public final class FishTaskAuto {
             sleep(1200L);
          }
 
-         if (var9 && var20 != null && !this.abort) {
-            this.browseForTask(var20[0], var20[1], var21, var22);
+         if (var9 && var20 != null && !this.abort && !browseDeadToday()) {
+            this.browseForTask(var20, var21, var22);
+         } else if (var20 != null && browseDeadToday()) {
+            this.report.append("[浏览] 跳过（当日已判需真实行为，不再重试）\n");
          }
 
          if (!this.abort) {
@@ -1142,29 +1189,30 @@ public final class FishTaskAuto {
                   JSONObject var101 = (JSONObject) var101o;
                   if (!"AWARD".equals(str(var101, "idleTaskStatus"))) continue;
                   String var102 = str(var101, "deliveryId");
+                  // 风控锁不再进收尾：既不打 trigger 也不打 benefit（11-12 日志里收尾是第二次刷屏源）
+                  if (rmbLocked(var102)) {
+                     this.report.append("[收尾] ").append(var102).append(" 跳过（人民币风控锁）\n");
+                     continue;
+                  }
                   JSONObject var103 = var101.optJSONObject("materialDTO");
                   String var104 = var103 == null ? "?" : optStr(var103, "title");
-                  JSONObject var105 = new JSONObject();
-                  try {
-                     var105.put("deliveryId", var102);
-                     var105.put("sceneId", 496);
-                     String var106 = str(var101, "fromToken");
-                     if (var106 != null && var106.length() > 0) {
-                        var105.put("fromToken", var106);
-                     }
-                     String var107 = str(var101, "groupId");
-                     if (var107 != null && var107.length() > 0) {
-                        try {
-                           var105.put("groupId", Long.parseLong(var107));
-                        } catch (Throwable var107e) {
-                           var105.put("groupId", var107);
-                        }
-                     }
-                  } catch (Throwable ignored) {
+                  // 字段闸（P0-1）：收尾阶段最容易被列表缺字段带到 PARAM_ILLEGAL，缺就不发。
+                  // 注意不 continue —— 触发发不出去也要走 claimOne，AWARD 状态直接领奖仍可能成。
+                  JSONObject var105 = this.triggerBody("496", var102, str(var101, "fromToken"), str(var101, "groupId"), null);
+                  String var105k = "收尾|" + (var103 != null ? optStr(var103, "actionType") : var104);
+                  if (var105 == null) {
+                     this.report.append("[收尾] ").append(var104).append(" 跳过触发（缺 fromToken/groupId），直接尝试领奖\n");
+                  } else if (this.triggerBlocked(var105k)) {
+                     this.report.append("[收尾] ").append(var104).append(" 跳过触发（同类本轮已连败 2 次），直接尝试领奖\n");
+                  } else {
+                     JSONObject var108 = this.callApi("mtop.taobao.idle.task.uploadolivertasktrigger", "1.0", var105.toString(), "收尾触发 " + var104);
+                     String var109 = firstRet(var108);
+                     this.triggerNote(var105k, var109);
+                     this.report.append("[收尾] ").append(var104).append(" trigger=").append(var109).append('\n');
                   }
-                  JSONObject var108 = this.callApi("mtop.taobao.idle.task.uploadolivertasktrigger", "1.0", var105.toString(), "收尾触发 " + var104);
-                  String var109 = firstRet(var108);
-                  this.report.append("[收尾] ").append(var104).append(" trigger=").append(var109).append('\n');
+
+                  sleep(1500L);
+                  this.claimOne(var102, var104, var21, var22);
                   sleep(1500L);
                   this.claimOne(var102, var104, var21, var22);
                   this.processed.add(var102);
@@ -1309,36 +1357,37 @@ public final class FishTaskAuto {
    }
 
    private void runSearchTask(String var1, String var2, String var3, String var4, String var5, List<String> var6, List<String> var7) {
-      JSONObject var8 = new JSONObject();
+      // 字段闸（P0-1）：搜索任务的 fromToken/groupId 来自列表的 fromToken/groupId 两列，
+      // 缺任一项时云端固定回 PARAM_ILLEGAL，连搜索行为一起省掉。
+      JSONObject var16e = new JSONObject();
 
       try {
-         var8.put("sceneId", 496);
-         var8.put("deliveryId", var1);
          Uri var9 = Uri.parse(var3);
 
          for (String var13 : new String[]{"implId", "channelSrp", "adPositionCode", "adOrderPositionCode", "refpid", "k_usetanx"}) {
             String var14 = var9.getQueryParameter(var13);
             if (var14 != null) {
-               var8.put(var13, var14);
-            }
-         }
-
-         if (var4 != null && var4.length() > 0) {
-            var8.put("fromToken", var4);
-         }
-
-         if (var5 != null && var5.length() > 0) {
-            try {
-               var8.put("groupId", Long.parseLong(var5));
-            } catch (Throwable var15) {
-               var8.put("groupId", var5);
+               var16e.put(var13, var14);
             }
          }
       } catch (Throwable var16) {
          this.report.append("[搜一搜] ").append(var2).append(" 参数组装失败: ").append(var16).append('\n');
       }
 
-      this.callApi("mtop.taobao.idle.task.uploadolivertasktrigger", "1.0", var8.toString(), "搜一搜触发 " + var2);
+      JSONObject var8b = this.triggerBody("496", var1, var4, var5, var16e);
+      String var8k = "搜一搜|" + var2;
+      if (var8b == null) {
+         this.report.append("[搜一搜] ").append(var2).append(" 跳过（列表未下发 fromToken/groupId）\n");
+         return;
+      }
+
+      if (this.triggerBlocked(var8k)) {
+         this.report.append("[搜一搜] ").append(var2).append(" 跳过（同类本轮已连败 2 次）\n");
+         return;
+      }
+
+      JSONObject var8r = this.callApi("mtop.taobao.idle.task.uploadolivertasktrigger", "1.0", var8b.toString(), "搜一搜触发 " + var2);
+      this.triggerNote(var8k, firstRet(var8r));
       this.callApi("mtop.taobao.idlemtopsearch.search", "1.0", "{\"q\":\"闲鱼\",\"pageNumber\":1,\"pageSize\":10}", "搜一搜行为 " + var2);
       JSONObject var17 = this.callApi("mtop.taobao.idle.task.queryolivertasklist", "2.0", "{\"sceneId\":496}", "搜一搜复核");
       String var18 = null;
@@ -1556,16 +1605,43 @@ public final class FishTaskAuto {
             } catch (Throwable var2) {
             }
          }
-      }, 20L, 30L, TimeUnit.SECONDS);
-      log("[coinlog] balance logger armed (every 30s, first in 20s)");
+      }, 20L, 90L, TimeUnit.SECONDS);
+      // v1.5.5 改进 B：周期 30s → 90s。map.init 是三台用户日志里被网关秒拒最多的接口
+      // （(3) 号 29 次、(2) 号 13 次），30s 高频直调是主要诱因；90s + 改进 D 的 60s 复用
+      // 把真实请求压到 ~90s 一次。配合 coinBalanceSnapshot 内的连续拒绝熔断（3 次停 10 分钟）。
+      log("[coinlog] balance logger armed (every 90s, first in 20s)");
    }
 
+   /** v1.5.5 改进 B：币余额探针熔断——连续 3 次网关拒绝（GATEWAY_REJECT）后停探 10 分钟。
+    *  静态：logger 与跑批共用同一判定；SUCCESS 清零。 */
+   private static final java.util.concurrent.atomic.AtomicInteger GW_FAIL_STREAK =
+           new java.util.concurrent.atomic.AtomicInteger(0);
+   private static volatile long gwBlockedUntil = 0L;
+
    public static void coinBalanceSnapshot(Context var0) {
+      // v1.5.5 改进 B：熔断窗内直接跳过本轮探针（不打请求、不占 30s 窗口）
+      long varNow = System.currentTimeMillis();
+      if (varNow < gwBlockedUntil) {
+         return;
+      }
+
       try {
          ClassLoader var1 = var0.getClassLoader();
          String var2 = cacheDirPath(var0);
          FishTaskAuto var3 = new FishTaskAuto(var1, var2);
          JSONObject var4 = var3.callApi("mtop.taobao.idle.treasure.hunt.map.init", "1.0", "{" + RhLocationContext.jsonPair() + "\"version\":4}", "币余额");
+         // 改进 B：连续 3 次网关拒绝 → 停探 10 分钟（期间日志每 90s 静默跳过一次）
+         String varRet0 = firstRet(var4);
+         if (varRet0 != null && varRet0.contains("GATEWAY_REJECT")) {
+            int varStreak = GW_FAIL_STREAK.incrementAndGet();
+            if (varStreak >= 3) {
+               gwBlockedUntil = System.currentTimeMillis() + 600000L;
+               GW_FAIL_STREAK.set(0);
+               log("[coinlog] gateway reject x3, balance probe paused 10min");
+            }
+            return;
+         }
+         GW_FAIL_STREAK.set(0);
          JSONObject var5 = var4 == null ? null : var4.optJSONObject("data");
          if (var5 == null) {
             return;
@@ -2304,7 +2380,30 @@ public final class FishTaskAuto {
       }
    }
 
-   private void browseForTask(String var1, String var2, List<String> var3, List<String> var4) {
+   /** v1.5.5 P1-3：浏览任务「需真实行为」当日标记（静态，跨轮生效；进程重启复位，按日期自动失效）。 */
+   private static volatile String browseDeadDay = "";
+
+   private static boolean browseDeadToday() {
+      String today = new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date());
+      return today.equals(browseDeadDay);
+   }
+
+   private static void browseMarkDead() {
+      browseDeadDay = new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date());
+   }
+
+   private void browseForTask(String[] var0, List<String> var3, List<String> var4) {
+      // var0 = {deliveryId, sceneId, fromToken, groupId}——列表解析时同一行的原始字段。
+      // 浏览上报同属 496 场景，缺 fromToken/groupId 时云端固定回 PARAM_ILLEGAL（P0-1）。
+      String var1 = var0[0];
+      String var0scene = var0[1] == null ? "496" : var0[1];
+      JSONObject varBase = this.triggerBody(
+         var0scene, var0[0], var0.length > 2 ? var0[2] : null, var0.length > 3 ? var0[3] : null, null
+      );
+      if (varBase == null) {
+         this.report.append("[浏览] 跳过（列表未下发 fromToken/groupId，上报必回 PARAM_ILLEGAL）\n");
+         return;
+      }
       List var5 = this.itemPool();
       if (var5.isEmpty()) {
          this.report.append("[浏览] 商品源为空，跳过\n");
@@ -2322,13 +2421,23 @@ public final class FishTaskAuto {
                break;
             } else {
                String var13 = (String)var5.get(var8);
+               // 每步换一个商品：基础体重新组一次 + implId 走 objJson（避免手拼字段名，兼容闸 R3）
+               JSONObject varReq = this.triggerBody(
+                  var0scene,
+                  var0[0],
+                  var0.length > 2 ? var0[2] : null,
+                  var0.length > 3 ? var0[3] : null,
+                  parseObj(objJson("implId", var13))
+               );
+
                JSONObject var14 = this.callApi(
                   "mtop.taobao.idle.task.uploadolivertasktrigger",
                   "1.0",
-                  objJson("sceneId", var2, "implId", var13, "deliveryId", var1),
+                  varReq.toString(),
                   "浏览上报 " + (var8 + 1) + "/" + var5.size()
                );
                String var15 = firstRet(var14);
+               this.triggerNote("浏览|" + var1, var15);
                if (var14 == null) {
                   this.report.append("[浏览] 上报无响应，中止\n");
                   break;
@@ -2366,8 +2475,12 @@ public final class FishTaskAuto {
                   var10 = 5000L;
                } else {
                   if (var15 != null && var15.contains("ILLEGAL")) {
-                     if (++var9 >= 3) {
-                        this.report.append("[浏览] 连续 ").append(var9).append(" 次 ILLEGAL，任务需真实行为，中止\n");
+                     // v1.5.5 P1-3：3 次 → 2 次即中止并当日标记。三台日志实证该任务
+                    // （deliveryId=3141）带 token 也必拒，纯真实行为类；每次中止省一轮退避 ≈13s，
+                     // 当日后续轮次不再进浏览（省 ~45s/轮）。
+                     if (++var9 >= 2) {
+                        browseMarkDead();
+                        this.report.append("[浏览] 连续 ").append(var9).append(" 次 ILLEGAL，任务需真实行为，当日不再重试\n");
                         if (this.lvlOnRun) {
                            this.lvlBump(var1);
                         }
@@ -2376,7 +2489,7 @@ public final class FishTaskAuto {
                      }
 
                      var10 = Math.min(var10 + 4000L, 16000L);
-                     this.report.append("[浏览] step ").append(var8).append(" ILLEGAL ").append(var9).append("/3，退避 ").append(var10 / 1000L).append("s\n");
+                     this.report.append("[浏览] step ").append(var8).append(" ILLEGAL ").append(var9).append("/2，退避 ").append(var10 / 1000L).append("s\n");
                      sleep(var10);
                      continue;
                   }
@@ -2398,7 +2511,77 @@ public final class FishTaskAuto {
       }
    }
 
+   /**
+    * 496 场景 trigger 请求体组装，返回 null 表示「这条别发」。
+    *
+    * 依据：2026-11-12 七份用户日志逐条对齐请求体与响应 —— uploadolivertasktrigger 的
+    * 109 条失败里 103 条是 PARAM_ILLEGAL，失败请求恰好都是 fromToken/groupId 缺失的形状（列表
+    * 没下发时旧代码照样发）。云端对这种请求固定回 PARAM_ILLEGAL，不扣任务次数，但每发一次
+    * 就在报告里落一条红字，用户看到的是「满屏失败」而不是「这条本来就不该发」。
+    *
+    * 字段：sceneId（调用方给，496 场景传 "496"）/ deliveryId / fromToken / groupId，
+    * 后三个任一为空 → null（调用方记 SKIP，不发请求）。
+    * extra 用于 implId 一类附带字段，已存在的键不覆盖，保证核心字段优先级。
+    */
+   private JSONObject triggerBody(String var0, String var1, String var2, String var3, JSONObject var4) {
+      if (var1 == null || var1.length() == 0 || var2 == null || var2.length() == 0 || var3 == null || var3.length() == 0) {
+         return null;
+      }
+      JSONObject var5 = new JSONObject();
+      try {
+         try {
+            var5.put("sceneId", Integer.parseInt(var0));
+         } catch (Throwable var0e) {
+            var5.put("sceneId", var0);
+         }
+         var5.put("deliveryId", var1);
+         var5.put("fromToken", var2);
+         try {
+            var5.put("groupId", Long.parseLong(var3));
+         } catch (Throwable var6) {
+            var5.put("groupId", var3);
+         }
+      } catch (Throwable var7) {
+         return null;
+      }
+      if (var4 != null) {
+         java.util.Iterator<String> var8 = var4.keys();
+         while (var8.hasNext()) {
+            String var9 = var8.next();
+            try {
+               if (!var5.has(var9)) {
+                  var5.put(var9, var4.get(var9));
+               }
+            } catch (Throwable ignored) {
+            }
+         }
+      }
+      return var5;
+   }
+
+   /** 毒化闸：同一任务类型连续 2 次 PARAM 类失败后本轮不再发（字段看着齐但云端不认的新变体兜底）。 */
+   private boolean triggerBlocked(String var1) {
+      Integer var2 = this.triggerPoison.get(var1);
+      return var2 != null && var2.intValue() >= 2;
+   }
+
+   /** 记一次触发结果：SUCCESS 清零；PARAM_ILLEGAL / PARAM_INVALID 累加；其余原因不动计数。 */
+   private void triggerNote(String var1, String var2) {
+      if (var2 != null && var2.contains("SUCCESS")) {
+         this.triggerPoison.remove(var1);
+      } else if (var2 != null && var2.contains("PARAM")) {
+         Integer var3 = this.triggerPoison.get(var1);
+         this.triggerPoison.put(var1, Integer.valueOf((var3 == null ? 0 : var3.intValue()) + 1));
+      }
+   }
+
    private void claimOne(String var1, String var2, List<String> var3, List<String> var4) {
+      // 风控锁前置：当日已判过人民币风控的 deliveryId 一次都不再打（见 rmbLocked 注释）
+      if (rmbLocked(var1)) {
+         this.report.append("[领取] ").append(var2).append(" 跳过（人民币风控锁，需 App 内手动完成）\n");
+         var4.add(var2 + "(" + var1 + ")");
+         return;
+      }
       JSONObject var5 = this.callApi(
          "mtop.taobao.idle.task.getolivertaskbenefit",
          "1.0",
@@ -2446,19 +2629,74 @@ public final class FishTaskAuto {
       } else {
          var4.add(var2 + "(" + var1 + ")");
          if (var11) {
-            // SUCCESS 但未生效：明示原因，不 bump，下一轮重试（服务端幂等，无重复风险）
-            this.report.append("[领取] ").append(var2).append(" -> 未生效（needBenefit 仍 true，下轮重试）\n");
-            log("[claim] not-effective: " + var2 + " (" + var1 + ")");
+            // v1.5.5 P1-2 归因细分：SUCCESS 但未生效时按 ret / 任务状态分四类，
+            // 报告直接可判「能不能等下一轮」，不再三台设备同一句文案。
+            // 实测分布：needBenefit=true 时 status 多为 ACCEPTED/COMPLETE（批次2日志 12/22/7 次）。
+            String varSt = "";
+            try {
+               JSONObject var8d = var5.optJSONObject("data");
+               JSONObject var9d = var8d == null ? null : var8d.optJSONObject("taskDTO");
+               varSt = var9d == null ? "" : var9d.optString("idleTaskStatus", "");
+            } catch (Throwable ignored) {
+            }
+            String varWhy;
+            if (var6 != null && var6.contains("RMB_CHECK")) {
+               varWhy = "人民币风控，需 App 内手动完成";
+            } else if (var6 != null && (var6.contains("TIMES") || var6.contains("LIMIT") || var6.contains("UPPER"))) {
+               varWhy = "当日次数耗尽，今日不再重试";
+            } else if ("COMPLETE".equals(varSt)) {
+               varWhy = "任务已完成，奖励待云控发放，下轮自动复核";
+            } else if ("AWARD".equals(varSt)) {
+               varWhy = "已到可领状态，发放被云控拦截，下轮重试";
+            } else {
+               varWhy = "需真实行为或服务端延迟，下轮重试";
+            }
+            this.report.append("[领取] ").append(var2).append(" -> 未生效：").append(varWhy)
+                  .append("（status=").append(varSt.length() == 0 ? "?" : varSt).append("）\n");
+            log("[claim] not-effective: " + var2 + " (" + var1 + ") why=" + varWhy);
          } else {
-            this.report.append("[领取] ").append(var2).append(" -> ").append(var6 == null ? "无响应" : var6).append('\n');
+            if (var6 != null && var6.contains("RMB_CHECK")) {
+               // 服务端行为凭证闸：一次判定即上锁，本轮/收尾/后续跑批都不再重打
+               rmbLock(var1);
+               this.report.append("[领取] ").append(var2)
+                     .append(" -> 人民币风控拒绝（需真实广告/浏览行为），当日锁定不再重试\n");
+            } else if (var6 != null && var6.contains("GATEWAY_REJECT")) {
+               // v1.5.5 改进 C 衔接：网关拒绝不是业务失败，不锁不重试本轮，下一轮自然再来
+               this.report.append("[领取] ").append(var2).append(" -> 网关拒绝（").append(var6)
+                     .append("），下轮重试\n");
+            } else {
+               this.report.append("[领取] ").append(var2).append(" -> ").append(var6 == null ? "无响应" : var6).append('\n');
+            }
          }
       }
    }
 
    private JSONObject callApi(String var1, String var2, String var3, String var4) {
+      // v1.5.5 改进 D：map.init 结果 60s 内复用（响应 6.9KB、分钟级内容不变）。
+      // 静态缓存——coinBalanceLogger 每 30s new 一个实例，实例字段会失效。
+      // 收益：探针请求量减半以上，直调频率降下来直接降低被 WAF 拦的概率（见批次2日志分析）。
+      if (MAP_INIT_API.equals(var1)) {
+         long varN = System.currentTimeMillis();
+         long[] varT = MAP_INIT_TS;
+         JSONObject varC = MAP_INIT_CACHE;
+         if (varC != null && varN - varT[0] < 60000L) {
+            log("[tasks] " + var4 + " -> (cache 60s) " + firstRet(varC));
+            return varC;
+         }
+      }
+
       String var5 = this.respFile(var1);
+      // v1.5.5 改进 C：清掉上一次请求可能遗留的 .bad，bad 只对「本次发送之后到达的拒绝」生效
+      try {
+         String varTail = var1.substring(var1.lastIndexOf('.') + 1);
+         java.io.File varBad0 = new java.io.File(this.cacheDir, "rh_resp_" + varTail + ".json.bad");
+         if (varBad0.exists()) varBad0.delete();
+      } catch (Throwable ignored) {
+      }
+
       sleep(300L);
       String var6 = this.fileFp(var5);
+      long varSentAt = System.currentTimeMillis();
       boolean var7 = ApiDirect.send(this.cl, var1, var2, var3);
       if (!var7) {
          log("[tasks] direct send failed: " + var1);
@@ -2468,6 +2706,23 @@ public final class FishTaskAuto {
 
          while (System.currentTimeMillis() < var8 && !this.abort) {
             sleep(400L);
+            // v1.5.5 改进 C：网关拒绝的响应非 JSON 会被 hook 丢弃并落 .bad——见到它立即短路，
+            // 返回带归因的构造 ret，不再空等 30s。mtime 必须晚于发送时刻才算本次的拒绝。
+            try {
+               String varTailB = var1.substring(var1.lastIndexOf('.') + 1);
+               java.io.File varBad = new java.io.File(this.cacheDir, "rh_resp_" + varTailB + ".json.bad");
+               if (varBad.exists() && varBad.lastModified() >= varSentAt) {
+                  String varHead = varBad.length() > 0 ? this.readFile(varBad.getAbsolutePath()) : "";
+                  varBad.delete();
+                  log("[tasks] " + var4 + " -> GATEWAY_REJECT (" + varHead.length() + "B)");
+                  JSONObject varR = new JSONObject();
+                  varR.put("ret", new JSONArray().put("FAIL_GATEWAY_REJECT::网关拒绝非JSON响应: "
+                          + varHead.substring(0, Math.min(60, varHead.length()))));
+                  return varR;
+               }
+            } catch (Throwable varBadErr) {
+            }
+
             String var10 = this.fileFp(var5);
             if (var10 != null && !var10.equals(var6)) {
                String var11 = this.readFile(var5);
@@ -2476,6 +2731,11 @@ public final class FishTaskAuto {
                   JSONObject var12 = new JSONObject(var11);
                   String var13 = firstRet(var12);
                   log("[tasks] " + var4 + " -> " + var13);
+                  // 改进 D：map.init 成功响应进 60s 缓存
+                  if (MAP_INIT_API.equals(var1) && var13 != null && var13.contains("SUCCESS")) {
+                     MAP_INIT_CACHE = var12;
+                     MAP_INIT_TS[0] = System.currentTimeMillis();
+                  }
                   return var12;
                } catch (Throwable var14) {
                   log("[tasks] resp parse fail " + var1 + ": " + var14);

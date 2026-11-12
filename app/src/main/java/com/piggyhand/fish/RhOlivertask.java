@@ -625,11 +625,11 @@ public final class RhOlivertask {
     }
 
     private static String briefRet(JSONObject j) {
-        if (j == null) return "无响应";
+        if (j == null) return Diag.tag("无响应");
         try {
-            return j.getJSONArray("ret").getString(0);
+            return Diag.tag(j.getJSONArray("ret").getString(0));
         } catch (Throwable t) {
-            return "ret解析失败";
+            return Diag.tag("ret解析失败");
         }
     }
 }

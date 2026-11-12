@@ -200,7 +200,9 @@ public final class RhCoinTask {
       try {
          JSONArray tasks = channelTasks(ctx);
          if (tasks == null) {
-            rep.append("[2] 渠道清单拉取失败（3 轮重试仍 TASK_PLATFORM_ERROR，稍后点本行复扫即可）\n");
+            rep.append("[2] 渠道清单拉取失败（3 轮重试）")
+               .append(Diag.tag(chqLastErr == null ? "无响应" : chqLastErr))
+               .append(" · 稍后点本行复扫\n");
          } else {
             int nAcc = 0;
             int nAward = 0;
@@ -466,7 +468,13 @@ public final class RhCoinTask {
     * 现场都能拿到 SUCCESS。既然不是参数错，就别改参数，改成隔 2s 再打；
     * 第 3 轮退化成空 body（少带上下文，命中率反而更高）。
     */
+   /** 渠道清单最近一次失败原因：报告层据此出归因码。
+    *  以前这里写死 TASK_PLATFORM_ERROR，把「进程不对 / 无响应」也冒充成平台错误，
+    *  导致用户报来的日志无法定性（2026-11-12 实测踩坑）。 */
+   private static volatile String chqLastErr = null;
+
    private static JSONArray channelTasks(Context ctx) {
+      chqLastErr = null;
       for (int round = 0; round < 3; round++) {
          if (round > 0) sleep(2000L);
          String body = round >= 2 ? "{}" : baseBody().toString();
@@ -475,7 +483,9 @@ public final class RhCoinTask {
             JSONArray a = o.optJSONObject("data").optJSONArray("tasks");
             if (a != null) return a;
          }
-         RhFileLog.write("[coin] chq round" + round + " fail: " + briefRet(o));
+         String br = briefRet(o);
+         chqLastErr = br;
+         RhFileLog.write("[coin] chq round" + round + " fail: " + br);
       }
       return null;
    }
@@ -1037,11 +1047,11 @@ public final class RhCoinTask {
    }
 
    static String briefRet(JSONObject o) {
-      if (o == null) return "无响应";
+      if (o == null) return Diag.tag("无响应");
       try {
-         return o.getJSONArray("ret").getString(0);
+         return Diag.tag(o.getJSONArray("ret").getString(0));
       } catch (Throwable t) {
-         return "ret解析失败";
+         return Diag.tag("ret解析失败");
       }
    }
 

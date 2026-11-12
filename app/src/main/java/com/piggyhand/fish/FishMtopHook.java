@@ -29,6 +29,11 @@ import de.robv.android.xposed.XposedBridge;
  * 结果看 LSPosed 日志里的 [hijack] 行。App 空闲时几秒内会有轮询请求触发发送。
  */
 public final class FishMtopHook {
+    /** v1.5.5 P0-3：报告服务 bind 成功 ≈ hook 链尾部完成，作为引擎就绪信号。
+     *  冷启动 auto-run 的 45s 固定首探改为「就绪即走、45s 兜底」，首轮 probe 不再
+     *  撞在未就绪的通道上白打（(2) 号日志「探测」timeout ×10 的来源之一）。 */
+    public static volatile boolean ENGINE_LISTENING = false;
+
 
     private static final String TAG = "RewardHook";
     public static final String ACTION_MTOP_CALL = "com.piggyhand.fish.MTOP_CALL";
@@ -916,6 +921,7 @@ public final class FishMtopHook {
                     ss = new java.net.ServerSocket(port, 50,
                             java.net.InetAddress.getByName("127.0.0.1"));
                     log("[report-server] listening 127.0.0.1:" + port);
+                    if (!isRenderProc) ENGINE_LISTENING = true;
                     while (true) {
                         final java.net.Socket s = ss.accept();
                         // 每连接独立线程：单连接挂起不能堵死服务（串行循环曾致 CLOSE_WAIT 堆积）
@@ -930,7 +936,15 @@ public final class FishMtopHook {
                                     String req = br.readLine();
                                     log("[report-server] req=" + req);
                                     String body = "";
-                                    if (req != null && req.startsWith("WV_RESUME")) {
+                                    // 引擎命令一律拒在渲染进程：COIN/GAME/COINEX 依赖
+                                    // XModuleCenter.moduleForProtocol(PApiContext)，而协议模块只在主进程
+                                    // Application.onCreate 里注册，渲染进程调用恒返回 null。
+                                    // 不拦会让调用方拿到 OK started 后全链路 无响应/TASK_PLATFORM_ERROR，
+                                    // 误判成版本不兼容（2026-11-12 7.29.10 实测踩坑）。
+                                    if (isRenderProc && isEngineCmd(req)) {
+                                        log("[report-server] reject engine cmd in render proc: " + req);
+                                        body = "WRONG_PROC";
+                                    } else if (req != null && req.startsWith("WV_RESUME")) {
                                         // v1.5.1 渲染进程专用：全局恢复 WebView timers（pauseTimers 失衡冻结 H5/游戏页的抢救通道）
                                         body = wvResumeAll();
                                     } else if (req != null && req.startsWith("WV_DEBUG")) {
@@ -943,6 +957,15 @@ public final class FishMtopHook {
                                     } else if (req != null && req.startsWith("WV_EVAL ")) {
                                         // v1.5.1 渲染进程专用：对捕获到的每个 WebView evaluateJavascript（结果落盘 rh_wv_eval.txt）
                                         body = wvEvalAll(req.substring(8));
+                                    } else if (req != null && req.trim().startsWith("CAPS")) {
+                                        // 能力矩阵（COMPAT_RULES 规则 9/12）：只做静态符号探测，
+                                        // 不发任何网络请求——探测类请求会进风控计数，这里连只读接口都不打。
+                                        // 主进程与渲染进程都能出结果，对比两份即可判定 NO_PATH:wrong-proc。
+                                        org.json.JSONObject caps = Diag.caps(appCtx, !isRenderProc, port);
+                                        String js = caps.toString();
+                                        writeCacheFile("rh_caps.json", js);
+                                        log("[caps] " + js);
+                                        body = js;
                                     } else if (!isRenderProc && req != null && req.trim().equals("PING")) {
                                         // 身份回执（2026-10-23）：回环端口跨用户互通，仅凭"连得上"无法
                                         // 证明是本用户的引擎。回传自身 uid/userId，App 侧据此校验归属。
@@ -1654,8 +1677,11 @@ public final class FishMtopHook {
     private static boolean writeTaskResp(String api, String body) {
         if (body == null || body.isEmpty()
                 || (body.charAt(0) != '{' && body.charAt(0) != '[')) {
+            // v1.5.5 改进 A：discard 行内联原文前 80 字符——日志里即可定性限流页/会话失效页，
+            // 不再只有 len 要去设备上翻 raw 旁档
+            String head = body == null ? "" : body.substring(0, Math.min(80, body.length()));
             logLimit("[task-resp] discard non-json body for " + api
-                    + " (len=" + (body == null ? -1 : body.length()) + ")");
+                    + " (len=" + (body == null ? -1 : body.length()) + ") head=" + head.replace('\n', ' '));
             // v1.5.1 非 JSON 原文落 raw 旁档（+stamp）：2026-11-11 日志实证网关拒绝响应
             // （discard len=224）被丢弃后调用方只能看到「无响应」，拒绝原因无法定性。
             // raw 文件让 callAndWait 立即感知并把原文带回报告/日志。
@@ -1664,6 +1690,11 @@ public final class FishMtopHook {
                 int dot = last.lastIndexOf('.');
                 if (dot >= 0) last = last.substring(dot + 1);
                 writeCacheFile("rh_resp_" + last + ".json.raw", body);
+                // v1.5.5 改进 C：固定名 .bad 旁档（不带 stamp，专供 callApi 短路）。
+                // callApi 轮询见到它立即返回 GATEWAY_REJECT 归因，不再空等 30s——
+                // (2) 号日志实测 30 次 timeout×30s≈15 分钟纯等待。正常响应到达时删除。
+                writeCacheFile("rh_resp_" + last + ".json.bad",
+                        body.substring(0, Math.min(200, body.length())));
             }
             return false;
         }
@@ -1672,6 +1703,12 @@ public final class FishMtopHook {
         int dot = last.lastIndexOf('.');
         if (dot >= 0) last = last.substring(dot + 1);
         writeCacheFile("rh_resp_" + last + ".json", body);
+        // v1.5.5 改进 C：正常响应到达即清 .bad，防止旧拒绝档被下一次请求误配
+        try {
+            java.io.File bad = cacheFile("rh_resp_" + last + ".json.bad");
+            if (bad != null && bad.exists()) bad.delete();
+        } catch (Throwable ignored) {
+        }
         return true;
     }
 
@@ -1683,6 +1720,17 @@ public final class FishMtopHook {
         } catch (Throwable t) {
             return null;
         }
+    }
+
+    /** report-server 引擎类命令：依赖主进程协议栈（XModuleCenter 只在主进程注册），渲染进程一律拒绝 */
+    private static boolean isEngineCmd(String req) {
+        if (req == null) return false;
+        String r = req.trim();
+        String[] p = {"RUN", "COIN", "GAME", "POND", "OLIVER", "CASH"};
+        for (int i = 0; i < p.length; i++) {
+            if (r.startsWith(p[i])) return true;
+        }
+        return false;
     }
 
     private static String readCacheFile(String name) {
