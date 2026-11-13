@@ -91,6 +91,12 @@ public class MainActivity extends Activity {
    private static final int COLOR_TEXT_MAIN = -15263716; // #17181C
    private static final int COLOR_TEXT_SUB = -7697518; // #8A8B92
    private static final int COLOR_HAIRLINE = 337057820; // #1417181C 8% 发丝线
+   private static final int COLOR_TEXT_FADE = -4605248; // #B9BAC0
+   // 名单区：<= NOTICE_LIST_ROWS 行固定显示，超过则滚动轮播；行高按 dp 走，改一个数就能调
+   private static final int NOTICE_LIST_ROWS = 3;
+   private static final int NOTICE_ROW_H_DP = 27;
+   // 测试占位符。接远端后换成 RhResaleList.read(this)，字段结构不变
+   private static final String[] RESALE_TEST_NAMES = new String[]{"占位符A", "占位符B", "占位符C", "占位符D"};
    private ViewGroup track;
    private View pagesWrap;
    private View pill;
@@ -2443,8 +2449,112 @@ public class MainActivity extends Activity {
          var11.setText("该提示每 72 小时出现一次，点下方按钮继续使用");
          var11.setTextSize(10.0F);
          var11.setTextColor(COLOR_TEXT_SUB);
-         var11.setPadding(this.dp(24), 0, this.dp(24), this.dp(16));
+         var11.setPadding(this.dp(24), 0, this.dp(24), this.dp(10));
          var2.addView(var11);
+
+         // ==== 名单区块：3 行以内定高固定显示，超过 3 行滚动轮播 ====
+         // 名单为空时整块不占位，弹窗高度自动回到原来的样子
+         final String[] var20x = RESALE_TEST_NAMES;
+         if (var20x.length > 0) {
+            final int var21x = this.dp(NOTICE_ROW_H_DP);
+            int var22x = Math.min(NOTICE_LIST_ROWS, var20x.length);
+
+            // 区块标题：已确认 N 人；超过可见行数时右侧标“自动滚动”
+            LinearLayout var23x = new LinearLayout(this);
+            var23x.setOrientation(0);
+            var23x.setGravity(16);
+            var23x.setPadding(this.dp(24), 0, this.dp(24), this.dp(6));
+            TextView var24x = new TextView(this);
+            var24x.setText("已确认倒卖者 " + var20x.length + " 人");
+            var24x.setTextSize(10.5F);
+            var24x.setTypeface(Typeface.DEFAULT_BOLD);
+            var24x.setTextColor(COLOR_TEXT_SUB);
+            var23x.addView(var24x, new android.widget.LinearLayout.LayoutParams(0, -2, 1.0F));
+            if (var20x.length > NOTICE_LIST_ROWS) {
+               TextView var25x = new TextView(this);
+               var25x.setText("自动滚动");
+               var25x.setTextSize(9.5F);
+               var25x.setTextColor(COLOR_TEXT_FADE);
+               var23x.addView(var25x);
+            }
+            var2.addView(var23x);
+
+            // 名单本体：序号灰 + 名字加粗标红，超长省略号截断
+            final LinearLayout var26x = new LinearLayout(this);
+            var26x.setOrientation(1);
+            for (int var27x = 0; var27x < var20x.length; var27x++) {
+               LinearLayout var28x = new LinearLayout(this);
+               var28x.setOrientation(0);
+               var28x.setGravity(16);
+               var28x.setPadding(this.dp(24), 0, this.dp(24), 0);
+               TextView var29x = new TextView(this);
+               var29x.setText(String.format(Locale.US, "%02d", var27x + 1));
+               var29x.setTextSize(10.0F);
+               var29x.setTextColor(COLOR_TEXT_FADE);
+               var29x.setTypeface(Typeface.MONOSPACE);
+               var28x.addView(var29x, new android.widget.LinearLayout.LayoutParams(this.dp(26), -2));
+               TextView var30x = new TextView(this);
+               var30x.setText(var20x[var27x]);
+               var30x.setTextSize(13.5F);
+               var30x.setTypeface(Typeface.DEFAULT_BOLD);
+               var30x.setTextColor(COLOR_RED);
+               var30x.setSingleLine(true);
+               var30x.setEllipsize(android.text.TextUtils.TruncateAt.END);
+               var28x.addView(var30x, new android.widget.LinearLayout.LayoutParams(0, -2, 1.0F));
+               var26x.addView(var28x, new android.widget.LinearLayout.LayoutParams(-1, var21x));
+            }
+
+            // 视窗高度 = 可见行数 × 行高：1 条就 1 行高，4 条封顶 3 行高
+            final ScrollView var31x = new ScrollView(this);
+            var31x.setVerticalScrollBarEnabled(false);
+            var31x.setOverScrollMode(2);
+            var31x.addView(var26x, new android.widget.FrameLayout.LayoutParams(-1, -2));
+            var2.addView(var31x, new android.widget.LinearLayout.LayoutParams(-1, var21x * var22x));
+
+            if (var20x.length > NOTICE_LIST_ROWS) {
+               final Handler var32x = new Handler(Looper.getMainLooper());
+               final int[] var33x = new int[]{0};
+               final Runnable var34x = new Runnable() {
+                  @Override
+                  public void run() {
+                     int var1x = var26x.getHeight() - var31x.getHeight();
+                     if (var1x <= 0) {
+                        var32x.postDelayed(this, 1800L);
+                        return;
+                     }
+                     if (var33x[0] >= var1x) {
+                        var33x[0] = 0;              // 到底回头，循环
+                     } else {
+                        var33x[0] = Math.min(var33x[0] + var21x, var1x);
+                     }
+                     var31x.smoothScrollTo(0, var33x[0]);
+                     var32x.postDelayed(this, 1800L);
+                  }
+               };
+               var32x.postDelayed(var34x, 1800L);
+               // 手指按住暂停轮播，松手 3s 续播（否则边看边被拽走）
+               var31x.setOnTouchListener(new View.OnTouchListener() {
+                  @Override
+                  public boolean onTouch(View var1x, android.view.MotionEvent var2x) {
+                     int var3x = var2x.getAction();
+                     if (var3x == 0) {
+                        var32x.removeCallbacks(var34x);
+                     } else if (var3x == 1 || var3x == 3) {
+                        var32x.removeCallbacks(var34x);
+                        var32x.postDelayed(var34x, 3000L);
+                     }
+                     return false;
+                  }
+               });
+               // 弹窗一关就停，别让 Handler 拽着已销毁的 View
+               var1.setOnDismissListener(new DialogInterface.OnDismissListener() {
+                  @Override
+                  public void onDismiss(DialogInterface var1x) {
+                     var32x.removeCallbacksAndMessages(null);
+                  }
+               });
+            }
+         }
 
          View var12 = new View(this);
          var12.setBackgroundColor(COLOR_HAIRLINE);
