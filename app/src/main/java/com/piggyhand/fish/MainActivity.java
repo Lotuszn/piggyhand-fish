@@ -2507,6 +2507,8 @@ public class MainActivity extends Activity {
          Log.i("RhNotice", "[notice] anti-resale dialog shown");
       } catch (Throwable var19) {
          Log.e("RhNotice", "[notice] show FAIL", var19);
+         // 弹窗没起来也别把更新检查吞掉，否则关于页「版本更新」永远停在“检查更新中…”
+         this.checkUpdate();
       }
    }
 
@@ -2514,6 +2516,13 @@ public class MainActivity extends Activity {
    private void jumpToAbout() {
       try {
          this.setIndex(2);
+         // 走这条路同样要把更新检查跑掉：关于页的「版本更新」行靠它出结果
+         new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+               MainActivity.this.checkUpdate();
+            }
+         }, 320L);
          final View var1 = this.rowQQGroup;
          if (var1 != null) {
             var1.postDelayed(new Runnable() {
