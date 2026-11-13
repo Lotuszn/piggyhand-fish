@@ -95,8 +95,6 @@ public class MainActivity extends Activity {
    // 名单区：<= NOTICE_LIST_ROWS 行固定显示，超过则滚动轮播；行高按 dp 走，改一个数就能调
    private static final int NOTICE_LIST_ROWS = 3;
    private static final int NOTICE_ROW_H_DP = 27;
-   // 测试占位符。接远端后换成 RhResaleList.read(this)，字段结构不变
-   private static final String[] RESALE_TEST_NAMES = new String[]{"占位符A", "占位符B", "占位符C", "占位符D"};
    private ViewGroup track;
    private View pagesWrap;
    private View pill;
@@ -210,6 +208,9 @@ public class MainActivity extends Activity {
    private boolean dirty = false;
    private boolean logLoaded = false;
    private boolean updateCheckFailed = false;
+   // 名单轮播的唯一计时器：重建区块 / 关弹窗都要先把它停掉，否则旧 ticker 会拽着已移除的 View
+   private Handler resaleTicker;
+   private Runnable resaleTickerTask;
    private final BroadcastReceiver resultReceiver = new BroadcastReceiver() {
       public void onReceive(Context var1, Intent var2) {
          String var3 = var2.getStringExtra("report");
@@ -1150,6 +1151,8 @@ public class MainActivity extends Activity {
       }
 
       this.startStateCheck();
+      // 名单预热：弹窗 700ms 后才出，这段空档先把 Gitee 名单拉下来，省得用户先看到“同步中”
+      RhResaleList.refreshAsync(this, null);
       final boolean var15 = this.shouldShowAntiResaleNotice();
       new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
          @Override
@@ -2452,109 +2455,27 @@ public class MainActivity extends Activity {
          var11.setPadding(this.dp(24), 0, this.dp(24), this.dp(10));
          var2.addView(var11);
 
-         // ==== 名单区块：3 行以内定高固定显示，超过 3 行滚动轮播 ====
-         // 名单为空时整块不占位，弹窗高度自动回到原来的样子
-         final String[] var20x = RESALE_TEST_NAMES;
-         if (var20x.length > 0) {
-            final int var21x = this.dp(NOTICE_ROW_H_DP);
-            int var22x = Math.min(NOTICE_LIST_ROWS, var20x.length);
+         // ==== 名单区块：容器常驻，内容由 renderResale() 反复重建 ====
+         // 远端拉到新名单时不用重开弹窗，直接在这个容器里原地刷新
+         final LinearLayout var20x = new LinearLayout(this);
+         var20x.setOrientation(1);
+         var2.addView(var20x);
+         this.renderResale(var20x, RhResaleList.read(this), true);
 
-            // 区块标题：已确认 N 人；超过可见行数时右侧标“自动滚动”
-            LinearLayout var23x = new LinearLayout(this);
-            var23x.setOrientation(0);
-            var23x.setGravity(16);
-            var23x.setPadding(this.dp(24), 0, this.dp(24), this.dp(6));
-            TextView var24x = new TextView(this);
-            var24x.setText("已确认倒卖者 " + var20x.length + " 人");
-            var24x.setTextSize(10.5F);
-            var24x.setTypeface(Typeface.DEFAULT_BOLD);
-            var24x.setTextColor(COLOR_TEXT_SUB);
-            var23x.addView(var24x, new android.widget.LinearLayout.LayoutParams(0, -2, 1.0F));
-            if (var20x.length > NOTICE_LIST_ROWS) {
-               TextView var25x = new TextView(this);
-               var25x.setText("自动滚动");
-               var25x.setTextSize(9.5F);
-               var25x.setTextColor(COLOR_TEXT_FADE);
-               var23x.addView(var25x);
-            }
-            var2.addView(var23x);
-
-            // 名单本体：序号灰 + 名字加粗标红，超长省略号截断
-            final LinearLayout var26x = new LinearLayout(this);
-            var26x.setOrientation(1);
-            for (int var27x = 0; var27x < var20x.length; var27x++) {
-               LinearLayout var28x = new LinearLayout(this);
-               var28x.setOrientation(0);
-               var28x.setGravity(16);
-               var28x.setPadding(this.dp(24), 0, this.dp(24), 0);
-               TextView var29x = new TextView(this);
-               var29x.setText(String.format(Locale.US, "%02d", var27x + 1));
-               var29x.setTextSize(10.0F);
-               var29x.setTextColor(COLOR_TEXT_FADE);
-               var29x.setTypeface(Typeface.MONOSPACE);
-               var28x.addView(var29x, new android.widget.LinearLayout.LayoutParams(this.dp(26), -2));
-               TextView var30x = new TextView(this);
-               var30x.setText(var20x[var27x]);
-               var30x.setTextSize(13.5F);
-               var30x.setTypeface(Typeface.DEFAULT_BOLD);
-               var30x.setTextColor(COLOR_RED);
-               var30x.setSingleLine(true);
-               var30x.setEllipsize(android.text.TextUtils.TruncateAt.END);
-               var28x.addView(var30x, new android.widget.LinearLayout.LayoutParams(0, -2, 1.0F));
-               var26x.addView(var28x, new android.widget.LinearLayout.LayoutParams(-1, var21x));
-            }
-
-            // 视窗高度 = 可见行数 × 行高：1 条就 1 行高，4 条封顶 3 行高
-            final ScrollView var31x = new ScrollView(this);
-            var31x.setVerticalScrollBarEnabled(false);
-            var31x.setOverScrollMode(2);
-            var31x.addView(var26x, new android.widget.FrameLayout.LayoutParams(-1, -2));
-            var2.addView(var31x, new android.widget.LinearLayout.LayoutParams(-1, var21x * var22x));
-
-            if (var20x.length > NOTICE_LIST_ROWS) {
-               final Handler var32x = new Handler(Looper.getMainLooper());
-               final int[] var33x = new int[]{0};
-               final Runnable var34x = new Runnable() {
+         // 缓存为空先显示“同步中”，拉到后原地替换；节流命中会同步回调，不重复请求
+         RhResaleList.refreshAsync(this, new Runnable() {
+            @Override
+            public void run() {
+               MainActivity.this.runOnUiThread(new Runnable() {
                   @Override
                   public void run() {
-                     int var1x = var26x.getHeight() - var31x.getHeight();
-                     if (var1x <= 0) {
-                        var32x.postDelayed(this, 1800L);
-                        return;
+                     if (var1.isShowing()) {
+                        MainActivity.this.renderResale(var20x, RhResaleList.read(MainActivity.this), false);
                      }
-                     if (var33x[0] >= var1x) {
-                        var33x[0] = 0;              // 到底回头，循环
-                     } else {
-                        var33x[0] = Math.min(var33x[0] + var21x, var1x);
-                     }
-                     var31x.smoothScrollTo(0, var33x[0]);
-                     var32x.postDelayed(this, 1800L);
-                  }
-               };
-               var32x.postDelayed(var34x, 1800L);
-               // 手指按住暂停轮播，松手 3s 续播（否则边看边被拽走）
-               var31x.setOnTouchListener(new View.OnTouchListener() {
-                  @Override
-                  public boolean onTouch(View var1x, android.view.MotionEvent var2x) {
-                     int var3x = var2x.getAction();
-                     if (var3x == 0) {
-                        var32x.removeCallbacks(var34x);
-                     } else if (var3x == 1 || var3x == 3) {
-                        var32x.removeCallbacks(var34x);
-                        var32x.postDelayed(var34x, 3000L);
-                     }
-                     return false;
-                  }
-               });
-               // 弹窗一关就停，别让 Handler 拽着已销毁的 View
-               var1.setOnDismissListener(new DialogInterface.OnDismissListener() {
-                  @Override
-                  public void onDismiss(DialogInterface var1x) {
-                     var32x.removeCallbacksAndMessages(null);
                   }
                });
             }
-         }
+         });
 
          View var12 = new View(this);
          var12.setBackgroundColor(COLOR_HAIRLINE);
@@ -2613,12 +2534,150 @@ public class MainActivity extends Activity {
 
          var1.setCancelable(false);
          var1.setCanceledOnTouchOutside(false);
+         // 关窗即停表：轮播 Handler 持有 ScrollView 引用，不停会一直拽着已销毁的 View
+         var1.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface var1x) {
+               MainActivity.this.stopResaleTicker();
+            }
+         });
          var1.show();
          Log.i("RhNotice", "[notice] anti-resale dialog shown");
       } catch (Throwable var19) {
          Log.e("RhNotice", "[notice] show FAIL", var19);
          // 弹窗没起来也别把更新检查吞掉，否则关于页「版本更新」永远停在“检查更新中…”
          this.checkUpdate();
+      }
+   }
+
+   private void stopResaleTicker() {
+      if (this.resaleTicker != null) {
+         this.resaleTicker.removeCallbacksAndMessages(null);
+      }
+      this.resaleTicker = null;
+      this.resaleTickerTask = null;
+   }
+
+   /**
+    * 重建名单区块，可反复调用：弹窗刚起时画本地缓存，后台拉完再画一次新的。
+    * 数据源是 RhResaleList（Gitee 远端 + 本地缓存），这里只负责渲染。
+    * names 为空时看 loading：true 显示“同步中”，false 整块隐藏不占位。
+    */
+   private void renderResale(LinearLayout var1, String[] var2, boolean var3) {
+      try {
+         this.stopResaleTicker();
+         var1.removeAllViews();
+
+         if (var2 == null || var2.length == 0) {
+            if (!var3) {
+               var1.setVisibility(8);
+               return;
+            }
+            var1.setVisibility(0);
+            TextView var4 = new TextView(this);
+            var4.setText("正在同步倒卖者名单…");
+            var4.setTextSize(10.5F);
+            var4.setTextColor(COLOR_TEXT_FADE);
+            var4.setPadding(this.dp(24), 0, this.dp(24), this.dp(10));
+            var1.addView(var4);
+            return;
+         }
+
+         var1.setVisibility(0);
+         final int var5 = this.dp(NOTICE_ROW_H_DP);
+         int var6 = Math.min(NOTICE_LIST_ROWS, var2.length);
+
+         // 标题：已确认 N 人；超过可见行数时右侧标“自动滚动”
+         LinearLayout var7 = new LinearLayout(this);
+         var7.setOrientation(0);
+         var7.setGravity(16);
+         var7.setPadding(this.dp(24), 0, this.dp(24), this.dp(6));
+         TextView var8 = new TextView(this);
+         var8.setText("已确认倒卖者 " + var2.length + " 人");
+         var8.setTextSize(10.5F);
+         var8.setTypeface(Typeface.DEFAULT_BOLD);
+         var8.setTextColor(COLOR_TEXT_SUB);
+         var7.addView(var8, new android.widget.LinearLayout.LayoutParams(0, -2, 1.0F));
+         if (var2.length > NOTICE_LIST_ROWS) {
+            TextView var9 = new TextView(this);
+            var9.setText("自动滚动");
+            var9.setTextSize(9.5F);
+            var9.setTextColor(COLOR_TEXT_FADE);
+            var7.addView(var9);
+         }
+         var1.addView(var7);
+
+         // 名单本体：序号灰 + 名字加粗标红，超长省略号截断
+         final LinearLayout var10 = new LinearLayout(this);
+         var10.setOrientation(1);
+         for (int var11 = 0; var11 < var2.length; var11++) {
+            LinearLayout var12 = new LinearLayout(this);
+            var12.setOrientation(0);
+            var12.setGravity(16);
+            var12.setPadding(this.dp(24), 0, this.dp(24), 0);
+            TextView var13 = new TextView(this);
+            var13.setText(String.format(Locale.US, "%02d", var11 + 1));
+            var13.setTextSize(10.0F);
+            var13.setTextColor(COLOR_TEXT_FADE);
+            var13.setTypeface(Typeface.MONOSPACE);
+            var12.addView(var13, new android.widget.LinearLayout.LayoutParams(this.dp(26), -2));
+            TextView var14 = new TextView(this);
+            var14.setText(var2[var11]);
+            var14.setTextSize(13.5F);
+            var14.setTypeface(Typeface.DEFAULT_BOLD);
+            var14.setTextColor(COLOR_RED);
+            var14.setSingleLine(true);
+            var14.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            var12.addView(var14, new android.widget.LinearLayout.LayoutParams(0, -2, 1.0F));
+            var10.addView(var12, new android.widget.LinearLayout.LayoutParams(-1, var5));
+         }
+
+         // 视窗高度 = 可见行数 × 行高：1 条就 1 行高，4 条封顶 3 行高
+         final ScrollView var15 = new ScrollView(this);
+         var15.setVerticalScrollBarEnabled(false);
+         var15.setOverScrollMode(2);
+         var15.addView(var10, new android.widget.FrameLayout.LayoutParams(-1, -2));
+         var1.addView(var15, new android.widget.LinearLayout.LayoutParams(-1, var5 * var6));
+
+         if (var2.length > NOTICE_LIST_ROWS) {
+            final Handler var16 = new Handler(Looper.getMainLooper());
+            final int[] var17 = new int[]{0};
+            final Runnable var18 = new Runnable() {
+               @Override
+               public void run() {
+                  int var1x = var10.getHeight() - var15.getHeight();
+                  if (var1x <= 0) {
+                     var16.postDelayed(this, 1800L);
+                     return;
+                  }
+                  if (var17[0] >= var1x) {
+                     var17[0] = 0;              // 到底回头，循环
+                  } else {
+                     var17[0] = Math.min(var17[0] + var5, var1x);
+                  }
+                  var15.smoothScrollTo(0, var17[0]);
+                  var16.postDelayed(this, 1800L);
+               }
+            };
+            this.resaleTicker = var16;
+            this.resaleTickerTask = var18;
+            var16.postDelayed(var18, 1800L);
+            // 手指按住暂停轮播，松手 3s 续播（否则边看边被拽走）
+            var15.setOnTouchListener(new View.OnTouchListener() {
+               @Override
+               public boolean onTouch(View var1x, android.view.MotionEvent var2x) {
+                  int var3x = var2x.getAction();
+                  if (var3x == 0) {
+                     var16.removeCallbacks(var18);
+                  } else if (var3x == 1 || var3x == 3) {
+                     var16.removeCallbacks(var18);
+                     var16.postDelayed(var18, 3000L);
+                  }
+                  return false;
+               }
+            });
+         }
+      } catch (Throwable var19) {
       }
    }
 
