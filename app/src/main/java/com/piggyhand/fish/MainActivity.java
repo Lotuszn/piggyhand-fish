@@ -25,6 +25,7 @@ import android.os.Looper;
 import android.os.Build.VERSION;
 import android.text.SpannableString;
 import android.text.style.ForegroundColorSpan;
+import android.text.style.StyleSpan;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.View;
@@ -78,6 +79,18 @@ public class MainActivity extends Activity {
    private static final String UC_PAN_URL = "https://drive.uc.cn/s/df475a5e0ad94";
    private static final String QUARK_PAN_URL = "https://pan.quark.cn/s/b0a477c5b50f";
    private static final String COOLAPK_URL = "https://www.coolapk.com/u/2206962";
+   // ==== 反倒卖声明：模块被二次打包倒卖时向买家喊话 ====
+   // 独立 pref 文件，不走 config_json —— 那是模块注入进程读的配置，不该混进 UI 侧的一次性状态
+   private static final String NOTICE_PREFS = "rh_notice";
+   private static final String NOTICE_KEY_AT = "anti_resale_at";
+   private static final long NOTICE_INTERVAL_MS = 259200000L; // 72h = 72 * 60 * 60 * 1000
+   private static final String NOTICE_TEXT =
+      "本模块为公益免费开发，如果你是买来的，请立即举报投诉+退款，如有兴趣，可在“关于”可以加入Lotuszn的小窝，获取最新版本。";
+   private static final int COLOR_ACCENT = -2066432;   // #E07800
+   private static final int COLOR_RED = -50384;        // #FF3B30
+   private static final int COLOR_TEXT_MAIN = -15263716; // #17181C
+   private static final int COLOR_TEXT_SUB = -7697518; // #8A8B92
+   private static final int COLOR_HAIRLINE = 337057820; // #1417181C 8% 发丝线
    private ViewGroup track;
    private View pagesWrap;
    private View pill;
@@ -1131,10 +1144,16 @@ public class MainActivity extends Activity {
       }
 
       this.startStateCheck();
+      final boolean var15 = this.shouldShowAntiResaleNotice();
       new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
          @Override
          public void run() {
-            MainActivity.this.checkUpdate();
+            // 声明优先：到期了这一轮只弹声明，更新检查挪到声明关掉之后再跑，两个弹窗不叠
+            if (var15) {
+               MainActivity.this.showAntiResaleNotice();
+            } else {
+               MainActivity.this.checkUpdate();
+            }
          }
       }, 700L);
    }
@@ -2303,6 +2322,211 @@ public class MainActivity extends Activity {
          if (var1 != null) {
             var1.addFlags(268435456);
             this.startActivity(var1);
+         }
+      } catch (Throwable var2) {
+      }
+   }
+
+   /**
+    * 距上次弹窗是否已满 72 小时。
+    * 首次安装（无记录）直接弹；系统时间被回拨（差值为负）也弹，否则回拨一次就能永久免弹。
+    */
+   private boolean shouldShowAntiResaleNotice() {
+      try {
+         long var1 = this.getSharedPreferences(NOTICE_PREFS, 0).getLong(NOTICE_KEY_AT, 0L);
+         if (var1 <= 0L) {
+            return true;
+         }
+         long var3 = System.currentTimeMillis() - var1;
+         return var3 < 0L || var3 >= NOTICE_INTERVAL_MS;
+      } catch (Throwable var5) {
+         // 读不到 pref（极少数多用户/损坏场景）按到期处理：宁可多弹一次，不能漏掉声明
+         return true;
+      }
+   }
+
+   /** 落时间戳。写在 show 之前：用户杀进程/强制返回也算“已看到”，72h 从这一刻起算。 */
+   private void markAntiResaleNotice() {
+      try {
+         this.getSharedPreferences(NOTICE_PREFS, 0)
+            .edit()
+            .putLong(NOTICE_KEY_AT, System.currentTimeMillis())
+            .apply();
+      } catch (Throwable var1) {
+      }
+   }
+
+   /**
+    * 给指定片段套加粗 + 标红，供声明正文用
+    */
+   private void boldRed(SpannableString var1, String var2) {
+      int var3 = var1.toString().indexOf(var2);
+      if (var3 >= 0) {
+         var1.setSpan(new StyleSpan(Typeface.BOLD), var3, var3 + var2.length(), 33);
+         var1.setSpan(new ForegroundColorSpan(COLOR_RED), var3, var3 + var2.length(), 33);
+      }
+   }
+
+   /**
+    * 汉字之间处处可断行，标红短语会被折成两截（“举报投诉” / “+退款”）。
+    * 逐字插 U+2060 WORD JOINER（零宽、不可见）把它们黏成一段，宽度不够时整体换行。
+    */
+   private static String noBreak(String var0) {
+      StringBuilder var1 = new StringBuilder();
+      for (int var2 = 0; var2 < var0.length(); var2++) {
+         if (var2 > 0) {
+            var1.append('\u2060');
+         }
+         var1.append(var0.charAt(var2));
+      }
+      return var1.toString();
+   }
+
+   /**
+    * 反倒卖声明弹窗。白色 24dp 圆角卡 + 橙色标签点，沿用 askInterval/showReportCard 那套视觉；
+    * 不可点外部关闭、不可返回键关闭，必须走「去关于」或「我知道了」。
+    */
+   private void showAntiResaleNotice() {
+      try {
+         if (this.isFinishing()) {
+            return;
+         }
+
+         this.markAntiResaleNotice();
+         final Dialog var1 = new Dialog(this);
+         LinearLayout var2 = new LinearLayout(this);
+         var2.setOrientation(1);
+         GradientDrawable var3 = new GradientDrawable();
+         var3.setCornerRadius((float)this.dp(24));
+         var3.setColor(-1);
+         var2.setBackground(var3);
+
+         // 顶部标签：橙色圆点 + “模块声明”
+         LinearLayout var4 = new LinearLayout(this);
+         var4.setOrientation(0);
+         var4.setGravity(16);
+         var4.setPadding(this.dp(24), this.dp(22), this.dp(24), 0);
+         View var5 = new View(this);
+         GradientDrawable var6 = new GradientDrawable();
+         var6.setShape(1);
+         var6.setColor(COLOR_ACCENT);
+         var5.setBackground(var6);
+         var4.addView(var5, new android.widget.LinearLayout.LayoutParams(this.dp(6), this.dp(6)));
+         TextView var7 = new TextView(this);
+         var7.setText("模块声明");
+         var7.setTextSize(10.5F);
+         var7.setTypeface(Typeface.DEFAULT_BOLD);
+         var7.setTextColor(COLOR_ACCENT);
+         var7.setLetterSpacing(0.08F);
+         android.widget.LinearLayout.LayoutParams var8 = new android.widget.LinearLayout.LayoutParams(-2, -2);
+         var8.leftMargin = this.dp(6);
+         var7.setLayoutParams(var8);
+         var4.addView(var7);
+         var2.addView(var4);
+
+         TextView var9 = new TextView(this);
+         // 两个标红短语各自黏成不可断行的一段，避免被折行切成两截
+         String var20 = NOTICE_TEXT
+            .replace("公益免费", noBreak("公益免费"))
+            .replace("举报投诉+退款", noBreak("举报投诉+退款"));
+         SpannableString var10 = new SpannableString(var20);
+         this.boldRed(var10, noBreak("公益免费"));
+         this.boldRed(var10, noBreak("举报投诉+退款"));
+         var9.setText(var10);
+         var9.setTextSize(14.0F);
+         var9.setTextColor(COLOR_TEXT_MAIN);
+         var9.setLineSpacing((float)this.dp(5), 1.0F);
+         var9.setPadding(this.dp(24), this.dp(14), this.dp(24), this.dp(6));
+         var2.addView(var9);
+
+         TextView var11 = new TextView(this);
+         var11.setText("该提示每 72 小时出现一次，点下方按钮继续使用");
+         var11.setTextSize(10.0F);
+         var11.setTextColor(COLOR_TEXT_SUB);
+         var11.setPadding(this.dp(24), 0, this.dp(24), this.dp(16));
+         var2.addView(var11);
+
+         View var12 = new View(this);
+         var12.setBackgroundColor(COLOR_HAIRLINE);
+         var2.addView(var12, new android.widget.LinearLayout.LayoutParams(-1, this.dp(1)));
+
+         LinearLayout var13 = new LinearLayout(this);
+         var13.setOrientation(0);
+         TextView var14 = new TextView(this);
+         var14.setText("去「关于」");
+         var14.setTextSize(13.5F);
+         var14.setTextColor(COLOR_TEXT_SUB);
+         var14.setGravity(17);
+         var14.setPadding(0, this.dp(15), 0, this.dp(15));
+         var14.setOnClickListener(new OnClickListener() {
+            public void onClick(View var1x) {
+               var1.dismiss();
+               MainActivity.this.jumpToAbout();
+            }
+         });
+         TextView var15 = new TextView(this);
+         var15.setText("我知道了");
+         var15.setTextSize(13.5F);
+         var15.setTypeface(Typeface.DEFAULT_BOLD);
+         var15.setTextColor(COLOR_ACCENT);
+         var15.setGravity(17);
+         var15.setPadding(0, this.dp(15), 0, this.dp(15));
+         var15.setOnClickListener(new OnClickListener() {
+            public void onClick(View var1x) {
+               var1.dismiss();
+               // 声明看完再跑更新检查，避免两个弹窗叠在一起
+               new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+                  @Override
+                  public void run() {
+                     MainActivity.this.checkUpdate();
+                  }
+               }, 220L);
+            }
+         });
+         var13.addView(var14, new android.widget.LinearLayout.LayoutParams(0, -2, 1.0F));
+         View var16 = new View(this);
+         var16.setBackgroundColor(COLOR_HAIRLINE);
+         var13.addView(var16, new android.widget.LinearLayout.LayoutParams(this.dp(1), -1));
+         var13.addView(var15, new android.widget.LinearLayout.LayoutParams(0, -2, 1.0F));
+         var2.addView(var13);
+
+         var1.setContentView(var2);
+         Window var17 = var1.getWindow();
+         if (var17 != null) {
+            var17.setBackgroundDrawable(new ColorDrawable(0));
+            var17.setDimAmount(0.45F);
+            android.view.WindowManager.LayoutParams var18 = var17.getAttributes();
+            var18.width = (int)((double)this.getResources().getDisplayMetrics().widthPixels * 0.88);
+            var18.gravity = 17;
+            var17.setAttributes(var18);
+         }
+
+         var1.setCancelable(false);
+         var1.setCanceledOnTouchOutside(false);
+         var1.show();
+         Log.i("RhNotice", "[notice] anti-resale dialog shown");
+      } catch (Throwable var19) {
+         Log.e("RhNotice", "[notice] show FAIL", var19);
+      }
+   }
+
+   /** 切到「关于」页，并把 QQ 群那行弹一下，指明“加入 Lotuszn 的小窝”的入口 */
+   private void jumpToAbout() {
+      try {
+         this.setIndex(2);
+         final View var1 = this.rowQQGroup;
+         if (var1 != null) {
+            var1.postDelayed(new Runnable() {
+               @Override
+               public void run() {
+                  var1.animate().scaleX(1.03F).scaleY(1.03F).setDuration(170L).withEndAction(new Runnable() {
+                     @Override
+                     public void run() {
+                        var1.animate().scaleX(1.0F).scaleY(1.0F).setDuration(240L).start();
+                     }
+                  }).start();
+               }
+            }, 620L);
          }
       } catch (Throwable var2) {
       }
