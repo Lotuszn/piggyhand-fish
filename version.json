@@ -1,6 +1,6 @@
 {
-  "latest": "1.5.3",
+  "latest": "1.5.6",
   "url": "https://github.com/Lotuszn/piggyhand-fish/releases/latest",
   "cnUrl": "https://drive.uc.cn/s/df475a5e0ad94",
-  "notes": "v1.5.3（上一发行版 v1.5.2）把「做任务赚游戏币」从能跑推到清零，三项历史遗留全部收口。一、渠道游戏任务全程协议打通：之前 27 项里 22 项长期卡在 ACCEPTED，根因是 mini.game.task.complete 少传 taskScene 导致服务端找不到 taskId（TASK_NOT_FOUND）；正确链路是 detail.query 登记 → complete 上报 → award 领奖，三层 taskScene/appkey 必须一致，现场 20 项一次性推完。二、激励视频不再跳过：任务 jumpUrl 自带 adEventPush（服务端下发的观看完成上报描述），原样推回 play.ad.event.push 即认定看完，任务 5 秒内转 AWARD，渠道 27/27 全清。三、「从桌面进入游戏频道」改了 sourceId（desktop_shortcut 型必须报 desktop_shortcut，报 TASK_RECOMMEND 是假成功）。四、补全每日签到：鱼塘「领饲料」playId=101、游戏中心「点击签到」playId=4，引擎首行直接给结论。五、渠道清单遇 TASK_PLATFORM_ERROR 改 3 轮重试，不再一撞限流就整天作废。本版收口基线：渠道 27/27、中央 62/62、鱼塘 23/23、496 场景 AWARD=0，余额 10050→16250。覆盖安装即可，签名未变，LSPosed 勾选状态保留。"
+  "notes": "v1.5.6（上一发行版 v1.5.5）给模块界面加了两件事，都围绕「有人拿本模块二次倒卖」这个实际问题。一、反倒卖声明弹窗：距上次展示满 72 小时强制弹一次，首次安装必弹；点外部、按返回都关不掉，必须走「去『关于』」或「我知道了」两个出口，关窗后才跑更新检查，两个弹窗不叠加；「公益免费」「举报投诉+退款」两段加粗标红。二、弹窗内嵌倒卖者名单：已确认倒卖者按序号列出，3 行封顶，超过就每 1.8 秒自动上滚一行、到底循环，手指按住暂停、松手 3 秒续播；名单为空时整块不占位，弹窗自动缩回原高度。名单走 Gitee 公开仓库 raw 直链热加载，客户端不存任何 token，本地缓存优先、网络失败不清缓存，6 小时最多拉一次，响应必须带 # rh-resale 头校验，条数与单行长度均封顶。覆盖安装即可，签名未变，LSPosed 勾选状态保留。"
 }

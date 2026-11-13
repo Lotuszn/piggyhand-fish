@@ -4,7 +4,7 @@
 
 ---
 
-## 未发布 · 反倒卖声明弹窗
+## v1.5.6（2026-11-14）· 反倒卖声明弹窗
 
 模块被二次倒卖，加 72 小时强制声明。
 
@@ -21,8 +21,20 @@
 - 弹窗内新增「已确认倒卖者 N 人」区块：序号灰 + 名字加粗标红（#FF3B30），超长省略号截断。
 - 高度自适应：视窗 = min(条数, 3) 行 × 27dp。1 条就 1 行高、2 条 2 行高、0 条整块不占位；弹窗整体随之伸缩。
 - >3 条自动轮播：每 1.8s 上滚一行，到底回头循环，右侧标「自动滚动」；手指按住暂停、松手 3s 续播；弹窗 dismiss 时 `removeCallbacksAndMessages` 停表。
-- 数据源暂为常量 `RESALE_TEST_NAMES`（占位符 A/B/C/D 四条，用于验证滚动）；接远端后替换成 `RhResaleList.read(this)`，渲染逻辑不动。
+- 数据源：常量 `RESALE_TEST_NAMES`（占位符 A/B/C/D 四条）只用于验证滚动；正式版已替换为 `RhResaleList.read(this)`，渲染逻辑未动。
 - 真机验证：4 条 → 首行在 A/B 间交替（12 帧扑捉两种状态交替）；2 条 → 高度收缩为两行、无「自动滚动」、不滚动。
+
+**名单远端热加载（`RhResaleList`）**
+
+- 数据源 `https://gitee.com/lotuszn/piggyhand-fish/raw/main/resale/list.txt`，包里不带任何 token ——
+  客户端一旦存凭据，等于把仓库写权限发给所有装机用户。
+- 三条硬约束：① 本地缓存 `rh_resale.txt` 优先，网络失败**绝不清空缓存**，只保留上一份能用的；
+  ② 响应必须以 `# rh-resale` 开头，否则整份丢弃（raw 跟随 302 后若文件不存在返回 HTML 错误页，
+  不校验就会把 HTML 当名字渲染）；③ `MAX_BYTES 65536` / `MAX_ITEMS 500` / `MAX_LINE 80` 封顶，
+  防有人往公开文件塞超长内容撑爆 UI。
+- 节流 `MIN_GAP_MS = 21600000`（6h，pref 键 `rh_notice/resale_at`），别把 Gitee 匿名 raw 打限流。
+- 渲染接 `renderResale(names, loading)`：首次先出缓存，`refreshAsync` 回来后原地重渲染；
+  names 为空时看 loading —— true 显示「同步中」，false 整块隐藏不占位。
 
 ---
 
