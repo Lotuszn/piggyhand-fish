@@ -65,7 +65,7 @@ if ! javac -encoding UTF-8 -source 11 -target 11 -nowarn \
   stub/de/robv/android/xposed/callbacks/*.java \
   build/gen/com/piggyhand/fish/R.java \
   build/gen/com/piggyhand/fish/BuildInfo.java \
-  app/src/main/java/com/piggyhand/fish/*.java > build/javac.log 2>&1; then
+  $(find app/src/main/java/com/piggyhand/fish -name "*.java") > build/javac.log 2>&1; then
   echo "javac FAILED:"; grep -v "bootstrap" build/javac.log; exit 1
 fi
 grep -v "bootstrap" build/javac.log || true

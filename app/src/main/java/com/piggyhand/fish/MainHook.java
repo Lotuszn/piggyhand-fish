@@ -1,5 +1,15 @@
 package com.piggyhand.fish;
 
+import com.piggyhand.fish.config.ConfigManager;
+import com.piggyhand.fish.core.Reflect;
+import com.piggyhand.fish.core.RhFileLog;
+import com.piggyhand.fish.hook.FishMtopHook;
+import com.piggyhand.fish.hook.RhChatHook;
+import com.piggyhand.fish.hook.RhSplashAd;
+import com.piggyhand.fish.task.RhFeedCols;
+import com.piggyhand.fish.ui.RhFishFloat;
+import com.piggyhand.fish.ui.RhUiScale;
+
 import android.util.Log;
 
 import java.lang.reflect.Constructor;

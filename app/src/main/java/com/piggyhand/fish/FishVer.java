@@ -1,5 +1,7 @@
 package com.piggyhand.fish;
 
+import com.piggyhand.fish.core.Symbols;
+
 import android.content.Context;
 import android.content.pm.PackageInfo;
 import android.os.Build;
