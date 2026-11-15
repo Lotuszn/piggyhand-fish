@@ -405,11 +405,17 @@ public final class RhPondTask {
             }
         } catch (Throwable ignored) {
         }
-        // ① 响应缓存
+        // ① 响应缓存（方案 A 起响应文件按 api 全名短哈希命名；forest.animal.feed 的哈希名 + ③ 通配兜底）
         try {
             java.io.File cacheDir = ctx.getExternalCacheDir();
             if (cacheDir == null) cacheDir = ctx.getCacheDir();
-            java.io.File f = new java.io.File(cacheDir, "rh_resp_feed.json");
+            String feedBase = com.piggyhand.fish.net.RespChannel.respBase("mtop.taobao.idle.forest.animal.feed");
+            java.io.File f = new java.io.File(cacheDir, "rh_resp_" + feedBase + ".json");
+            if (!f.exists()) {
+                // 升级过渡:旧命名的缓存仍在位时先兜一次
+                java.io.File legacy = new java.io.File(cacheDir, "rh_resp_feed.json");
+                if (legacy.exists()) f = legacy;
+            }
             if (f.exists() && f.length() > 0) {
                 byte[] b = new byte[(int) f.length()];
                 java.io.FileInputStream in = new java.io.FileInputStream(f);
@@ -1044,14 +1050,15 @@ public final class RhPondTask {
     private static String callAndWaitOnce(Context ctx, String api, String version,
                                           String data, String tailKey, long maxWaitMs) {
         try {
-            String tail = tailKey;
-            int dot = api.lastIndexOf('.');
-            if (dot >= 0) tail = api.substring(dot + 1);
+            // 备忘录 2026-11-13 方案 A：api 全名短哈希命名（与 hook 写侧同规则），tailKey 不再参与命名
+            String tail = com.piggyhand.fish.net.RespChannel.respBase(api);
             java.io.File cacheDir = ctx.getExternalCacheDir();
             if (cacheDir == null) cacheDir = ctx.getCacheDir();
+            // 方案 B：api 级互斥——send+轮询全程持锁，同 api（oliver.show 多活动）跨引擎串行
+            synchronized (com.piggyhand.fish.net.RespChannel.lockFor(api)) {
             final java.io.File f = new java.io.File(cacheDir, "rh_resp_" + tail + ".json");
             final java.io.File stamp = new java.io.File(cacheDir, "rh_resp_" + tail + ".json.stamp");
-            // v1.5.1 raw 旁档：writeTaskResp 丢弃非 JSON body 时同写 rh_resp_<tail>.json.raw + stamp，
+            // v1.5.1 raw 旁档：writeTaskResp 丢弃非 JSON body 时同写 rh_resp_<base>.json.raw + stamp，
             // 命中即返回原文，上层能看到网关拒绝的真实内容而不是「无响应」
             final java.io.File raw = new java.io.File(cacheDir, "rh_resp_" + tail + ".json.raw");
             final java.io.File rawStamp = new java.io.File(cacheDir, "rh_resp_" + tail + ".json.raw.stamp");
@@ -1089,6 +1096,7 @@ public final class RhPondTask {
             }
             RhFileLog.write("[pond] callAndWait timeout " + api + " fp0=" + fp0 + " fp=" + fp(f));
             return null;
+            } // synchronized lockFor(api)——方案 B 同 api 串行
         } catch (Throwable t) {
             RhFileLog.write("[pond] callAndWait " + api + " err: " + t);
             return null;

@@ -340,7 +340,8 @@ public final class RhCashClaim {
    }
 
    static JSONObject callMtop(Context var0, String var1, String var2, String var3, Map<String, String> var4, Map<String, String> var5, long var6) {
-      String var8 = var1.substring(var1.lastIndexOf(46) + 1);
+      // 备忘录 2026-11-13 方案 A:api 全名短哈希命名,与 hook 写侧 writeTaskResp 同规则
+      String var8 = com.piggyhand.fish.net.RespChannel.respBase(var1);
       File var9 = dir(var0);
       File var10 = new File(var9, "rh_resp_" + var8 + ".json");
 
@@ -358,6 +359,8 @@ public final class RhCashClaim {
          String var13 = "\"" + var1 + "\"";
 
          while (System.currentTimeMillis() < var11) {
+            // 方案 B:api 级互斥——响应体自带 api 名校验(下方 indexOf)兜同 api 内容,锁兜跨引擎时序
+            synchronized (com.piggyhand.fish.net.RespChannel.lockFor(var1)) {
             sleep(200L);
             if (var10.exists()) {
                String var14 = readAll(var10);
@@ -368,6 +371,7 @@ public final class RhCashClaim {
                      return var15;
                   }
                }
+            }
             }
          }
 

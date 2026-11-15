@@ -1240,13 +1240,12 @@ public final class FishMtopHook {
                                             final String cVer = jo.optString("version", "1.0");
                                             Object dObj = jo.opt("data");
                                             final String cData = dObj == null ? "{}" : String.valueOf(dObj);
-                                            final String tail = cApi.lastIndexOf('.') >= 0
-                                                    ? cApi.substring(cApi.lastIndexOf('.') + 1) : cApi;
+                                            final String respBase = com.piggyhand.fish.net.RespChannel.respBase(cApi); // 方案 A:与写侧同规则
                                             final long t0 = System.currentTimeMillis();
                                             // 先删旧响应文件再轮询 exists()：部分 ROM（Android 10 sdcardfs）
                                             // lastModified 有缓存延迟，mtime 判断会漏掉新响应（MIX3 实测）
                                             try {
-                                                java.io.File f0 = cacheFile("rh_resp_" + tail + ".json");
+                                                java.io.File f0 = cacheFile("rh_resp_" + respBase + ".json");
                                                 if (f0 != null && f0.exists()) f0.delete();
                                             } catch (Throwable ignored) {
                                             }
@@ -1255,9 +1254,9 @@ public final class FishMtopHook {
                                                 body = "NO_RESP";
                                                 for (int i = 0; i < 16; i++) {
                                                     Thread.sleep(250);
-                                                    java.io.File f = cacheFile("rh_resp_" + tail + ".json");
+                                                    java.io.File f = cacheFile("rh_resp_" + respBase + ".json");
                                                     if (f != null && f.exists()) {
-                                                        body = readCacheFile("rh_resp_" + tail + ".json");
+                                                        body = readCacheFile("rh_resp_" + respBase + ".json");
                                                         break;
                                                     }
                                                 }
@@ -1719,26 +1718,22 @@ public final class FishMtopHook {
             // （discard len=224）被丢弃后调用方只能看到「无响应」，拒绝原因无法定性。
             // raw 文件让 callAndWait 立即感知并把原文带回报告/日志。
             if (body != null && !body.isEmpty()) {
-                String last = api == null ? "unknown" : api;
-                int dot = last.lastIndexOf('.');
-                if (dot >= 0) last = last.substring(dot + 1);
-                writeCacheFile("rh_resp_" + last + ".json.raw", body);
+                String base = com.piggyhand.fish.net.RespChannel.respBase(api); // 方案 A:全名短哈希,消五组尾段撞车
+                writeCacheFile("rh_resp_" + base + ".json.raw", body);
                 // v1.5.5 改进 C：固定名 .bad 旁档（不带 stamp，专供 callApi 短路）。
                 // callApi 轮询见到它立即返回 GATEWAY_REJECT 归因，不再空等 30s——
                 // (2) 号日志实测 30 次 timeout×30s≈15 分钟纯等待。正常响应到达时删除。
-                writeCacheFile("rh_resp_" + last + ".json.bad",
+                writeCacheFile("rh_resp_" + base + ".json.bad",
                         body.substring(0, Math.min(200, body.length())));
             }
             return false;
         }
         writeCacheFile("rh_resp.json", body);
-        String last = api == null ? "unknown" : api;
-        int dot = last.lastIndexOf('.');
-        if (dot >= 0) last = last.substring(dot + 1);
-        writeCacheFile("rh_resp_" + last + ".json", body);
+        String base = com.piggyhand.fish.net.RespChannel.respBase(api); // 方案 A:全名短哈希
+        writeCacheFile("rh_resp_" + base + ".json", body);
         // v1.5.5 改进 C：正常响应到达即清 .bad，防止旧拒绝档被下一次请求误配
         try {
-            java.io.File bad = cacheFile("rh_resp_" + last + ".json.bad");
+            java.io.File bad = cacheFile("rh_resp_" + base + ".json.bad");
             if (bad != null && bad.exists()) bad.delete();
         } catch (Throwable ignored) {
         }

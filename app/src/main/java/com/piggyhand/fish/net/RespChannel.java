@@ -43,4 +43,29 @@ public final class RespChannel {
             s.noteDirectSent(api);
         }
     }
+
+    /** 响应文件基名：api 全名 CRC32 短哈希（8 位 hex）。
+     *  备忘录 2026-11-13 方案 A：hook 写侧与引擎读侧共用同一规则，替换原「api 末段」命名——
+     *  原 rh_resp_<末段> 命名下 detail.query/center.query/channel.query/point.withdraw.query/
+     *  ad.query 五组尾段撞车（跨引擎串包实证），全名哈希后一 api 一文件，互不可见。 */
+    public static String respBase(String api) {
+        String a = api == null ? "unknown" : api;
+        java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+        crc.update(a.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return String.format("%08x", crc.getValue());
+    }
+
+    /** api 级互斥锁（备忘录方案 B）：同 api 串行——oliver.show 多活动（104042/102178）同 api
+     *  不同参数时，跨引擎各持同名锁排队，先发的先收，杜绝读串包；不同 api 完全并行。 */
+    private static final java.util.concurrent.ConcurrentHashMap<String, Object> API_LOCKS =
+            new java.util.concurrent.ConcurrentHashMap<String, Object>();
+
+    public static Object lockFor(String api) {
+        String a = api == null ? "unknown" : api;
+        Object lock = API_LOCKS.get(a);
+        if (lock != null) return lock;
+        Object fresh = new Object();
+        Object old = API_LOCKS.putIfAbsent(a, fresh);
+        return old != null ? old : fresh;
+    }
 }

@@ -2777,11 +2777,15 @@ public final class FishTaskAuto {
       String var5 = this.respFile(var1);
       // v1.5.5 改进 C：清掉上一次请求可能遗留的 .bad，bad 只对「本次发送之后到达的拒绝」生效
       try {
-         String varTail = var1.substring(var1.lastIndexOf('.') + 1);
-         java.io.File varBad0 = new java.io.File(this.cacheDir, "rh_resp_" + varTail + ".json.bad");
+         String varBase = com.piggyhand.fish.net.RespChannel.respBase(var1); // 方案 A:与 hook 写侧同规则
+         java.io.File varBad0 = new java.io.File(this.cacheDir, "rh_resp_" + varBase + ".json.bad");
          if (varBad0.exists()) varBad0.delete();
       } catch (Throwable ignored) {
       }
+
+      // 方案 B（备忘录 2026-11-13）：api 级互斥——同 api（oliver.show 多活动等）跨引擎串行，
+      // 先发先收；不同 api 完全并行。锁覆盖 send+轮询全程。
+      synchronized (com.piggyhand.fish.net.RespChannel.lockFor(var1)) {
 
       pace(var1); // 节奏整形：替代原固定 sleep(300L)——按 api 类别 2/3/5s ×设备系数 ±40% 抖动
       String var6 = this.fileFp(var5);
@@ -2798,7 +2802,7 @@ public final class FishTaskAuto {
             // v1.5.5 改进 C：网关拒绝的响应非 JSON 会被 hook 丢弃并落 .bad——见到它立即短路，
             // 返回带归因的构造 ret，不再空等 30s。mtime 必须晚于发送时刻才算本次的拒绝。
             try {
-               String varTailB = var1.substring(var1.lastIndexOf('.') + 1);
+               String varTailB = com.piggyhand.fish.net.RespChannel.respBase(var1);
                java.io.File varBad = new java.io.File(this.cacheDir, "rh_resp_" + varTailB + ".json.bad");
                if (varBad.exists() && varBad.lastModified() >= varSentAt) {
                   String varHead = varBad.length() > 0 ? this.readFile(varBad.getAbsolutePath()) : "";
@@ -2836,16 +2840,13 @@ public final class FishTaskAuto {
          log("[tasks] timeout: " + var4);
          return null;
       }
+      } // synchronized lockFor(api)——方案 B 同 api 串行
    }
 
    private String respFile(String var1) {
-      String var2 = var1;
-      int var3 = var1.lastIndexOf(46);
-      if (var3 >= 0) {
-         var2 = var1.substring(var3 + 1);
-      }
-
-      return this.cacheDir + "/rh_resp_" + var2 + ".json";
+      // 方案 A：api 全名短哈希命名，与 hook 写侧 writeTaskResp 同规则——
+      // 替换原「api 末段」命名（五组尾段跨引擎撞车，见备忘录 2026-11-13）
+      return this.cacheDir + "/rh_resp_" + com.piggyhand.fish.net.RespChannel.respBase(var1) + ".json";
    }
 
    private String fileFp(String var1) {
