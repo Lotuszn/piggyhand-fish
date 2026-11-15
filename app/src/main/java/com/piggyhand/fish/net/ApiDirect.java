@@ -4,7 +4,6 @@ import com.piggyhand.fish.core.Diag;
 import com.piggyhand.fish.core.Reflect;
 import com.piggyhand.fish.core.RhFileLog;
 import com.piggyhand.fish.core.Symbols;
-import com.piggyhand.fish.hook.FishMtopHook;
 
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
@@ -25,7 +24,7 @@ import de.robv.android.xposed.XposedBridge;
  *   ② v1.5.1 补：send 挂动态 Proxy 万能 callback（原实现 callback=null，
  *      部分 ROM/时序下 MtopLauncher 依赖 callback 才派发响应——2026-11-11 日志实证
  *      13:10/13:20/15:49 三轮直调请求进构建层但响应零到达）。callback 参数对象
- *      统一喂 FishMtopHook.feedRespCandidate，内部有 MtopResponse 校验，
+ *      统一喂 RespChannel.feed（hook 层注册的 RespSink 实现），内部有 MtopResponse 校验，
  *      匹配即落盘，不匹配丢弃，安全。
  *
  * 调用链定位自闲鱼 7.25.31 dex 静态分析。
@@ -100,7 +99,7 @@ public final class ApiDirect {
                     // 兼容版自检：先标记再发送——setApiName 在 send 内部同步触发，
                     // 若 send 之后才标记，清除逻辑永远追不上导致 WARN 恒误报（一加用户日志实证）
                     lastDiag = null;
-                    FishMtopHook.noteDirectSent(api);
+                    RespChannel.noteSent(api); // Phase 2a-2 依赖倒置：经 net 层接口路由，不引 hook 包
                     Object cb = buildProxyCallback(hostCl, m.getParameterTypes()[1], api);
                     m.invoke(sender, req, cb);
                     log("[direct] sent: " + api + " v" + version + " via "
@@ -124,7 +123,7 @@ public final class ApiDirect {
      *  - callback 类型是接口 → Proxy 万能监听（当前 ROM 未命中，保留作兼容路径）；
      *  - callback 类型是具体类（MI9 实证 com.taobao.idlefish.protocol.net.ApiCallBack）
      *    → 对该类做一次性类级 hook（构造器 + 全部方法 after），所有参数喂
-     *    FishMtopHook.feedRespCandidate（isMtopResp 校验兜底），send 仍传 null。
+     *    FishMtopHook 经 RespSink 注册的响应通道（isMtopResp 校验兜底），send 仍传 null。
      *    这是响应旁路捕获的真正主路径：页面请求与直调请求的回调都经过 ApiCallBack。
      */
     private static Object buildProxyCallback(final ClassLoader hostCl, Class<?> cbCls, final String api) {
@@ -149,7 +148,7 @@ public final class ApiDirect {
                 try {
                     if (args != null) {
                         for (Object a : args) {
-                            if (a != null) FishMtopHook.feedRespCandidate(a, "direct-proxy");
+                            if (a != null) RespChannel.feed(a, "direct-proxy");
                         }
                     }
                 } catch (Throwable ignored) {
@@ -178,7 +177,7 @@ public final class ApiDirect {
                                 try {
                                     if (param.args == null) return;
                                     for (Object a : param.args) {
-                                        if (a != null) FishMtopHook.feedRespCandidate(a, "direct-callback");
+                                        if (a != null) RespChannel.feed(a, "direct-callback");
                                     }
                                 } catch (Throwable ignored) {
                                 }

@@ -89,6 +89,18 @@ public final class FishMtopHook {
 
     public static void hook(final ClassLoader cl) {
         hostCl = cl;
+        // Phase 2a-2 依赖倒置：net 层经 RespSink 接口路由响应事件，ApiDirect 不再 import hook 包
+        com.piggyhand.fish.net.RespChannel.install(new com.piggyhand.fish.net.RespSink() {
+            @Override
+            public void feedRespCandidate(Object resp, String api) {
+                FishMtopHook.feedRespCandidate(resp, api);
+            }
+
+            @Override
+            public void noteDirectSent(String api) {
+                FishMtopHook.noteDirectSent(api);
+            }
+        });
         /* ---------- 1. 请求侧侦察 ---------- */
         try {
             Class<?> reqCls = Reflect.findClass("mtopsdk.mtop.domain.MtopRequest", cl);
