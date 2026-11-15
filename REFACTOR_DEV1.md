@@ -96,3 +96,33 @@ com.piggyhand.fish                 根包：MainHook（Xposed 入口）、FishVe
 - 整体回滚：`git checkout main`（dev1 独立工作区，主工作区从未被动过）。
 - 单簇回滚：Phase 2 每簇一 commit，`git revert <sha>` 即可。
 - 发布回滚：dev1 的 APK 未发布，云端 1.5.6 用户不受任何影响。
+
+## 八、耦合审计（2026-11-15 实测，回答"是否低耦合高内聚"）
+
+对 dev1 全部源码做包级引用扫描（grep 边界匹配，含少量注释误报）：
+
+**量化结果**：30 条包级依赖边，其中 **11 对双向环**；三条为编译实证（Phase 1 迁移时的 17 个 javac 错误即来自它们）：
+
+| 双向环 | 正向 / 反向引用 | 实证 |
+|---|---|---|
+| hook ↔ task | 8 / 7 | ✅ 编译错误实证（FishMtopHook 调 task 8 类；task 调 persistDir/cacheDir/appCtx） |
+| core ↔ hook | 10 / 2 | ✅ 编译错误实证（RhFileLogCtx/RhLocationContext 调 appCtx） |
+| net ↔ hook | 1 / 3 | ✅ 编译错误实证（ApiDirect 调 feedRespCandidate/noteDirectSent） |
+| config ↔ hook/task/ui/core | 各 2~4 | 部分为注释引用 |
+| root ↔ core/ui | 各 1~3 | 装配边 |
+
+**类扇入 Top3**：RhFileLog 24（基建，合理）、ConfigManager 19（基建，合理）、**FishMtopHook 12（神枢纽，不合理）**。
+
+**结论：Phase 1 只完成了内聚的一半，耦合尚未下降。**
+- 内聚：包级达标（6 包单一职责）；类级两处不足——FishTaskAuto（63 方法 8 件事）、FishMtopHook（拦截路由+共享基建+响应通道 3 件事）。
+- 耦合：11 对双向环仍在，hook↔task 的环意味着"加一个任务模块必须同时改 FishMtopHook"（违反开闭原则）。
+
+**Phase 2 必须叠加依赖倒置（在原路线图之上新增三条硬性要求）**：
+
+1. **下沉基建**：`appCtx` / `persistDir` / `cacheDir` 从 FishMtopHook 移入 `core.Runtime` / `core.Store` → 砍掉 core↔hook 环。
+2. **下沉响应通道**：`callApi` / `respFile` / `readFile` / `writeFile` / `feedRespCandidate` / `noteDirectSent` 移入 `net.RespChannel`，ApiDirect 与 task 一律依赖 net → 砍掉 net↔hook 环（顺带整改同 api 同名响应文件冲突）。
+3. **分发倒置为订阅**：FishMtopHook 不再直接调用 task 类；定义 `task.ResponseConsumer` 接口，各任务模块启动时注册，FishMtopHook 只按 api 前缀发布事件 → 砍掉 hook↔task 环，新增任务模块零改动 hook 包。
+
+完成后目标形态：单向分层 DAG（root→hook/ui→task/config→net→core），**11 环 → 0 环**，FishMtopHook 扇入 12 → ≤3。此时"低耦合高内聚"才完整成立。
+
+**回归验证口径**：每砍掉一个环跑一次编译 + compat_gate + 真机冒烟；依赖方向可用本节同款扫描脚本复核（脚本随 `_dev/` 保存）。
