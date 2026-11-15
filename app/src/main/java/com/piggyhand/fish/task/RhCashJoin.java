@@ -4,7 +4,6 @@ import com.piggyhand.fish.config.ConfigManager;
 import com.piggyhand.fish.core.Diag;
 import com.piggyhand.fish.core.RhFileLog;
 import com.piggyhand.fish.core.RhLocationContext;
-import com.piggyhand.fish.hook.FishMtopHook;
 import com.piggyhand.fish.net.RhReport;
 
 import android.app.Application;
@@ -529,7 +528,7 @@ public final class RhCashJoin {
       File var1 = null;
 
       try {
-         var1 = FishMtopHook.cacheDir();
+         var1 = com.piggyhand.fish.core.RhRuntime.cacheDir();
       } catch (Throwable var4) {
       }
 
@@ -556,7 +555,7 @@ public final class RhCashJoin {
       File var1 = null;
 
       try {
-         var1 = FishMtopHook.persistDir(var0);
+         var1 = com.piggyhand.fish.core.RhRuntime.persistDir(var0);
       } catch (Throwable var2) {
       }
 

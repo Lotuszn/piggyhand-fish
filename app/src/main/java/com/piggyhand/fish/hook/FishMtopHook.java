@@ -319,6 +319,8 @@ public final class FishMtopHook {
     private static void registerInvoker(final Context ctx) {
         try {
             appCtx = ctx.getApplicationContext() != null ? ctx.getApplicationContext() : ctx;
+            // Phase 2a 依赖倒置：core/task 经 RhRuntime 取上下文，不再引 hook 包（单写点同步）
+            com.piggyhand.fish.core.RhRuntime.appCtx = appCtx;
             RhFileLog.init(appCtx); // B 类运行日志就绪（Application 上下文最早可用点）
             RhTokenVault.init(appCtx); // v1.0.8：token 保险库加载（files/zhushou_tokens.json）
             BroadcastReceiver receiver = new BroadcastReceiver() {
@@ -1913,39 +1915,15 @@ public final class FishMtopHook {
     }
 
     /** 宿主 cache 目录（优先外部 cache）；v1.2.x 起供 FishTaskAuto 落盘用 */
-    public static java.io.File cacheDir() { // 跨包共享：task 模块持久化（模块化 2026-11-15）
-        java.io.File f;
-        android.content.Context c = appCtx;
-        if (c == null) return null;
-        try {
-            f = c.getExternalCacheDir();
-            if (f != null && f.exists()) return f;
-        } catch (Throwable ignored) {
-        }
-        try {
-            f = c.getCacheDir();
-            if (f == null) return null;
-            if (!f.exists()) f.mkdirs();
-            return f;
-        } catch (Throwable ignored) {
-            return null;
-        }
+    public static java.io.File cacheDir() { // 跨包共享已下沉 core.RhRuntime（Phase 2a），此处保留包内便捷委托
+        return com.piggyhand.fish.core.RhRuntime.cacheDir();
     }
 
     /** 持久目录（外部 files，退内部 files）。
      *  任务状态与报告都落这里：外部 cache 会随装包/清缓存整目录消失
      *  （v1.2.9 实测：一次 pm install -r 后 rh_cash_claim.txt 就没了，
      *  面板状态从「今日已开红包」退回「今日未执行」）。 */
-    public static java.io.File persistDir(android.content.Context ctx) { // 跨包共享：task 模块持久化（模块化 2026-11-15）
-        android.content.Context c = (ctx != null) ? ctx : appCtx;
-        if (c == null) return null;
-        try {
-            java.io.File f = c.getExternalFilesDir(null);
-            if (f == null) f = c.getFilesDir();
-            if (f != null && !f.exists()) f.mkdirs();
-            return f;
-        } catch (Throwable ignored) {
-            return null;
-        }
+    public static java.io.File persistDir(android.content.Context ctx) { // 已下沉 core.RhRuntime（Phase 2a），此处保留包内便捷委托
+        return com.piggyhand.fish.core.RhRuntime.persistDir(ctx);
     }
 }

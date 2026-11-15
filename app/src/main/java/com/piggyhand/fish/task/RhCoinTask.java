@@ -4,7 +4,6 @@ import com.piggyhand.fish.config.ConfigManager;
 import com.piggyhand.fish.core.Diag;
 import com.piggyhand.fish.core.RhFileLog;
 import com.piggyhand.fish.core.RhLocationContext;
-import com.piggyhand.fish.hook.FishMtopHook;
 import com.piggyhand.fish.net.RhReport;
 
 import android.content.Context;
@@ -930,7 +929,7 @@ public final class RhCoinTask {
    private static void writeReport(Context ctx, RhReport rep) {
       boolean ok = false;
       try {
-         File dir = FishMtopHook.persistDir(ctx);
+         File dir = com.piggyhand.fish.core.RhRuntime.persistDir(ctx);
          if (dir != null) {
             File f = new File(dir, REPORT_NAME);
             FileWriter w = new FileWriter(f, false);

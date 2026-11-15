@@ -3,7 +3,6 @@ package com.piggyhand.fish.task;
 import com.piggyhand.fish.config.ConfigManager;
 import com.piggyhand.fish.core.Diag;
 import com.piggyhand.fish.core.RhFileLog;
-import com.piggyhand.fish.hook.FishMtopHook;
 import com.piggyhand.fish.net.RhReport;
 
 import android.content.Context;

@@ -3,7 +3,6 @@ package com.piggyhand.fish.task;
 import com.piggyhand.fish.config.ConfigManager;
 import com.piggyhand.fish.core.RhFileLog;
 import com.piggyhand.fish.core.RhLocationContext;
-import com.piggyhand.fish.hook.FishMtopHook;
 import com.piggyhand.fish.net.RhReport;
 
 import android.content.Context;
@@ -270,7 +269,7 @@ public final class RhCoinExchange {
       rep.append("耗时 ").append((System.currentTimeMillis() - t0) / 1000L).append("s\n");
       boolean ok = false;
       try {
-         File dir = FishMtopHook.persistDir(ctx);
+         File dir = com.piggyhand.fish.core.RhRuntime.persistDir(ctx);
          if (dir != null) {
             FileWriter w = new FileWriter(new File(dir, REPORT_NAME), false);
             w.write(rep.toString());

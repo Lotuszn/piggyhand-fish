@@ -1,13 +1,12 @@
 package com.piggyhand.fish.core;
 
-import com.piggyhand.fish.hook.FishMtopHook;
 import com.piggyhand.fish.net.ApiProtoDump;
 
 import android.content.Context;
 
 /**
  * v1.4.4 上下文访问器：给 ApiProtoDump 等无状态落盘类提供 Application 上下文。
- * 单一来源 = FishMtopHook.appCtx（Application attach 时最早赋值）。
+ * 单一来源 = RhRuntime.appCtx（Application attach 时最早赋值）。
  */
 public final class RhFileLogCtx {
 
@@ -15,6 +14,6 @@ public final class RhFileLogCtx {
     }
 
     public static Context get() {
-        return FishMtopHook.appCtx;
+        return RhRuntime.appCtx;
     }
 }

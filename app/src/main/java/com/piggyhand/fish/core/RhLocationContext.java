@@ -1,6 +1,6 @@
 package com.piggyhand.fish.core;
 
-import com.piggyhand.fish.hook.FishMtopHook;
+import com.piggyhand.fish.core.RhRuntime; // 同包显式引用（原 hook 依赖已倒置）
 
 import android.content.Context;
 import de.robv.android.xposed.XposedBridge;
@@ -99,7 +99,7 @@ public final class RhLocationContext {
         synchronized (LOAD_LOCK) {
             if (loaded) return;
             try {
-                Context c = FishMtopHook.appCtx;
+                Context c = RhRuntime.appCtx;
                 if (c != null) {
                     java.io.File f = new java.io.File(c.getExternalCacheDir(), "rh_loc.json");
                     if (f.exists()) {
@@ -126,7 +126,7 @@ public final class RhLocationContext {
 
     private static void persist() {
         try {
-            Context c = FishMtopHook.appCtx;
+            Context c = RhRuntime.appCtx;
             if (c == null) return;
             org.json.JSONObject j = new org.json.JSONObject();
             if (fishAdCode != null) j.put("fishAdCode", fishAdCode);

@@ -427,7 +427,7 @@ public final class FishTaskAuto {
       if (RUNNING.get()) {
          return "拒绝：引擎正在运行中（RUNNING=true），等本轮跑完再清，否则计数会被写回";
       }
-      Context ctx = appCtx != null ? appCtx : FishMtopHook.appCtx;
+      Context ctx = appCtx != null ? appCtx : com.piggyhand.fish.core.RhRuntime.appCtx;
       if (ctx == null) {
          return "失败：上下文未就绪（闲鱼进程未完成初始化）";
       }
@@ -479,7 +479,7 @@ public final class FishTaskAuto {
    }
 
    private static String cacheDirPath(Context var0) {
-      File var1 = FishMtopHook.cacheDir();
+      File var1 = com.piggyhand.fish.core.RhRuntime.cacheDir();
       return var1 != null ? var1.getAbsolutePath() : ConfigManager.fishExternal("cache");
    }
 
@@ -735,7 +735,7 @@ public final class FishTaskAuto {
 
          if (var25 == 0L) {
             try {
-               File var8 = FishMtopHook.cacheDir();
+               File var8 = com.piggyhand.fish.core.RhRuntime.cacheDir();
                String var9 = var8 == null ? "" : new String(Files.readAllBytes(new File(var8, "rh_pref.json").toPath()), "UTF-8");
                String var10 = new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date());
                if (var9.contains("\"autorun_date\":\"" + var10 + "\"")) {

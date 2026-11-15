@@ -4,7 +4,6 @@ import com.piggyhand.fish.config.ConfigManager;
 import com.piggyhand.fish.core.Diag;
 import com.piggyhand.fish.core.RhFileLog;
 import com.piggyhand.fish.core.RhLocationContext;
-import com.piggyhand.fish.hook.FishMtopHook;
 import com.piggyhand.fish.net.RhReport;
 
 import android.app.Application;
@@ -596,7 +595,7 @@ public final class RhGameTask {
 
       try {
          // 报告主写持久区（cache/ 会被装包与清缓存抹掉，二次读不到了）
-         File var5 = new File(FishMtopHook.persistDir(var0), "rh_tasks_game.txt");
+         File var5 = new File(com.piggyhand.fish.core.RhRuntime.persistDir(var0), "rh_tasks_game.txt");
          if (var5.getParentFile() != null && !var5.getParentFile().exists()) {
             var5.getParentFile().mkdirs();
          }
@@ -629,7 +628,7 @@ public final class RhGameTask {
       File var1 = null;
 
       try {
-         var1 = FishMtopHook.cacheDir();
+         var1 = com.piggyhand.fish.core.RhRuntime.cacheDir();
       } catch (Throwable var4) {
       }
 
