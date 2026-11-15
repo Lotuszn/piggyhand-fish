@@ -71,7 +71,6 @@ public final class FishTaskAuto {
    private static final String LOTTERY_BET_API = "mtop.taobao.idle.coin.lottery.bet";
    private static final int REQ_TIMEOUT_S = 30;
    private static final int BROWSE_MAX_STEPS = 60;
-   private static final long BROWSE_GAP_MS = 5000L;
    private final ClassLoader cl;
    /** 响应通道目录：宿主 FishMtopHook.writeCacheFile 落 rh_resp_*.json 的地方，必须是 getExternalCacheDir。
     *  只用来读写 rh_resp_*、rh_pref.json，不承载任何需要跨冷启动保留的东西。 */
@@ -1050,7 +1049,7 @@ public final class FishTaskAuto {
 
             this.claimOne(var65[0], var65[1], var21, var22);
             this.processed.add(var65[0]);
-            sleep(1200L);
+            sleepJitter(1200L);
          }
 
          for (Object var66o : var57) {
@@ -1060,7 +1059,7 @@ public final class FishTaskAuto {
             }
 
             this.runAdEventTask(var66[0], var66[1], var21, var22);
-            sleep(2000L);
+            sleepJitter(2000L);
          }
 
          for (Object var67o : var17) {
@@ -1070,7 +1069,7 @@ public final class FishTaskAuto {
             }
 
             this.runSearchTask(var67[0], var67[1], var67[2], var67[3], var67[4], var21, var22);
-            sleep(2000L);
+            sleepJitter(2000L);
          }
 
          for (Object var68o : var18) {
@@ -1080,7 +1079,7 @@ public final class FishTaskAuto {
             }
 
             this.runEcMallTask(var68[0], var68[1], var68[2], var21, var22);
-            sleep(2000L);
+            sleepJitter(2000L);
          }
 
          for (Object var69o : var19) {
@@ -1090,7 +1089,7 @@ public final class FishTaskAuto {
             }
 
             this.runTreasureBetTask(var69[0], var69[1], var21, var22);
-            sleep(2000L);
+            sleepJitter(2000L);
          }
 
          for (Object var70o : var56) {
@@ -1132,7 +1131,7 @@ public final class FishTaskAuto {
                   int var80 = 0;
 
                   while (var80 < 10 && !this.abort) {
-                     sleep(2000L);
+                     sleepJitter(2000L);
                      String var82 = null;
                      int var84 = -1;
                      int var86 = -1;
@@ -1189,7 +1188,7 @@ public final class FishTaskAuto {
                this.report.append("[触发] ").append(var70[1]).append(" -> 无响应，跳过\n");
             }
 
-            sleep(1200L);
+            sleepJitter(1200L);
          }
 
          if (var9 && var20 != null && !this.abort && !browseDeadToday()) {
@@ -1200,7 +1199,7 @@ public final class FishTaskAuto {
 
          if (!this.abort) {
             for (int var64 = 0; var64 < 2; var64++) {
-               sleep(6000L);
+               sleepJitter(6000L);
                var48 = this.callApi("mtop.taobao.idle.task.queryolivertasklist", "2.0", "{\"sceneId\":496}", "任务列表复核" + (var64 + 1));
                List var71 = this.extractTasks(var48);
                if (var71 != null) {
@@ -1283,12 +1282,12 @@ public final class FishTaskAuto {
                      this.report.append("[收尾] ").append(var104).append(" trigger=").append(var109).append('\n');
                   }
 
-                  sleep(1500L);
+                  sleepJitter(1500L);
                   this.claimOne(var102, var104, var21, var22);
-                  sleep(1500L);
+                  sleepJitter(1500L);
                   this.claimOne(var102, var104, var21, var22);
                   this.processed.add(var102);
-                  sleep(1000L);
+                  sleepJitter(1000L);
                }
             }
          } catch (Throwable var110) {
@@ -1332,7 +1331,7 @@ public final class FishTaskAuto {
          if (var9 == null) {
             var7++;
             this.report.append("[广告] 第 ").append(var8 + 1).append(" 次 无响应（7.28.30 响应不落盘，继续）\n");
-            sleep(5000L);
+            sleepJitter(5000L);
          } else {
             if (var10 == null || !var10.contains("SUCCESS")) {
                this.report.append("[广告] 第 ").append(var8 + 1).append(" 次 -> ").append(var10).append('\n');
@@ -1341,7 +1340,7 @@ public final class FishTaskAuto {
 
             var6++;
             this.report.append("[广告] 第 ").append(var8 + 1).append(" 次 complete -> ").append(var10).append('\n');
-            sleep(5000L);
+            sleepJitter(5000L);
          }
       }
 
@@ -1549,11 +1548,11 @@ public final class FishTaskAuto {
                      break;
                   }
 
-                  sleep(30000L);
+                  sleepJitter(30000L);
                }
 
                this.report.append("[ecMall] push -> ").append(var29 == null ? "无响应" : var29).append('\n');
-               sleep(3000L);
+               sleepJitter(3000L);
                JSONObject var31 = this.callApi("mtop.taobao.idle.task.queryolivertasklist", "2.0", "{\"sceneId\":496}", "ecMall 复核");
                String var33 = null;
                List var21 = this.extractTasks(var31);
@@ -1629,12 +1628,12 @@ public final class FishTaskAuto {
                break;
             }
 
-            sleep(8000L);
+            sleepJitter(8000L);
          }
 
          this.report.append("[夺宝] ").append(var2).append(" bet(").append(var6).append(") -> ").append(var14 == null ? "无响应" : var14).append('\n');
          if (var14 != null && var14.contains("SUCCESS")) {
-            sleep(3000L);
+            sleepJitter(3000L);
             JSONObject var16 = this.callApi("mtop.taobao.idle.task.queryolivertasklist", "2.0", "{\"sceneId\":496}", "夺宝复核");
             String var18 = null;
             List var11 = this.extractTasks(var16);
@@ -2298,7 +2297,7 @@ public final class FishTaskAuto {
                            }
 
                            var29++;
-                           sleep(1200L);
+                           sleepJitter(1200L);
                         }
 
                         StringBuilder var46 = new StringBuilder("[背包] ").append(var22).append(" 使用 ").append(var29).append("/").append(var28);
@@ -2570,7 +2569,7 @@ public final class FishTaskAuto {
 
                      var10 = Math.min(var10 + 4000L, 16000L);
                      this.report.append("[浏览] step ").append(var8).append(" ILLEGAL ").append(var9).append("/2，退避 ").append(var10 / 1000L).append("s\n");
-                     sleep(var10);
+                     sleepJitter(var10);
                      continue;
                   }
 
@@ -2578,7 +2577,7 @@ public final class FishTaskAuto {
                   var8++;
                }
 
-               sleep(var10);
+               sleepJitter(var10);
             }
          }
 
@@ -3097,6 +3096,13 @@ public final class FishTaskAuto {
    /** 触发→领取拟人延迟：中心 11.5s±40%（约 7~16s），模拟「人完成任务再回来领」的间隔 */
    private static void claimHumanGap() {
       sleep(jitterMs(11500L));
+   }
+
+   /** 执行器节奏等待：任意固定等待过 jitterMs（设备系数×±40% 抖动）——
+    *  2026-11-15 节奏整形补全：执行器内 18 处固定字面量与浏览流步进间隔统一走这里，
+    *  消除任务间等间隔脉冲；<1000ms 的轮询小间隔保持原 sleep 不抖。 */
+   private static void sleepJitter(long centerMs) {
+      sleep(jitterMs(centerMs));
    }
 
    private static void log(String var0) {
