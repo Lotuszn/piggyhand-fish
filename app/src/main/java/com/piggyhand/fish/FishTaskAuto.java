@@ -78,6 +78,11 @@ public final class FishTaskAuto {
     *  实例字段而不是静态——FishTaskAuto 每次跑批新 new 一个，天然按轮清零，
     *  避免单例态跨轮残留把本来能跑的任务永久封锁（见 optimization 2026-11-12）。 */
    private final java.util.HashMap<String, Integer> triggerPoison = new java.util.HashMap<String, Integer>();
+   /** 2026-11-15 实测补丁（本轮修）：主列表里判过「当日额度已满」的 deliveryId 台账。
+    *  现场 06:33:22 —— 主循环 06:32:26 已经 [跳过] 89640，6 秒后的复核循环却只看
+    *  idleTaskStatus=AWARD + needBenefit 又打了一发 benefit，回 RMB_CHECK，等于白送一次风控计数。
+    *  复核 / 收尾 / claimOne 三条路径统一查这张表，额度满的任务一次都不再发。 */
+   private final Set<String> quotaFullIds = ConcurrentHashMap.newKeySet();
    /** v1.5.5 改进 D：map.init 60s 结果缓存（静态——coinBalanceLogger 每 30s 新建实例）。
     *  只缓存 SUCCESS 响应；GATEWAY_REJECT/失败不缓存，失败立刻可重试。 */
    private static volatile JSONObject MAP_INIT_CACHE = null;
@@ -317,6 +322,17 @@ public final class FishTaskAuto {
          lvlSave();
          log("[rmb-lock] " + var0 + " 上锁（人民币风控，需真实行为）");
       }
+   }
+
+   /** 任务当日额度是否已用尽。reachLimit 是服务端下发的权威位；
+    *  times>=maxTimes 兜底服务端不下发 reachLimit 的变体（7.25.31 两处都下发了，仍保留兜底）。
+    *  纯函数，只读 task JSON，不产生任何请求。 */
+   private static boolean quotaFull(JSONObject var0) {
+      if (var0 == null) return false;
+      JSONObject var1 = var0.optJSONObject("progressDTO");
+      if (var1 == null) return false;
+      return var1.optBoolean("reachLimit", false)
+            || (var1.optInt("maxTimes", 0) > 0 && var1.optInt("times", 0) >= var1.optInt("maxTimes", 0));
    }
 
    private boolean lvlCountedThisRun(String var1) {
@@ -808,6 +824,10 @@ public final class FishTaskAuto {
       boolean var10 = opt(var4, "claim_only", false);
       boolean var11 = opt(var4, "lvl", true);
       this.lvlOnRun = var11;
+      // 2026-11-15：假曝光闸。play.ad.event.push 的 eventType=complete 是纯伪造，
+      // 服务端与广告平台（优量汇/穿山甲）对账时缺真实曝光回传，客户端侧无法补。
+      // 默认关；确需跑广告任务时显式传 {"adEvent":true}。
+      boolean varAdEvent = opt(var4, "adEvent", false);
       if (var10) {
          var9 = false;
       }
@@ -916,7 +936,23 @@ public final class FishTaskAuto {
          for (Object var26o : var52) {
             JSONObject var26 = (JSONObject) var26o;
             String var27 = str(var26, "deliveryId");
-            if (var27 != null && !var23.contains(var27) && !rejectedToday.contains(var27)) {
+            // 2026-11-15 P3 实测（_diag/p3_capture/00_SUMMARY.md）：
+            //   89640  status=AWARD   times=3/3 reachLimit=true  → 因 !"AWARD".equals 判定落 else
+            //          → 塞进 var55「可领」→ claimOne 打 getolivertaskbenefit → RMB_CHECK
+            //   106181 status=COMPLETE times=4/4 reachLimit=true → 落内层 showAds 分支
+            //          → 塞进 var57「视频任务」→ runAdEventTask 再伪造 4 次 complete
+            // 对已经没有任何东西可给的任务反复刷接口，就是 FAIL_BIZ_IDL_COIN_TASK_RMB_CHECK 的直接来源。
+            JSONObject varProg = var26.optJSONObject("progressDTO");
+            boolean varQuotaFull = quotaFull(var26);
+            if (varQuotaFull && var27 != null) {
+               // 记入 var23 去重集，避免同一批内重复判定同一任务
+               var23.add(var27);
+               // 落台账：复核 / 收尾 / claimOne 三条后续路径都要认这张表，见 quotaFullIds 注释
+               this.quotaFullIds.add(var27);
+               this.report.append("[跳过] ").append(var27).append(" 当日额度已满（")
+                     .append(varProg.optInt("times", 0)).append("/")
+                     .append(varProg.optInt("maxTimes", 0)).append("），不发请求\n");
+            } else if (var27 != null && !var23.contains(var27) && !rejectedToday.contains(var27)) {
                if (var11 && lvlSkip(var27)) {
                   var24++;
                } else {
@@ -933,11 +969,18 @@ public final class FishTaskAuto {
                      if ("ACCEPTED".equals(var30) && var33.contains("showAds") && var33.contains("adType=ecMall")) {
                         var18.add(new String[]{var27, var32, var33});
                      } else if ("ACCEPTED".equals(var30) && var33.contains("showAds")) {
-                        String var36 = extractAdEventPush(var33);
-                        if (var36 != null) {
-                           var57.add(new String[]{var27, var36, optStr(var28, "subTitle")});
+                        if (!varAdEvent) {
+                           // 不伪造曝光：这类任务只能靠真实看完广告完成，代码侧无解。
+                           // 硬发 complete 只会把额度记成"已完成"却无曝光，反而毒化当日窗口。
+                           this.report.append("[广告] ").append(var32)
+                                 .append(" 跳过（adEvent=off，假曝光拿不到平台侧回传）\n");
                         } else {
-                           this.report.append("[广告] ").append(var32).append(" 无 adEventPush 参数，跳过\n");
+                           String var36 = extractAdEventPush(var33);
+                           if (var36 != null) {
+                              var57.add(new String[]{var27, var36, optStr(var28, "subTitle")});
+                           } else {
+                              this.report.append("[广告] ").append(var32).append(" 无 adEventPush 参数，跳过\n");
+                           }
                         }
                      } else if ("ACCEPTED".equals(var30) && var33.contains("xianyu/search.html")) {
                         var17.add(new String[]{var27, var32, var33, str(var26, "fromToken"), str(var26, "groupId")});
@@ -1149,6 +1192,13 @@ public final class FishTaskAuto {
                      JSONObject var75 = (JSONObject) var75o;
                      String var77 = str(var75, "deliveryId");
                      if (var77 != null && !this.processed.contains(var77) && (!var11 || !lvlSkip(var77))) {
+                        // 复核这条路径原来只看 status=AWARD/needBenefit，不看额度——
+                        // 06:33:22 实测：89640 主循环已跳过，这里又打了一发 benefit 换回 RMB_CHECK。
+                        if (quotaFull(var75) || this.quotaFullIds.contains(var77)) {
+                           this.processed.add(var77);
+                           this.report.append("[复核] ").append(var77).append(" 跳过（当日额度已满，不发 benefit）\n");
+                           continue;
+                        }
                         JSONObject var79 = var75.optJSONObject("taskBenefitDTO");
                         String var81 = str(var75, "idleTaskStatus");
                         JSONObject var83 = var75.optJSONObject("materialDTO");
@@ -1192,6 +1242,12 @@ public final class FishTaskAuto {
                   // 风控锁不再进收尾：既不打 trigger 也不打 benefit（11-12 日志里收尾是第二次刷屏源）
                   if (rmbLocked(var102)) {
                      this.report.append("[收尾] ").append(var102).append(" 跳过（人民币风控锁）\n");
+                     continue;
+                  }
+                  // 额度闸前置：额度满的 AWARD 再打 benefit 只会换回 RMB_CHECK，连 trigger 一起省掉
+                  if (quotaFull(var101) || this.quotaFullIds.contains(var102)) {
+                     this.report.append("[收尾] ").append(var102).append(" 跳过（当日额度已满，不发 benefit）\n");
+                     this.processed.add(var102);
                      continue;
                   }
                   JSONObject var103 = var101.optJSONObject("materialDTO");
@@ -2582,10 +2638,18 @@ public final class FishTaskAuto {
          var4.add(var2 + "(" + var1 + ")");
          return;
       }
+      // 额度闸：主列表判定过「当日额度已满」的任务，任何调用方（复核/收尾/浏览兜底）都拦在这里
+      if (this.quotaFullIds.contains(var1)) {
+         this.report.append("[领取] ").append(var2).append(" 跳过（当日额度已满，需 App 内手动完成）\n");
+         return;
+      }
       JSONObject var5 = this.callApi(
          "mtop.taobao.idle.task.getolivertaskbenefit",
          "1.0",
-         objJson("sceneId", "496", "deliveryId", var1, "fishAdCode", RhLocationContext.fishAdCode(), "gps", RhLocationContext.gps()),
+         // 2026-11-15 P3 逐字对比（_diag/p3_capture/00_SUMMARY.md）：
+         //   App 真实请求 {"asac":"...","deliveryId":77912,"sceneId":496}，没有 fishAdCode / gps。
+         //   模块原来多发这两个字段，与线上形态不一致，去掉。asac 由协议栈自动补齐，不用手写。
+         objJson("sceneId", "496", "deliveryId", var1),
          "领奖 " + var2
       );
       String var6 = firstRet(var5);
