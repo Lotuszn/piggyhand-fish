@@ -99,7 +99,7 @@ public final class RhPondTask {
             }
 
             // v1.4.1 LVL 门：当日 @pondTask 计满 2 跳过自动跑（手动 POND 不受此限）
-            if (FishTaskAuto.lvlSkipShared(ctx, LVL_KEY_TASK)) {
+            if (LvlLedger.skipShared(ctx, LVL_KEY_TASK)) {
                 RhFileLog.write("[pond] auto-run skip: LVL " + LVL_KEY_TASK + " reached daily cap");
                 return;
             }
@@ -113,7 +113,7 @@ public final class RhPondTask {
                         Thread.sleep(40000);
                         RhPondTask.run(ctx);
                         // v1.4.1 LVL 计数：本轮调度无论成败都计一次（与签到类引擎语义一致）
-                        FishTaskAuto.lvlBumpShared(ctx, LVL_KEY_TASK);
+                        LvlLedger.bumpShared(ctx, LVL_KEY_TASK);
                         // 落当日标记
                         try {
                             String td = new java.text.SimpleDateFormat("yyyyMMdd",
@@ -184,7 +184,7 @@ public final class RhPondTask {
             }
 
             // LVL 门：当日触发次数达上限时跳过自动跑（手动 PONDFEED 不受此限）
-            if (FishTaskAuto.lvlSkipShared(ctx, LVL_KEY_FEED)) {
+            if (LvlLedger.skipShared(ctx, LVL_KEY_FEED)) {
                 RhFileLog.write("[pondfeed] auto-run skip: " + LVL_KEY_FEED + " reached daily cap");
                 return;
             }
@@ -196,7 +196,7 @@ public final class RhPondTask {
                     try {
                         Thread.sleep(46000);
                         RhPondTask.runFeed(ctx);
-                        FishTaskAuto.lvlBumpShared(ctx, LVL_KEY_FEED);
+                        LvlLedger.bumpShared(ctx, LVL_KEY_FEED);
                         // 落当日标记
                         try {
                             String td = new java.text.SimpleDateFormat("yyyyMMdd",

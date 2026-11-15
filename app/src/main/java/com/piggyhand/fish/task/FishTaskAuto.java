@@ -111,17 +111,13 @@ public final class FishTaskAuto {
    private static volatile double devicePaceFactor = Double.NaN;
    private static final Set<String> rejectedToday = ConcurrentHashMap.newKeySet();
    private static volatile String rejectedDay = "";
-   private static final String LVL_FILE = "rh_task_lvl.json";
+   // LVL 当日台账（lvlDay/lvlDir/lvlMap/lvlLoaded/LVL_FILE）与 RMB 锁已迁 LvlLedger（优化5簇1）；
+   // K_* 键常量留这里（键的使用方在任务执行器）。
    private static final String K_SIGNIN = "@signin";
    private static final String K_PLAY_SIGN = "@playSignin";
    private static final String K_DAILY_REWARD = "@dailyReward";
-   private static final int LVL_MAX = 2;
-   private static volatile String lvlDay = "";
-   private static volatile String lvlDir = null;
-   private static final Map<String, Integer> lvlMap = new ConcurrentHashMap<>();
    private final Set<String> lvlBumpedThisRun = new HashSet<>();
    private volatile boolean lvlOnRun = true;
-   private static volatile boolean lvlLoaded = false;
    private List<String> itemPool = null;
    private static final Object COIN_LOG_LOCK = new Object();
    private static volatile long coinLogLastVal = -1L;
@@ -145,7 +141,7 @@ public final class FishTaskAuto {
       this.cl = var1;
       this.cacheDir = var2;
       // 报告与 lvl 存档共用持久目录；lvlDir 未初始化时退化为通道目录（只影响首次极端时序，不影响请求）
-      this.reportDir = lvlDir != null ? lvlDir : var2;
+      this.reportDir = LvlLedger.dir() != null ? LvlLedger.dir() : var2;
    }
 
    private static void markRejected(String var0) {
@@ -161,331 +157,6 @@ public final class FishTaskAuto {
       }
    }
 
-   private static String dayOf(long var0) {
-      return new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date(var0));
-   }
-
-   private static String lvlDirPath(Context var0) {
-      if (var0 != null) {
-         try {
-            File var1 = var0.getExternalFilesDir(null);
-            if (var1 != null) {
-               if (!var1.exists()) {
-                  var1.mkdirs();
-               }
-
-               if (var1.isDirectory() && var1.canWrite()) {
-                  return var1.getAbsolutePath();
-               }
-            }
-         } catch (Throwable var3) {
-         }
-
-         try {
-            File var4 = var0.getFilesDir();
-            if (var4 != null && var4.isDirectory()) {
-               return var4.getAbsolutePath();
-            }
-         } catch (Throwable var2) {
-         }
-      }
-
-      return cacheDirPath(var0);
-   }
-
-   private static synchronized void lvlLoadOnce(Context var0) {
-      if (!lvlLoaded) {
-         if (lvlDir == null) {
-            lvlDir = lvlDirPath(var0 != null ? var0 : appCtx);
-         }
-
-         lvlLoaded = lvlLoad(var0 != null ? var0 : appCtx);
-      }
-   }
-
-   private static synchronized boolean lvlLoad(Context var0) {
-      String var1 = lvlDir;
-      if (var1 == null) {
-         log("[lvl] load skip: dir=null");
-         return false;
-      } else {
-         try {
-            File var2 = new File(var1, "rh_task_lvl.json");
-            boolean var3 = false;
-            if (!var2.exists()) {
-               File var4 = new File(cacheDirPath(var0), "rh_task_lvl.json");
-               if (var4.exists()) {
-                  var2 = var4;
-                  var3 = true;
-               }
-            }
-
-            if (!var2.exists()) {
-               log("[lvl] load skip: no file " + var2.getAbsolutePath());
-               return true;
-            } else {
-               String var10 = new String(Files.readAllBytes(var2.toPath()), "UTF-8");
-               JSONObject var5 = new JSONObject(var10);
-               lvlDay = var5.optString("day", "");
-               JSONObject var6 = var5.optJSONObject("lvl");
-               lvlMap.clear();
-               if (var6 != null) {
-                  Iterator var7 = var6.keys();
-
-                  while (var7.hasNext()) {
-                     String var8 = (String)var7.next();
-                     lvlMap.put(var8, var6.optInt(var8, 0));
-                  }
-               }
-
-               log("[lvl] loaded day=" + lvlDay + " n=" + lvlMap.size() + (var3 ? " (migrated from cache)" : ""));
-               if (var3) {
-                  lvlSave();
-               }
-
-               return true;
-            }
-         } catch (Throwable var9) {
-            log("[lvl] load fail: " + var9);
-            return false;
-         }
-      }
-   }
-
-   private static synchronized void lvlSave() {
-      String var0 = lvlDir;
-      if (var0 == null) {
-         try {
-            lvlDir = var0 = lvlDirPath(appCtx);
-         } catch (Throwable var6) {
-         }
-      }
-
-      if (var0 == null) {
-         log("[lvl] save skip: dir=null");
-      } else {
-         try {
-            JSONObject var1 = new JSONObject();
-
-            for (Entry var3 : lvlMap.entrySet()) {
-               var1.put((String)var3.getKey(), var3.getValue());
-            }
-
-            JSONObject var8 = new JSONObject();
-            var8.put("day", lvlDay);
-            var8.put("lvl", var1);
-            byte[] var9 = var8.toString().getBytes("UTF-8");
-            File var4 = new File(var0, "rh_task_lvl.json");
-            File var5 = new File(var0, "rh_task_lvl.json.tmp");
-            Files.write(var5.toPath(), var9);
-            if (!var5.renameTo(var4)) {
-               Files.write(var4.toPath(), var9);
-               var5.delete();
-            }
-         } catch (Throwable var7) {
-            log("[lvl] save fail: " + var7);
-         }
-      }
-   }
-
-   private static synchronized void lvlEnsure(String var0) {
-      if (var0 != null && var0.length() != 0) {
-         if (!var0.equals(lvlDay)) {
-            int var1 = lvlMap.size();
-            lvlMap.clear();
-            lvlDay = var0;
-            lvlSave();
-            if (var1 > 0) {
-               log("[lvl] day -> " + var0 + ", cleared " + var1);
-            }
-         }
-      }
-   }
-
-   private static int lvlGet(String var0) {
-      // v1.4.1 修复：缺省 -1 会让 lvlBump 首次计数写成 0（-1+1），实际放行 3 次而非上限 2 次。
-      // 缺省 0 与「未记录」等效：lvlSkip(0>=2=false)、lvlReset(0!=0=false) 行为均不变，bump 首次正确写 1。
-      Integer var1 = lvlMap.get(var0);
-      return var1 == null ? 0 : var1;
-   }
-
-   private static boolean lvlSkip(String var0) {
-      return lvlGet(var0) >= 2;
-   }
-
-   /* ---------- 496 场景人民币风控锁（v1.5.4-fix，2026-11-12 日志取证） ----------
-    * 证据：单次会话 25 分钟内对 6 个任务打 44 次 getolivertaskbenefit，
-    *       73 条配对回包 100% 是 FAIL_BIZ_IDL_COIN_TASK_RMB_CHECK_ERROR::服务器繁忙请稍后再试~。
-    * 该请求的【线上形态】已经和 App 手动领完全一致——模块传字符串 "106538"，
-    *       经闲鱼协议栈 paramMap 序列化后落地为 int 106538，asac 也由协议栈自动补齐
-    *       （日志 [mtop-req] 里两条路径的参数逐字相同）。所以这不是参数问题，
-    *       是服务端「真实广告曝光 / 真实浏览行为」凭证闸：没有凭证，重试多少次都是同一码。
-    * 危害：高频重打会把账号钉进当日风控窗口，导致 App 内手动领也一起失败（用户实测现象）。
-    * 处理：当日一次判定即上锁，主循环与收尾一律不再打该 deliveryId，把名额留给手动。
-    * 存储：复用 rh_task_lvl.json（跨进程持久、跨天由 lvlEnsure 自动清空）。 */
-   private static final String RMB_LOCK_PREFIX = "rmb:";
-
-   private static boolean rmbLocked(String var0) {
-      return var0 != null && var0.length() != 0 && lvlMap.containsKey(RMB_LOCK_PREFIX + var0);
-   }
-
-   private void rmbLock(String var0) {
-      if (var0 == null || var0.length() == 0) return;
-      String var1 = RMB_LOCK_PREFIX + var0;
-      if (!lvlMap.containsKey(var1)) {
-         lvlMap.put(var1, 1);
-         lvlSave();
-         log("[rmb-lock] " + var0 + " 上锁（人民币风控，需真实行为）");
-      }
-   }
-
-   /** 任务当日额度是否已用尽。reachLimit 是服务端下发的权威位；
-    *  times>=maxTimes 兜底服务端不下发 reachLimit 的变体（7.25.31 两处都下发了，仍保留兜底）。
-    *  纯函数，只读 task JSON，不产生任何请求。 */
-   private static boolean quotaFull(JSONObject var0) {
-      if (var0 == null) return false;
-      JSONObject var1 = var0.optJSONObject("progressDTO");
-      if (var1 == null) return false;
-      return var1.optBoolean("reachLimit", false)
-            || (var1.optInt("maxTimes", 0) > 0 && var1.optInt("times", 0) >= var1.optInt("maxTimes", 0));
-   }
-
-   private boolean lvlCountedThisRun(String var1) {
-      return this.lvlBumpedThisRun.contains(var1);
-   }
-
-   private void lvlBump(String var1) {
-      if (var1 != null && var1.length() != 0) {
-         if (this.lvlBumpedThisRun.add(var1)) {
-            int var2 = lvlGet(var1);
-            if (var2 < 2) {
-               lvlMap.put(var1, var2 + 1);
-               lvlSave();
-            }
-         }
-      }
-   }
-
-   private void lvlReset(String var1) {
-      if (var1 != null && var1.length() != 0) {
-         if (lvlGet(var1) != 0) {
-            lvlMap.put(var1, 0);
-            lvlSave();
-         }
-      }
-   }
-
-   /* ---------- 共享 LVL 门（v1.4.1）：RhPondTask 的自动赚饲料/自动投喂复用同一份 rh_task_lvl.json ----------
-    * 语义与实例版一致：当日计数 >=2 跳过（lvlSkip），每次引擎运行计一次。
-    * 鱼塘两引擎的 bump 只在自动调度线程里调用（每调度一轮 bump 一次），手动 socket 触发不经过这里
-    * —— 与 POND/OLIVER 手动语义对齐。跨天由 lvlEnsure 自动清零。 */
-   private static final Object LVL_SHARED_LOCK = new Object();
-
-   /** 共享 LVL 查询：当日该键已计满（>=2）→ 自动跑跳过 */
-   public static boolean lvlSkipShared(Context ctx, String key) {
-      try {
-         lvlLoadOnce(ctx != null ? ctx : appCtx);
-         lvlEnsure(dayOf(System.currentTimeMillis()));
-         return lvlSkip(key);
-      } catch (Throwable t) {
-         return false; // LVL 存档坏了不拦业务
-      }
-   }
-
-   /** 共享 LVL 计数 +1：每次引擎运行调用一次，当日累计到 2 后 lvlSkipShared 开始返回 true */
-   public static void lvlBumpShared(Context ctx, String key) {
-      try {
-         if (key == null || key.length() == 0) return;
-         synchronized (LVL_SHARED_LOCK) {
-            lvlLoadOnce(ctx != null ? ctx : appCtx);
-            lvlEnsure(dayOf(System.currentTimeMillis()));
-            int v = lvlGet(key);
-            if (v < 2) {
-               lvlMap.put(key, v + 1);
-               lvlSave();
-               log("[lvl] shared bump " + key + " -> " + (v + 1));
-            }
-         }
-      } catch (Throwable t) {
-         log("[lvl] shared bump fail: " + t);
-      }
-   }
-
-   /** v1.5.3 各引擎当日标记文件名：done=完成标记 / try=尝试计数 / date=当日已跑标记 */
-   private static final String[] DAILY_MARK_FILES = {
-         "rh_task_lvl.json",        // LVL 门（0/1/2 计数，含 @signin/@playSignin/@dailyReward/@pondTask/@pondFeed 等）
-         "rh_game_done.txt", "rh_game_try.txt",       // 游戏任务
-         "rh_oliver_done.txt", "rh_oliver_try.txt",   // 会员任务
-         "rh_pond_date.txt",                            // 鱼塘赚饲料
-         "rh_pondfeed_date.txt",                        // 自动投喂（重跑会真实消耗饲料）
-         "rh_cash_done.txt", "rh_cash_claim.txt",       // 现金瓜分
-         "rh_coin_try.txt", "rh_coin_mark.txt",         // 币任务尝试计数 + 当日标记
-         "rh_coin_exch.txt",                            // 兑换每日 1 次标记（清除后会再尝试兑换，服务端限额兜底）
-         "rh_cycle_claim.txt",                          // 圈数挑战本地领取档
-   };
-
-   /**
-    * v1.5.3 清除全部当日任务标记（socket CLEAR_MARKS 调用，必须由闲鱼进程自己执行：
-    * lvlMap 是本进程 static 内存缓存，App 进程删文件会被 lvlSave 回写——见 RhGameTask.doneFile 注释同因）。
-    * 引擎运行中（RUNNING）拒绝执行，避免边跑边清 bump 把 0 写回。
-    * @return 逐项结果清单（回显给 UI）
-    */
-   public static String clearDailyMarks() {
-      StringBuilder out = new StringBuilder();
-      if (RUNNING.get()) {
-         return "拒绝：引擎正在运行中（RUNNING=true），等本轮跑完再清，否则计数会被写回";
-      }
-      Context ctx = appCtx != null ? appCtx : com.piggyhand.fish.core.RhRuntime.appCtx;
-      if (ctx == null) {
-         return "失败：上下文未就绪（闲鱼进程未完成初始化）";
-      }
-      // ① 内存 LVL 缓存清零 + 落盘空表（lvlSave 原子写）
-      synchronized (LVL_SHARED_LOCK) {
-         int n = lvlMap.size();
-         lvlMap.clear();
-         lvlDay = "";
-         lvlSave();
-         out.append("LVL 内存计数: 已清 ").append(n).append(" 项并落盘\n");
-      }
-      // ② 标记文件：在 4 个候选目录里找到即删（各引擎目录选择不一，逐个尝试不漏）
-      File[] dirs;
-      try {
-         File ef = ctx.getExternalFilesDir(null);
-         File ec = ctx.getExternalCacheDir();
-         dirs = new File[]{ctx.getFilesDir(), ctx.getCacheDir(), ef, ec};
-      } catch (Throwable t) {
-         dirs = new File[]{new File("/data/data/com.taobao.idlefish/files")};
-      }
-      int deleted = 0, absent = 0, failed = 0;
-      for (String name : DAILY_MARK_FILES) {
-         boolean gone = false, found = false;
-         if (dirs != null) {
-            for (File d : dirs) {
-               if (d == null) continue;
-               File f = new File(d, name);
-               if (!f.exists()) continue;
-               found = true;
-               // .tmp 伴生文件一并清（原子写残留）
-               File tmp = new File(d, name + ".tmp");
-               if (tmp.exists()) tmp.delete();
-               gone = f.delete() || !f.exists();
-               if (!gone) failed++;
-               break;
-            }
-         }
-         if (!found) absent++;
-         else if (gone) deleted++;
-      }
-      out.append("标记文件: 删除 ").append(deleted)
-            .append(" · 本就不存在 ").append(absent)
-            .append(failed > 0 ? " · 删除失败 " + failed : "")
-            .append('\n');
-      out.append("rejectedToday/内存探针态: 随进程重启复位\n");
-      out.append("DONE @").append(new SimpleDateFormat("HH:mm:ss", Locale.US).format(new Date()));
-      log("[marks] cleared: del=" + deleted + " absent=" + absent + " fail=" + failed);
-      return out.toString();
-   }
-
    private static String cacheDirPath(Context var0) {
       File var1 = com.piggyhand.fish.core.RhRuntime.cacheDir();
       return var1 != null ? var1.getAbsolutePath() : ConfigManager.fishExternal("cache");
@@ -493,7 +164,7 @@ public final class FishTaskAuto {
 
    private static int probeRunnableCount(Context var0) {
       try {
-         lvlLoadOnce(var0);
+         LvlLedger.loadOnce(var0);
          ClassLoader var1 = var0.getClassLoader();
          String var2 = cacheDirPath(var0);
          FishTaskAuto var3 = new FishTaskAuto(var1, var2);
@@ -507,7 +178,7 @@ public final class FishTaskAuto {
             for (Object var8o : var5) {
                JSONObject var8 = (JSONObject) var8o;
                String var9 = str(var8, "deliveryId");
-               if (var9 != null && !lvlSkip(var9)) {
+               if (var9 != null && !LvlLedger.skip(var9)) {
                   String var10 = str(var8, "idleTaskStatus");
                   if ("AWARD".equals(var10)) {
                      var6++;
@@ -587,7 +258,7 @@ public final class FishTaskAuto {
          var1.report.append("[圈数挑战] 异常 ").append(var3).append('\n');
       }
       // 报告落持久区 files/（lvlDirPath 同源），冷启动不被清；写 cache 会被系统回收
-      String var4 = lvlDirPath(var0 != null ? var0 : appCtx);
+      String var4 = LvlLedger.dirPath(var0 != null ? var0 : appCtx);
       var1.writeFile((var4 != null ? var4 : cacheDirPath(var0)) + "/rh_tasks_cycle.txt", var1.report.toString());
       log("[cycle-manual] report written");
    }
@@ -597,6 +268,8 @@ public final class FishTaskAuto {
          log("[tasks] engine already running, trigger ignored");
       } else {
          appCtx = var0.getApplicationContext() != null ? var0.getApplicationContext() : var0;
+         // 与 core.RhRuntime.appCtx 保持同步（LvlLedger 等已统一走 RhRuntime 来源；幂等写，值恒等）
+         com.piggyhand.fish.core.RhRuntime.appCtx = appCtx;
 
          try {
             ConfigManager var2 = ConfigManager.load();
@@ -607,9 +280,7 @@ public final class FishTaskAuto {
 
          ClassLoader var5 = var0.getClassLoader();
          String var3 = cacheDirPath(var0);   // 响应通道：必须是宿主写 rh_resp_* 的那个目录
-         lvlDir = lvlDirPath(var0);          // 持久区：存档 + 报告，冷启动不被清
-         lvlLoaded = false;
-         lvlLoadOnce(var0);
+         LvlLedger.reload(var0);             // 持久区：存档 + 报告，冷启动不被清（优化5簇1 收口）
          new Thread(() -> {
             try {
                new FishTaskAuto(var5, var3).run(var1);
@@ -850,11 +521,11 @@ public final class FishTaskAuto {
 
       try {
          if (var11) {
-            lvlLoadOnce(appCtx);
-            lvlEnsure(dayOf(System.currentTimeMillis()));
+            LvlLedger.loadOnce(appCtx);
+            LvlLedger.ensure(LvlLedger.dayOf(System.currentTimeMillis()));
          }
 
-         if (var5 && (!var11 || !lvlSkip("@signin"))) {
+         if (var5 && (!var11 || !LvlLedger.skip("@signin"))) {
             JSONObject var12 = this.callApi("mtop.taobao.idle.coin.signin", "1.0", "{}", "签到");
             String var13 = firstRet(var12);
             boolean var14 = var13 != null && var13.contains("SUCCESS");
@@ -862,16 +533,16 @@ public final class FishTaskAuto {
             if (var14) {
                toast("✓ 每日签到" + coinSuffix(signinRewards(var12)));
                if (var11) {
-                  this.lvlBump("@signin");
+                  LvlLedger.bump("@signin", this.lvlBumpedThisRun);
                }
             } else if (var11 && var13 != null && (var13.contains("SIGNED") || var13.contains("已签"))) {
-               this.lvlBump("@signin");
+               LvlLedger.bump("@signin", this.lvlBumpedThisRun);
             }
          } else if (var5) {
             this.report.append("[签到] 跳过：标识=2（今日已判定完成 3 次）\n");
          }
 
-         if (var5 && (!var11 || !lvlSkip("@playSignin"))) {
+         if (var5 && (!var11 || !LvlLedger.skip("@playSignin"))) {
             JSONObject var46 = this.callApi("mtop.taobao.idle.play.sign.in", "1.0", playSignData(), "玩一玩签到");
             String var50 = firstRet(var46);
             boolean var53 = var50 != null && var50.contains("SUCCESS");
@@ -880,10 +551,10 @@ public final class FishTaskAuto {
             if (var53) {
                toast("✓ 玩一玩签到");
                if (var11) {
-                  this.lvlBump("@playSignin");
+                  LvlLedger.bump("@playSignin", this.lvlBumpedThisRun);
                }
             } else if (var11 && var50 != null && var50.contains("SIGNED_IN")) {
-               this.lvlBump("@playSignin");
+               LvlLedger.bump("@playSignin", this.lvlBumpedThisRun);
             }
          } else if (var5) {
             this.report.append("[玩一玩签到] 跳过：标识=2（今日已判定完成 3 次）\n");
@@ -934,7 +605,7 @@ public final class FishTaskAuto {
             } catch (Throwable var44) {
             }
 
-            lvlEnsure(dayOf(var54 > 0L ? var54 : System.currentTimeMillis()));
+            LvlLedger.ensure(LvlLedger.dayOf(var54 > 0L ? var54 : System.currentTimeMillis()));
          }
 
          ArrayList var55 = new ArrayList();
@@ -959,7 +630,7 @@ public final class FishTaskAuto {
             //          → 塞进 var57「视频任务」→ runAdEventTask 再伪造 4 次 complete
             // 对已经没有任何东西可给的任务反复刷接口，就是 FAIL_BIZ_IDL_COIN_TASK_RMB_CHECK 的直接来源。
             JSONObject varProg = var26.optJSONObject("progressDTO");
-            boolean varQuotaFull = quotaFull(var26);
+            boolean varQuotaFull = LvlLedger.quotaFull(var26);
             if (varQuotaFull && var27 != null) {
                // 记入 var23 去重集，避免同一批内重复判定同一任务
                var23.add(var27);
@@ -969,7 +640,7 @@ public final class FishTaskAuto {
                      .append(varProg.optInt("times", 0)).append("/")
                      .append(varProg.optInt("maxTimes", 0)).append("），不发请求\n");
             } else if (var27 != null && !var23.contains(var27) && !rejectedToday.contains(var27)) {
-               if (var11 && lvlSkip(var27)) {
+               if (var11 && LvlLedger.skip(var27)) {
                   var24++;
                } else {
                   var23.add(var27);
@@ -1040,7 +711,7 @@ public final class FishTaskAuto {
             .append(" 浏览:")
             .append(var20 != null ? 1 : 0)
             .append('\n');
-         this.report.append("[lvl] 跳过=").append(var24).append(" 记录=").append(lvlMap.size()).append(" day=").append(lvlDay).append('\n');
+         this.report.append("[lvl] 跳过=").append(var24).append(" 记录=").append(LvlLedger.size()).append(" day=").append(LvlLedger.day()).append('\n');
 
          for (Object var65o : var55) {
             String[] var65 = (String[]) var65o;
@@ -1120,12 +791,12 @@ public final class FishTaskAuto {
                   this.report.append("[触发] ").append(var70[1]).append(" -> ").append(var76).append("（云控判定需真实行为，协议跳过）\n");
                   markRejected(var70[0]);
                   if (this.lvlOnRun) {
-                     this.lvlBump(var70[0]);
+                     LvlLedger.bump(var70[0], this.lvlBumpedThisRun);
                   }
                } else {
                   this.report.append("[触发] ").append(var70[1]).append(" -> ").append(var76).append('\n');
                   if (this.lvlOnRun) {
-                     this.lvlReset(var70[0]);
+                     LvlLedger.reset(var70[0]);
                   }
 
                   int var78 = -1;
@@ -1207,10 +878,10 @@ public final class FishTaskAuto {
                   for (Object var75o : var71) {
                      JSONObject var75 = (JSONObject) var75o;
                      String var77 = str(var75, "deliveryId");
-                     if (var77 != null && !this.processed.contains(var77) && (!var11 || !lvlSkip(var77))) {
+                     if (var77 != null && !this.processed.contains(var77) && (!var11 || !LvlLedger.skip(var77))) {
                         // 复核这条路径原来只看 status=AWARD/needBenefit，不看额度——
                         // 06:33:22 实测：89640 主循环已跳过，这里又打了一发 benefit 换回 RMB_CHECK。
-                        if (quotaFull(var75) || this.quotaFullIds.contains(var77)) {
+                        if (LvlLedger.quotaFull(var75) || this.quotaFullIds.contains(var77)) {
                            this.processed.add(var77);
                            this.report.append("[复核] ").append(var77).append(" 跳过（当日额度已满，不发 benefit）\n");
                            continue;
@@ -1256,12 +927,12 @@ public final class FishTaskAuto {
                   if (!"AWARD".equals(str(var101, "idleTaskStatus"))) continue;
                   String var102 = str(var101, "deliveryId");
                   // 风控锁不再进收尾：既不打 trigger 也不打 benefit（11-12 日志里收尾是第二次刷屏源）
-                  if (rmbLocked(var102)) {
+                  if (LvlLedger.rmbLocked(var102)) {
                      this.report.append("[收尾] ").append(var102).append(" 跳过（人民币风控锁）\n");
                      continue;
                   }
                   // 额度闸前置：额度满的 AWARD 再打 benefit 只会换回 RMB_CHECK，连 trigger 一起省掉
-                  if (quotaFull(var101) || this.quotaFullIds.contains(var102)) {
+                  if (LvlLedger.quotaFull(var101) || this.quotaFullIds.contains(var102)) {
                      this.report.append("[收尾] ").append(var102).append(" 跳过（当日额度已满，不发 benefit）\n");
                      this.processed.add(var102);
                      continue;
@@ -1477,7 +1148,7 @@ public final class FishTaskAuto {
       if (!"AWARD".equals(var18) && !"COMPLETE".equals(var18)) {
          this.report.append("[搜一搜] ").append(var2).append(" 未推进（status=").append(var18).append("）\n");
          if (this.lvlOnRun) {
-            this.lvlBump(var1);
+            LvlLedger.bump(var1, this.lvlBumpedThisRun);
          }
       } else {
          this.claimOne(var1, var2, var6, var7);
@@ -1991,7 +1662,7 @@ public final class FishTaskAuto {
    private void maybeClaimDailyReward(JSONObject var0) {
       try {
          // LVL 闸门：今日累计判定 2 次（领取成功 / 已发放）后整天不再尝试，省掉每轮跑批的重复调用
-         if (this.lvlOnRun && lvlSkip(K_DAILY_REWARD)) {
+         if (this.lvlOnRun && LvlLedger.skip(K_DAILY_REWARD)) {
             return;
          }
          JSONObject var1 = var0 == null ? null : var0.optJSONObject("dailyReward");
@@ -2001,7 +1672,7 @@ public final class FishTaskAuto {
          if ("true".equalsIgnoreCase(var1.optString("todayHasIssue", "false"))) {
             // 今日已发放 = 服务端判定完成，记一次 LVL（与 signin 的 SIGNED 分支同款语义）
             if (this.lvlOnRun) {
-               this.lvlBump(K_DAILY_REWARD);
+               LvlLedger.bump(K_DAILY_REWARD, this.lvlBumpedThisRun);
             }
             return;
          }
@@ -2016,7 +1687,7 @@ public final class FishTaskAuto {
             log("[daily-reward] claimed +" + var6);
             // 领取成功记一次 LVL；FAIL（未到点/步数不足）不记，后续跑批继续重试
             if (this.lvlOnRun) {
-               this.lvlBump(K_DAILY_REWARD);
+               LvlLedger.bump(K_DAILY_REWARD, this.lvlBumpedThisRun);
             }
          } else {
             // 未到点/无可领，只落日志不进报告，避免噪音
@@ -2562,7 +2233,7 @@ public final class FishTaskAuto {
                         browseMarkDead();
                         this.report.append("[浏览] 连续 ").append(var9).append(" 次 ILLEGAL，任务需真实行为，当日不再重试\n");
                         if (this.lvlOnRun) {
-                           this.lvlBump(var1);
+                           LvlLedger.bump(var1, this.lvlBumpedThisRun);
                         }
 
                         return;
@@ -2657,7 +2328,7 @@ public final class FishTaskAuto {
 
    private void claimOne(String var1, String var2, List<String> var3, List<String> var4) {
       // 风控锁前置：当日已判过人民币风控的 deliveryId 一次都不再打（见 rmbLocked 注释）
-      if (rmbLocked(var1)) {
+      if (LvlLedger.rmbLocked(var1)) {
          this.report.append("[领取] ").append(var2).append(" 跳过（人民币风控锁，需 App 内手动完成）\n");
          var4.add(var2 + "(" + var1 + ")");
          return;
@@ -2714,7 +2385,7 @@ public final class FishTaskAuto {
          this.report.append("[领取] ").append(var2).append(" -> ").append(var6).append(" rewards=").append(var7).append('\n');
          toast("✓ " + var2 + coinSuffix(var7));
          if (this.lvlOnRun) {
-            this.lvlBump(var1);
+            LvlLedger.bump(var1, this.lvlBumpedThisRun);
          }
       } else {
          var4.add(var2 + "(" + var1 + ")");
@@ -2747,7 +2418,7 @@ public final class FishTaskAuto {
          } else {
             if (var6 != null && var6.contains("RMB_CHECK")) {
                // 服务端行为凭证闸：一次判定即上锁，本轮/收尾/后续跑批都不再重打
-               rmbLock(var1);
+               LvlLedger.rmbLock(var1);
                this.report.append("[领取] ").append(var2)
                      .append(" -> 人民币风控拒绝（需真实广告/浏览行为），当日锁定不再重试\n");
             } else if (var6 != null && var6.contains("GATEWAY_REJECT")) {
@@ -3105,6 +2776,16 @@ public final class FishTaskAuto {
     *  消除任务间等间隔脉冲；<1000ms 的轮询小间隔保持原 sleep 不抖。 */
    private static void sleepJitter(long centerMs) {
       sleep(jitterMs(centerMs));
+   }
+
+   /**
+    * v1.5.3 清除全部当日任务标记（socket CLEAR_MARKS 入口，实现在 LvlLedger——
+    * 台账与标记文件同域；RUNNING 生命周期属引擎，参数化传入）。
+    * @return 逐项结果清单（回显给 UI）
+    */
+   public static String clearDailyMarks() {
+      Context ctx = appCtx != null ? appCtx : com.piggyhand.fish.core.RhRuntime.appCtx;
+      return LvlLedger.clearDailyMarks(RUNNING.get(), ctx);
    }
 
    private static void log(String var0) {
