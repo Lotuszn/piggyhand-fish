@@ -43,6 +43,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+// JSON/数字解析纯函数已迁 JsonUtil（优化5簇2）；静态导入保持裸调用形态不变
+import static com.piggyhand.fish.task.JsonUtil.*;
+
 public final class FishTaskAuto {
    private static final String TASK_LIST_API = "mtop.taobao.idle.task.queryolivertasklist";
    private static final String TASK_BENEFIT_API = "mtop.taobao.idle.task.getolivertaskbenefit";
@@ -1480,29 +1483,6 @@ public final class FishTaskAuto {
       }
    }
 
-   public static long parseCoinNum(String var0) {
-      if (var0 == null) {
-         return -1L;
-      } else {
-         try {
-            String var1 = var0.trim().replace("\"", "");
-            if (var1.length() == 0) {
-               return -1L;
-            } else {
-               int var2 = var1.indexOf(46);
-               if (var2 >= 0) {
-                  var1 = var1.substring(0, var2);
-               }
-
-               var1 = var1.replaceAll("[^0-9]", "");
-               return var1.length() == 0 ? -1L : Long.parseLong(var1);
-            }
-         } catch (Throwable var3) {
-            return -1L;
-         }
-      }
-   }
-
    private void doMapRoll() {
       try {
          JSONObject var1 = this.callApi("mtop.taobao.idle.treasure.hunt.map.init", "1.0", "{" + RhLocationContext.jsonPair() + "\"version\":4}", "地图状态");
@@ -2065,26 +2045,6 @@ public final class FishTaskAuto {
       }
    }
 
-   private static int parseNum(String var0) {
-      if (var0 == null) {
-         return 0;
-      } else {
-         try {
-            StringBuilder var1 = new StringBuilder();
-
-            for (char var5 : var0.toCharArray()) {
-               if (var5 >= '0' && var5 <= '9') {
-                  var1.append(var5);
-               }
-            }
-
-            return var1.length() == 0 ? 0 : Integer.parseInt(var1.toString());
-         } catch (Throwable var6) {
-            return 0;
-         }
-      }
-   }
-
    private void runPolish() {
       String var1 = new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date());
       String var2 = this.cacheDir + "/rh_pref.json";
@@ -2584,57 +2544,6 @@ public final class FishTaskAuto {
       }
    }
 
-   private static String firstRet(JSONObject var0) {
-      if (var0 == null) {
-         return null;
-      } else {
-         JSONArray var1 = var0.optJSONArray("ret");
-         return var1 != null && var1.length() > 0 ? var1.optString(0) : String.valueOf(var0.opt("ret"));
-      }
-   }
-
-   private static String objJson(String... var0) {
-      try {
-         JSONObject var1 = new JSONObject();
-
-         for (byte var2 = 0; var2 + 1 < var0.length; var2 += 2) {
-            var1.put(var0[var2], var0[var2 + 1]);
-         }
-
-         return var1.toString();
-      } catch (Throwable var3) {
-         return "{}";
-      }
-   }
-
-   private static JSONObject parseObj(String var0) {
-      try {
-         return var0 == null ? new JSONObject() : new JSONObject(var0);
-      } catch (Throwable var2) {
-         return new JSONObject();
-      }
-   }
-
-   private static boolean opt(JSONObject var0, String var1, boolean var2) {
-      return var0 == null ? var2 : var0.optBoolean(var1, var2);
-   }
-
-   private static String str(JSONObject var0, String var1) {
-      return var0 == null ? null : var0.optString(var1, null);
-   }
-
-   private static String optStr(JSONObject var0, String var1) {
-      return var0.optString(var1, "");
-   }
-
-   private static int parseInt(String var0, int var1) {
-      try {
-         return Integer.parseInt(var0.trim());
-      } catch (Throwable var3) {
-         return var1;
-      }
-   }
-
    private void finish(long var1) {
       this.doMapRoll();
       this.maybeClaimCycleReward(); // 收尾再查一次：跑批期间浏览/游戏攒的步数可能又过档
@@ -2696,15 +2605,6 @@ public final class FishTaskAuto {
          log("notification sent: " + var12);
       } catch (Throwable var11) {
          log("notify FAILED: " + var11);
-      }
-   }
-
-   private static int parseCount(String var0) {
-      try {
-         int var1 = var0.indexOf(58);
-         return Integer.parseInt(var0.substring("领取成功".length(), var1).trim());
-      } catch (Throwable var2) {
-         return 0;
       }
    }
 

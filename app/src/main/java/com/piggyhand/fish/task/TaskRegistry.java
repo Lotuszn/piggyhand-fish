@@ -173,7 +173,7 @@ public final class TaskRegistry implements EngineHook {
     @Override
     public void onCoinLevel(String coinText) {
         try {
-            long lv = FishTaskAuto.parseCoinNum(coinText);
+            long lv = JsonUtil.parseCoinNum(coinText);
             if (lv > 0 && com.piggyhand.fish.core.RhRuntime.appCtx != null) {
                 FishTaskAuto.recordCoinBalance(com.piggyhand.fish.core.RhRuntime.appCtx, lv);
             }
