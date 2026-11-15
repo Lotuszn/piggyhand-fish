@@ -766,7 +766,8 @@ public final class FishTaskAuto {
                // (2) 号日志「探测 timeout ×10」里有一部分是引擎未就绪时的白打探针。
                long varWait0 = System.currentTimeMillis();
 
-               while (!FishMtopHook.ENGINE_LISTENING && System.currentTimeMillis() - varWait0 < var12) {
+               // Phase 2b:就绪标记移入 core.RhRuntime(engineListening),task 不再引 hook 包
+               while (!com.piggyhand.fish.core.RhRuntime.engineListening && System.currentTimeMillis() - varWait0 < var12) {
                   try {
                      Thread.sleep(500L);
                   } catch (InterruptedException varW) {

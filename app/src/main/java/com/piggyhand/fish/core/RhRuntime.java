@@ -10,6 +10,10 @@ public final class RhRuntime {
     /** 模块运行所在 App 的 context（Application attach 时最早赋值） */
     public static volatile android.content.Context appCtx;
 
+    /** 引擎就绪标记（原 FishMtopHook.ENGINE_LISTENING，Phase 2b 移入 core——
+     *  task 读就绪状态改走本字段，不再引 hook 包）。FishMtopHook 单写点置位。 */
+    public static volatile boolean engineListening = false;
+
     private RhRuntime() {
     }
 

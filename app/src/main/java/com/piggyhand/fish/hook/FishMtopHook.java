@@ -3,20 +3,13 @@ package com.piggyhand.fish.hook;
 import com.piggyhand.fish.config.ConfigManager;
 import com.piggyhand.fish.config.RhTokenVault;
 import com.piggyhand.fish.core.Diag;
+import com.piggyhand.fish.core.EngineHook;
 import com.piggyhand.fish.core.Reflect;
 import com.piggyhand.fish.core.RhFileLog;
 import com.piggyhand.fish.core.RhLocationContext;
 import com.piggyhand.fish.net.ApiDirect;
 import com.piggyhand.fish.net.ApiProtoDump;
 import com.piggyhand.fish.net.RhTrafficPair;
-import com.piggyhand.fish.task.FishTaskAuto;
-import com.piggyhand.fish.task.RhCashClaim;
-import com.piggyhand.fish.task.RhCashJoin;
-import com.piggyhand.fish.task.RhCoinExchange;
-import com.piggyhand.fish.task.RhCoinTask;
-import com.piggyhand.fish.task.RhGameTask;
-import com.piggyhand.fish.task.RhOlivertask;
-import com.piggyhand.fish.task.RhPondTask;
 import com.piggyhand.fish.ui.MainActivity;
 
 import android.app.Application;
@@ -52,6 +45,26 @@ public final class FishMtopHook {
      *  冷启动 auto-run 的 45s 固定首探改为「就绪即走、45s 兜底」，首轮 probe 不再
      *  撞在未就绪的通道上白打（(2) 号日志「探测」timeout ×10 的来源之一）。 */
     public static volatile boolean ENGINE_LISTENING = false;
+
+    /** 引擎事件回调（Phase 2b 依赖倒置）：task 分发经 core.EngineHook 接口，
+     *  MainHook 装配时 setEngineHook(TaskRegistry.get())——hook 包不再 import task 包。 */
+    private static volatile EngineHook engineHook;
+
+    /** MainHook（root 装配层）调用，进程内一次 */
+    public static void setEngineHook(EngineHook h) {
+        engineHook = h;
+    }
+
+    private static EngineHook hookOrNull() {
+        return engineHook;
+    }
+
+    /** 命令转发：经 EngineHook 交 TaskRegistry 分发（Phase 2b），装配缺失时回退 fallback */
+    private static String dispatch(String cmd, String arg, String fallback) {
+        EngineHook h = hookOrNull();
+        String r = h != null ? h.onCommand(cmd, appCtx, arg) : null;
+        return r != null ? r : fallback;
+    }
 
 
     private static final String TAG = "RewardHook";
@@ -347,9 +360,10 @@ public final class FishMtopHook {
                     } catch (Throwable ignored) {
                     }
                     if (proc != null && proc.contains(":")) return;
-                    // 全自动任务引擎入口
+                    // 全自动任务引擎入口（Phase 2b:task 分发经 EngineHook 接口）
                     if ("__RUN_TASKS__".equals(api)) {
-                        FishTaskAuto.launch(appCtx, intent.getStringExtra("extras"));
+                        EngineHook h = hookOrNull();
+                        if (h != null) h.onCommand("LAUNCH_TASKS", appCtx, intent.getStringExtra("extras"));
                         log("[tasks] engine launched via broadcast");
                         return;
                     }
@@ -414,29 +428,15 @@ public final class FishMtopHook {
                 ctx.registerReceiver(receiver, filter);
             }
             log("mtop invoker armed: am broadcast -a " + ACTION_MTOP_CALL + " --es api <api> [--es data <json> 或 push rh_data.json]");
-            // 每日自动跑（免电脑值守）：主进程 Application 就绪后检查日期标记，当日未跑则延迟触发
-            FishTaskAuto.autoRunDaily(appCtx);
-            // v1.0.9 🐟 鱼塘任务自动跑：开关 pond=true 且当日未跑时延迟 40s 触发
-            RhPondTask.autoRunDaily(appCtx);
-            // v1.4.1 🍚 自动投喂自动跑：开关 pondFeed=true 且当日未跑时延迟 46s 触发（投喂至饲料耗尽）
-            RhPondTask.autoRunFeedDaily(appCtx);
-            // v1.1.9 🏅 会员任务自动跑：开关 oliverTask=true 且当日未跑时延迟 45s 触发
-            RhOlivertask.autoRunDaily(appCtx);
-            // v1.2.9 🎮 游戏任务自动跑：开关 gameTask=true 且当日未跑时延迟 50s 触发
-            // 纯协议链（center→detail→complete→award），不依赖游戏页 UI
-            RhGameTask.autoRunDaily(appCtx);
-            // v1.4.6 🪙 赚游戏币任务自动跑：开关 coinGame=true 且标识<2 时延迟 240s 触发
-            // （避开 40~50s 那波引擎，防 center.query 共用响应文件串包；标识 0/1/2 停止条件见 RhCoinTask）
-            RhCoinTask.autoRunDaily(appCtx);
-            // v1.2.9 🧧 自动开红包：开奖日 10:00 起进窗口，每日 2 轮（1 正常 + 1 补）
-            RhCashClaim.autoRunDaily(appCtx);
-            // v1.2.9 🪙 自动投币：00:01 后进窗口，每轮 30s 轮询 coin 余额补投到当期额度上限
-            RhCashJoin.autoRunDaily(appCtx);
-            // 会员页顶部「500 每日经验」：独立体系（user.level.exp.fetch），任务全完成也要领，
-            // 所以单独起一条 20s 的线，不挂在 45s 的任务链上
-            RhOlivertask.autoRunDailyExp(appCtx);
-            // 闲鱼币余额日志（差分法今日领取）：每分钟取值写 zhushou_*.log，仅主进程
-            FishTaskAuto.startCoinBalanceLogger(appCtx);
+            // 每日自动跑（免电脑值守）：Phase 2b 起 10 条自启线整体迁入 TaskRegistry.onEngineReady，
+            // hook 层只发就绪事件——就绪时序、各引擎内部延迟与开关判断零变化
+            EngineHook h0 = hookOrNull();
+            if (h0 != null) {
+                h0.onEngineReady(appCtx);
+            } else {
+                // 防御：装配缺失时跳过自启（正常时序下 MainHook 先于 Application attach 装配）
+                log("[autorun] engine hook not installed, daily auto-run skipped");
+            }
             // 报告 Socket 服务（仅主进程）：模块 UI 经 127.0.0.1:27715 免权限读取钓鱼报告，
             // 绕过 MIUI 跨 App 广播拦截与 scoped storage
             startReportServer();
@@ -954,7 +954,11 @@ public final class FishMtopHook {
                     ss = new java.net.ServerSocket(port, 50,
                             java.net.InetAddress.getByName("127.0.0.1"));
                     log("[report-server] listening 127.0.0.1:" + port);
-                    if (!isRenderProc) ENGINE_LISTENING = true;
+                    if (!isRenderProc) {
+                        ENGINE_LISTENING = true;
+                        // Phase 2b:就绪状态移入 core.RhRuntime,task 侧读它不再引 hook 包
+                        com.piggyhand.fish.core.RhRuntime.engineListening = true;
+                    }
                     while (true) {
                         final java.net.Socket s = ss.accept();
                         // 每连接独立线程：单连接挂起不能堵死服务（串行循环曾致 CLOSE_WAIT 堆积）
@@ -1033,148 +1037,54 @@ public final class FishMtopHook {
                                         body = readReportFile("rh_tasks_join.txt");
                                         if (body == null) body = "NO_REPORT";
                                     } else if (req != null && req.trim().equals("JOIN")) {
-                                        // v1.2.9 手动投币一轮（后台执行，结果 JOIN_REPORT 读）
-                                        final Context jc = appCtx;
-                                        new Thread(new Runnable() {
-                                            @Override
-                                            public void run() {
-                                                try {
-                                                    RhCashJoin.run(jc);
-                                                    log("[join] manual done");
-                                                } catch (Throwable t) {
-                                                    log("[join] manual fail: " + t);
-                                                }
-                                            }
-                                        }, "rh-cash-join-one").start();
-                                        body = "OK started";
+                                        // v1.2.9 手动投币一轮（后台执行，结果 JOIN_REPORT 读；Phase 2b 分发迁 TaskRegistry）
+                                        body = dispatch("JOIN", null, "OK started");
                                     } else if (req != null && req.startsWith("CASH_STATE")) {
                                         // v1.2.9 两组状态合并回传：CLAIM|day|state|round|lastRet
                                         //                        #JOIN|day|state|...
                                         // App 侧按 '#' 拆两段、按 '|' 取 [1]=day [2]=state 定文案
-                                        try {
-                                            body = "CLAIM|" + RhCashClaim.stateText(appCtx)
-                                                    + "#JOIN|" + RhCashJoin.stateText(appCtx);
-                                        } catch (Throwable t) {
-                                            body = "NONE";
-                                        }
+                                        body = dispatch("CASH_STATE", null, "NONE");
                                     } else if (req != null && req.trim().equals("CLAIM")) {
-                                        // v1.2.9 手动开红包一轮（结果 CASH_REPORT 读）
-                                        final Context cc = appCtx;
-                                        new Thread(new Runnable() {
-                                            @Override
-                                            public void run() {
-                                                try {
-                                                    RhCashClaim.run(cc);
-                                                    log("[cash] claim done");
-                                                } catch (Throwable t) {
-                                                    log("[cash] claim fail: " + t);
-                                                }
-                                            }
-                                        }, "rh-cash").start();
-                                        body = "OK started";
+                                        // v1.2.9 手动开红包一轮（结果 CASH_REPORT 读；Phase 2b 分发迁 TaskRegistry）
+                                        body = dispatch("CLAIM", null, "OK started");
                                     } else if (req != null && req.startsWith("CYCLE_REPORT")) {
                                         // v1.2.10 圈数挑战手动触发结果读取（必须先于 CYCLE 的前缀匹配）
                                         body = readReportFile("rh_tasks_cycle.txt");
                                         if (body == null) body = "NO_REPORT";
                                     } else if (req != null && req.startsWith("CYCLE")) {
-                                        // v1.2.10 手动跑一次圈数挑战查档+领取（结果 CYCLE_REPORT 读，报告带 @runId 防旧档误读）
-                                        final Context yc = appCtx;
-                                        new Thread(new Runnable() {
-                                            @Override
-                                            public void run() {
-                                                try {
-                                                    FishTaskAuto.runCycleClaimOnce(yc);
-                                                    log("[cycle] manual run done");
-                                                } catch (Throwable t) {
-                                                    log("[cycle] manual fail: " + t);
-                                                }
-                                            }
-                                        }, "rh-cycle").start();
-                                        body = "OK started";
+                                        // v1.2.10 手动跑一次圈数挑战查档+领取（Phase 2b 分发迁 TaskRegistry）
+                                        body = dispatch("CYCLE", null, "OK started");
                                     } else if (req != null && req.startsWith("CLEAR_MARKS")) {
-                                        // v1.5.3 清除全部当日任务标记（LVL 0/1/2 计数 + done/try/date 文件）。
-                                        // 必须同步执行并回显结果：App 端拿到回显后才会 force-stop，
-                                        // 异步回写会与进程被杀竞争。纯文件 IO 毫秒级，同步不阻塞。
-                                        // 引擎运行中 clearDailyMarks 内部拒绝（防 bump 回写）。
-                                        body = FishTaskAuto.clearDailyMarks();
+                                        // v1.5.3 清除全部当日任务标记（同步执行并回显；Phase 2b 分发迁 TaskRegistry）
+                                        body = dispatch("CLEAR_MARKS", null, "FAIL no-hook");
                                     } else if (req != null && req.startsWith("GAME_REPORT")) {
                                         // v1.2.9 游戏任务报告读取（必须先于 GAME 的前缀匹配）
                                         body = readReportFile("rh_tasks_game.txt");
                                         if (body == null) body = "NO_REPORT";
                                     } else if (req != null && req.startsWith("GAME")) {
-                                        // v1.2.9 手动跑一轮游戏任务（纯协议链，结果 GAME_REPORT 读）
-                                        final Context gc = appCtx;
-                                        new Thread(new Runnable() {
-                                            @Override
-                                            public void run() {
-                                                try {
-                                                    RhGameTask.run(gc);
-                                                    log("[game] engine done");
-                                                } catch (Throwable t) {
-                                                    log("[game] engine fail: " + t);
-                                                }
-                                            }
-                                        }, "rh-game").start();
-                                        body = "OK started";
+                                        // v1.2.9 手动跑一轮游戏任务（Phase 2b 分发迁 TaskRegistry）
+                                        body = dispatch("GAME", null, "OK started");
                                     } else if (req != null && req.startsWith("COINEX_REPORT")) {
                                         // v1.4.9 自动兑换报告读取（必须先于 COINEX / COIN 的前缀匹配）
                                         body = readReportFile("rh_tasks_coinexch.txt");
                                         if (body == null) body = "NO_REPORT";
                                     } else if (req != null && req.startsWith("COINEX")) {
-                                        // v1.4.9 手动执行一次兑换检查（manual=true，不受每日 1 次与时间窗口限制；
-                                        // 自动触发走 RhCoinTask 的标识 2 挂点，硬性条件在 RhCoinExchange 内判）
-                                        final Context cx2 = appCtx;
-                                        new Thread(new Runnable() {
-                                            @Override
-                                            public void run() {
-                                                try {
-                                                    RhCoinExchange.runCheck(cx2, true);
-                                                    log("[exch] manual run done");
-                                                } catch (Throwable t) {
-                                                    log("[exch] manual fail: " + t);
-                                                }
-                                            }
-                                        }, "rh-coinex").start();
-                                        body = "OK started";
+                                        // v1.4.9 手动执行一次兑换检查（Phase 2b 分发迁 TaskRegistry）
+                                        body = dispatch("COINEX", null, "OK started");
                                     } else if (req != null && req.startsWith("COIN_REPORT")) {
                                         // v1.4.6 赚游戏币任务报告读取（必须先于 COIN 的前缀匹配）
                                         body = readReportFile("rh_tasks_coin.txt");
                                         if (body == null) body = "NO_REPORT";
                                     } else if (req != null && req.startsWith("COIN")) {
-                                        // v1.4.6 手动跑一轮赚游戏币任务（中央+渠道收口，结果 COIN_REPORT 读；
-                                        // 手动触发不受标识 0/1/2 停止条件限制，跑完按复核结果滚动标记）
-                                        final Context cc2 = appCtx;
-                                        new Thread(new Runnable() {
-                                            @Override
-                                            public void run() {
-                                                try {
-                                                    RhCoinTask.run(cc2);
-                                                    log("[coin] engine done");
-                                                } catch (Throwable t) {
-                                                    log("[coin] engine fail: " + t);
-                                                }
-                                            }
-                                        }, "rh-coin").start();
-                                        body = "OK started";
+                                        // v1.4.6 手动跑一轮赚游戏币任务（Phase 2b 分发迁 TaskRegistry）
+                                        body = dispatch("COIN", null, "OK started");
                                     } else if (req != null && req.startsWith("PONDFEED_REPORT")) {
                                         // v1.4.1 自动投喂报告读取（必须先于 PONDFEED / POND 的前缀匹配）
                                         body = readCacheFile("rh_tasks_pondfeed.txt");
                                         if (body == null) body = "NO_REPORT";
                                     } else if (req != null && req.startsWith("PONDFEED")) {
-                                        // v1.4.1 手动投喂（自动进行到饲料耗尽，结果 PONDFEED_REPORT 读）
-                                        final Context fc = appCtx;
-                                        new Thread(new Runnable() {
-                                            @Override
-                                            public void run() {
-                                                try {
-                                                    RhPondTask.runFeed(fc);
-                                                    log("[pondfeed] manual done");
-                                                } catch (Throwable t) {
-                                                    log("[pondfeed] manual fail: " + t);
-                                                }
-                                            }
-                                        }, "rh-pondfeed").start();
-                                        body = "OK started";
+                                        // v1.4.1 手动投喂（Phase 2b 分发迁 TaskRegistry）
+                                        body = dispatch("PONDFEED", null, "OK started");
                                     } else if (req != null && req.startsWith("POND_REPORT")) {
                                         // v1.0.9 鱼塘任务报告读取
                                         body = readCacheFile("rh_tasks_pond.txt");
@@ -1185,51 +1095,20 @@ public final class FishMtopHook {
                                         body = readCacheFile("rh_tasks_oliver.txt");
                                         if (body == null) body = "NO_REPORT";
                                     } else if (req != null && req.startsWith("OLIVER_STATE")) {
-                                        // v1.1.9 会员任务完成状态查询（同样必须先于 OLIVER 前缀）
-                                        // 返回 "DONE <失效毫秒>" 或 "TODO"
-                                        try {
-                                            body = RhOlivertask.stateText(appCtx);
-                                        } catch (Throwable t) {
-                                            body = "TODO";
-                                        }
+                                        // v1.1.9 会员任务完成状态查询（Phase 2b 分发迁 TaskRegistry）
+                                        body = dispatch("OLIVER_STATE", null, "TODO");
                                     } else if (req != null && req.startsWith("OLIVER")) {
-                                        // v1.1.9 会员任务引擎触发（后台执行，结果 OLIVER_REPORT 读）
-                                        final Context oc = appCtx;
-                                        new Thread(new Runnable() {
-                                            @Override
-                                            public void run() {
-                                                try {
-                                                    RhOlivertask.run(oc);
-                                                    log("[oliver] engine done");
-                                                } catch (Throwable t) {
-                                                    log("[oliver] engine fail: " + t);
-                                                }
-                                            }
-                                        }, "rh-oliver").start();
-                                        body = "OK started";
+                                        // v1.1.9 会员任务引擎触发（Phase 2b 分发迁 TaskRegistry）
+                                        body = dispatch("OLIVER", null, "OK started");
                                     } else if (req != null && req.startsWith("POND")) {
-                                        // v1.0.9 鱼塘任务引擎触发（后台执行，结果 POND_REPORT 读）
-                                        final Context pc = appCtx;
-                                        new Thread(new Runnable() {
-                                            @Override
-                                            public void run() {
-                                                try {
-                                                    RhPondTask.run(pc);
-                                                    log("[pond] engine done");
-                                                } catch (Throwable t) {
-                                                    log("[pond] engine fail: " + t);
-                                                }
-                                            }
-                                        }, "rh-pond").start();
-                                        body = "OK started";
+                                        // v1.0.9 鱼塘任务引擎触发（Phase 2b 分发迁 TaskRegistry）
+                                        body = dispatch("POND", null, "OK started");
                                     } else if (req != null && req.startsWith("RUN")) {
                                         // 任务触发指令（绕过 MIUI 对跨 App 广播的拦截）：
                                         // RUN            → 默认全任务
                                         // RUN {"signin":true,...} → 带 extras
                                         String extras = req.length() > 3 ? req.substring(3).trim() : null;
-                                        if (extras != null && extras.isEmpty()) extras = null;
-                                        FishTaskAuto.launch(appCtx, extras);
-                                        body = "OK";
+                                        body = dispatch("RUN", extras, "OK");
                                     } else if (req != null && req.startsWith("CALL ")) {
                                         // v1.1 直调指令：CALL {"api":"mtop...","version":"1.0","data":{...}}
                                         // 进程内 ApiDirect 直调 → 等全局 MtopFinishEvent 落盘 → 回传响应全文
@@ -1519,8 +1398,9 @@ public final class FishMtopHook {
                         org.json.JSONObject ui = d2.optJSONObject("userInfo");
                         if (ui != null) cv = ui.optString("coinNum", "");
                     }
-                    long lv = FishTaskAuto.parseCoinNum(cv);
-                    if (lv > 0 && appCtx != null) FishTaskAuto.recordCoinBalance(appCtx, lv);
+                    // Phase 2b:金币记录经 EngineHook 下发,parse/record 细节在 TaskRegistry
+                    EngineHook hCoin = hookOrNull();
+                    if (hCoin != null) hCoin.onCoinLevel(cv);
                 } catch (Throwable ignored) {
                 }
             }

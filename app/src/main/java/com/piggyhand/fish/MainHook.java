@@ -7,6 +7,7 @@ import com.piggyhand.fish.hook.FishMtopHook;
 import com.piggyhand.fish.hook.RhChatHook;
 import com.piggyhand.fish.hook.RhSplashAd;
 import com.piggyhand.fish.task.RhFeedCols;
+import com.piggyhand.fish.task.TaskRegistry;
 import com.piggyhand.fish.ui.RhFishFloat;
 import com.piggyhand.fish.ui.RhUiScale;
 
@@ -42,6 +43,9 @@ public class MainHook implements IXposedHookLoadPackage {
         if (cfg.mtopHook) {
             // 淘系 mtop 侦察 + 广播直调入口（闲鱼专用，其他 App 无此 SDK 时自动跳过）
             FishMtopHook.hook(lpp.classLoader);
+            // Phase 2b 装配点：引擎事件（就绪/命令/币值）经 core.EngineHook 下发 TaskRegistry，
+            // hook() 内就绪段为异步延迟触发，此处同步装配必然先于回调到达
+            FishMtopHook.setEngineHook(TaskRegistry.get());
             // v1.0.8 🎣 悬浮工具钮（详情页原图/视频保存，Flutter 容器注入）
             RhFishFloat.hook(lpp.classLoader);
         }
