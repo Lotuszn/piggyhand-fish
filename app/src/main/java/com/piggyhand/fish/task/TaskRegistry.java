@@ -81,7 +81,7 @@ public final class TaskRegistry implements EngineHook {
             log("[autorun] oliver-exp fail: " + t);
         }
         try {
-            FishTaskAuto.startCoinBalanceLogger(appCtx);
+            CoinLogger.startCoinBalanceLogger(appCtx);
         } catch (Throwable t) {
             log("[autorun] coinlogger fail: " + t);
         }
@@ -175,7 +175,7 @@ public final class TaskRegistry implements EngineHook {
         try {
             long lv = JsonUtil.parseCoinNum(coinText);
             if (lv > 0 && com.piggyhand.fish.core.RhRuntime.appCtx != null) {
-                FishTaskAuto.recordCoinBalance(com.piggyhand.fish.core.RhRuntime.appCtx, lv);
+                CoinLogger.recordCoinBalance(com.piggyhand.fish.core.RhRuntime.appCtx, lv);
             }
         } catch (Throwable ignored) {
         }
