@@ -101,6 +101,15 @@ public final class FishTaskAuto {
    private static final long PROBE_INTERVAL_MS = 900000L;
    private static final long PROBE_BURST_MS = 300000L;
    private static final long PROBE_FAIL_MS = 180000L;
+   /** ---- 风控节奏整形（2026-11-15 用户定参）：触发 3s / 领取 5s / 查询 2s 中心值，
+    *  ±40% 抖动，设备系数 [0.7,1.5] 首跑固化（pref rh_pace/device_factor）——
+    *  消除「300ms 等间隔脉冲」与「全量设备同一节奏」两类最强机器特征。
+    *  pace() 统一收口在 callApi 发送前，任务执行器零改动。 ---- */
+   private static final long PACE_SUBMIT_MS = 3000L;
+   private static final long PACE_CLAIM_MS = 5000L;
+   private static final long PACE_QUERY_MS = 2000L;
+   private static final double PACE_AMP = 0.4D;
+   private static volatile double devicePaceFactor = Double.NaN;
    private static final Set<String> rejectedToday = ConcurrentHashMap.newKeySet();
    private static volatile String rejectedDay = "";
    private static final String LVL_FILE = "rh_task_lvl.json";
@@ -1659,20 +1668,28 @@ public final class FishTaskAuto {
       } catch (Throwable var2) {
       }
 
-      ScheduledExecutorService var3 = Executors.newSingleThreadScheduledExecutor();
-      var3.scheduleAtFixedRate(new Runnable() {
+      final ScheduledExecutorService var3 = Executors.newSingleThreadScheduledExecutor();
+      // 节奏整形（2026-11-15）：固定 90s 周期是等间隔机器特征，改为每轮跑完按 90s±30% 自重排；
+      // 引擎 RUNNING 期间探针静默跳过——跑批与探针两类流量不再叠加（周期互斥）。
+      // v1.5.5 改进 B 背景：map.init 是三台用户日志里被网关秒拒最多的接口，高频直调是主要诱因。
+      // 配合 coinBalanceSnapshot 内的连续拒绝熔断（3 次停 10 分钟）。
+      Runnable probe = new Runnable() {
          @Override
          public void run() {
             try {
-               FishTaskAuto.coinBalanceSnapshot(var0);
+               if (RUNNING.get()) {
+                  log("[coinlog] engine running, probe skipped this round");
+               } else {
+                  FishTaskAuto.coinBalanceSnapshot(var0);
+               }
             } catch (Throwable var2) {
             }
+            long nextMs = (long) (90000L * (0.7D + java.util.concurrent.ThreadLocalRandom.current().nextDouble() * 0.6D));
+            var3.schedule(this, nextMs, TimeUnit.MILLISECONDS);
          }
-      }, 20L, 90L, TimeUnit.SECONDS);
-      // v1.5.5 改进 B：周期 30s → 90s。map.init 是三台用户日志里被网关秒拒最多的接口
-      // （(3) 号 29 次、(2) 号 13 次），30s 高频直调是主要诱因；90s + 改进 D 的 60s 复用
-      // 把真实请求压到 ~90s 一次。配合 coinBalanceSnapshot 内的连续拒绝熔断（3 次停 10 分钟）。
-      log("[coinlog] balance logger armed (every 90s, first in 20s)");
+      };
+      var3.schedule(probe, 20L * 1000L, TimeUnit.MILLISECONDS);
+      log("[coinlog] balance logger armed (90s±30% jitter, engine-mutex, first in 20s)");
    }
 
    /** v1.5.5 改进 B：币余额探针熔断——连续 3 次网关拒绝（GATEWAY_REJECT）后停探 10 分钟。
@@ -2650,6 +2667,8 @@ public final class FishTaskAuto {
          this.report.append("[领取] ").append(var2).append(" 跳过（当日额度已满，需 App 内手动完成）\n");
          return;
       }
+      // 节奏整形（2026-11-15）：触发→领取拟人延迟 ~11.5s±40%（8~16s），提交完成立即领奖是最可疑的时序
+      claimHumanGap();
       JSONObject var5 = this.callApi(
          "mtop.taobao.idle.task.getolivertaskbenefit",
          "1.0",
@@ -2765,7 +2784,7 @@ public final class FishTaskAuto {
       } catch (Throwable ignored) {
       }
 
-      sleep(300L);
+      pace(var1); // 节奏整形：替代原固定 sleep(300L)——按 api 类别 2/3/5s ×设备系数 ±40% 抖动
       String var6 = this.fileFp(var5);
       long varSentAt = System.currentTimeMillis();
       boolean var7 = ApiDirect.send(this.cl, var1, var2, var3);
@@ -3023,6 +3042,61 @@ public final class FishTaskAuto {
       } catch (InterruptedException var3) {
          Thread.currentThread().interrupt();
       }
+   }
+
+   /** 设备节奏系数：首跑随机 [0.7,1.5] 并固化到 pref（rh_pace/device_factor），
+    *  之后每台设备有自己稳定的中心节奏——同参数设备轨迹互不相同。 */
+   private static double paceFactor() {
+      double f = devicePaceFactor;
+      if (f == f) return f;
+      synchronized (FishTaskAuto.class) {
+         if (devicePaceFactor == devicePaceFactor) return devicePaceFactor;
+         double v = 0.7D + java.util.concurrent.ThreadLocalRandom.current().nextDouble() * 0.8D;
+         try {
+            Context c = appCtx;
+            if (c != null) {
+               android.content.SharedPreferences sp = c.getSharedPreferences("rh_pace", 0);
+               String saved = sp.getString("device_factor", null);
+               if (saved != null) {
+                  try {
+                     v = Double.parseDouble(saved);
+                  } catch (Throwable ignored) {
+                  }
+               } else {
+                  sp.edit().putString("device_factor", String.valueOf(v)).apply();
+               }
+            }
+         } catch (Throwable ignored) {
+         }
+         devicePaceFactor = v;
+         return v;
+      }
+   }
+
+   /** 中心值 ±40% 抖动，下限 800ms 防抖出瞬时连发 */
+   private static long jitterMs(long center) {
+      long v = (long) (center * paceFactor());
+      double amp = v * PACE_AMP;
+      return Math.max(800L, v + (long) ((java.util.concurrent.ThreadLocalRandom.current().nextDouble() * 2D - 1D) * amp));
+   }
+
+   /** 发送前节奏等待：按 api 类别取中心值（领取 5s / 触发 3s / 查询 2s）×设备系数±40%。
+    *  收口点——所有 mtop 直调只经 callApi 一处，任务执行器零改动。 */
+   private static void pace(String api) {
+      long center;
+      if (api.contains("benefit") || api.contains("claim") || api.contains("signin")) {
+         center = PACE_CLAIM_MS;
+      } else if (api.contains("trigger") || api.contains("polish") || api.contains("bet") || api.contains("lottery")) {
+         center = PACE_SUBMIT_MS;
+      } else {
+         center = PACE_QUERY_MS;
+      }
+      sleep(jitterMs(center));
+   }
+
+   /** 触发→领取拟人延迟：中心 11.5s±40%（约 7~16s），模拟「人完成任务再回来领」的间隔 */
+   private static void claimHumanGap() {
+      sleep(jitterMs(11500L));
    }
 
    private static void log(String var0) {
