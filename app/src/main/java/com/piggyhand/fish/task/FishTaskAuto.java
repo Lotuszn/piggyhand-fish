@@ -54,18 +54,7 @@ public final class FishTaskAuto {
    private static final String AD_EVENT_QUERY_API = "mtop.taobao.idle.play.ad.event.query";
    private static final String SIGNIN_API = "mtop.taobao.idle.coin.signin";
    private static final String PLAY_SIGN_API = "mtop.taobao.idle.play.sign.in";
-   private static final String MAP_INIT_API = "mtop.taobao.idle.treasure.hunt.map.init";
-   private static final String MAP_ROLL_API = "mtop.taobao.idle.treasure.hunt.map.roll";
-   // 圈数挑战每日步数奖励领取（11-10 抓包：宿主走到目标后弹领取按钮时发的就是这个）
-   private static final String MAP_DAILY_REWARD_API = "mtop.taobao.idle.treasure.hunt.map.daily.reward";
-   // 7天圈数挑战（11-10 实抓）：info 查档位状态，tierList[].status==AWARD 即可领；reward 按 cycle+recordId 领取
-   private static final String CYCLE_INFO_API = "mtop.idle.interact.cycle.challenge.info";
-   private static final String CYCLE_REWARD_API = "mtop.idle.interact.cycle.challenge.reward";
-   // 探针发现「无任务可跑但圈数挑战有 AWARD 档」时置位，launch 切 claim_only 迷你跑批（跳浏览）
-   private static volatile boolean cycleClaimOnly = false;
-   private static final String PROP_LIST_API = "mtop.taobao.idle.play.prop.list";
-   private static final String PROP_USE_API = "mtop.taobao.idle.play.prop.use";
-   private static final String POLISH_API = "mtop.taobao.idle.item.polish";
+   // 地图/圈数/背包/擦亮 API 常量与 cycleClaimOnly 已迁 MapTasks（优化5簇4）
    private static final String SHOP_BENEFIT_API = "mtop.taobao.idle.startup.shop.daily.benefit";
    private static final String LOTTERY_FEEDS_API = "mtop.taobao.idle.coin.lottery.feeds";
    private static final String LOTTERY_BET_API = "mtop.taobao.idle.coin.lottery.bet";
@@ -74,11 +63,11 @@ public final class FishTaskAuto {
    private final ClassLoader cl;
    /** 响应通道目录：宿主 FishMtopHook.writeCacheFile 落 rh_resp_*.json 的地方，必须是 getExternalCacheDir。
     *  只用来读写 rh_resp_*、rh_pref.json，不承载任何需要跨冷启动保留的东西。 */
-   private final String cacheDir;
+   final String cacheDir;
    /** 报告目录：持久区（files/）。宿主的 cache/ 会被冷启动清空，报告必须住这里。 */
    private final String reportDir;
    private final Set<String> processed = new HashSet<>();
-   private final RhReport report = new RhReport();
+   final RhReport report = new RhReport();
    private volatile boolean abort = false;
    /** 触发毒化记忆：key=任务类型，value=连续 PARAM 类失败次数。
     *  实例字段而不是静态——FishTaskAuto 每次跑批新 new 一个，天然按轮清零，
@@ -89,10 +78,7 @@ public final class FishTaskAuto {
     *  idleTaskStatus=AWARD + needBenefit 又打了一发 benefit，回 RMB_CHECK，等于白送一次风控计数。
     *  复核 / 收尾 / claimOne 三条路径统一查这张表，额度满的任务一次都不再发。 */
    private final Set<String> quotaFullIds = ConcurrentHashMap.newKeySet();
-   /** v1.5.5 改进 D：map.init 60s 结果缓存（静态——coinBalanceLogger 每 30s 新建实例）。
-    *  只缓存 SUCCESS 响应；GATEWAY_REJECT/失败不缓存，失败立刻可重试。 */
-   private static volatile JSONObject MAP_INIT_CACHE = null;
-   private static final long[] MAP_INIT_TS = new long[]{0L};
+   // map.init 60s 结果缓存（MAP_INIT_CACHE/MAP_INIT_TS）已迁 MapTasks（优化5簇4）
    private static Context appCtx;
    private static volatile boolean toastOn = true;
    private static volatile boolean polishOn = true;
@@ -120,9 +106,9 @@ public final class FishTaskAuto {
    // K_* 键常量留这里（键的使用方在任务执行器）。
    private static final String K_SIGNIN = "@signin";
    private static final String K_PLAY_SIGN = "@playSignin";
-   private static final String K_DAILY_REWARD = "@dailyReward";
-   private final Set<String> lvlBumpedThisRun = new HashSet<>();
-   private volatile boolean lvlOnRun = true;
+   static final String K_DAILY_REWARD = "@dailyReward";
+   final Set<String> lvlBumpedThisRun = new HashSet<>();
+   volatile boolean lvlOnRun = true;
    private List<String> itemPool = null;
    private static String playSignData() {
       StringBuilder var0 = new StringBuilder("{");
@@ -135,6 +121,9 @@ public final class FishTaskAuto {
       var0.append("\"playId\":4,\"usertoken\":\"\"}");
       return var0.toString();
    }
+
+   /** 地图/圈数/背包/擦亮域（优化5簇4）：finish 阶段动作收口在 MapTasks，owner 引用回穿响应通道 */
+   final MapTasks mapTasks = new MapTasks(this);
 
    FishTaskAuto(ClassLoader var1, String var2) {
       this.cl = var1;
@@ -195,12 +184,12 @@ public final class FishTaskAuto {
             // 圈数挑战 AWARD 探测（11-10）：任务无可跑但挑战到档时仍要 launch（claim_only 迷你跑批）
             // UI 开关关闭时不探测不置位，迷你跑批保持沉默
             ConfigManager var14 = ConfigManager.load();
-            int var13 = (var14 == null || var14.cycleChallenge) ? probeCycleAward(var3) : 0;
+            int var13 = (var14 == null || var14.cycleChallenge) ? MapTasks.probeCycleAward(var3) : 0;
             if (var6 == 0 && var13 > 0) {
-               cycleClaimOnly = true;
+               MapTasks.cycleClaimOnly = true;
                var6 = 1;
             } else {
-               cycleClaimOnly = false;
+               MapTasks.cycleClaimOnly = false;
             }
 
             return var6;
@@ -208,33 +197,6 @@ public final class FishTaskAuto {
       } catch (Throwable var12) {
          log("[probe] error: " + var12);
          return -1;
-      }
-   }
-
-   /** 圈数挑战 tierList 里 status==AWARD 的档位数；info 不可用/通道撞车返回 0 */
-   private static int probeCycleAward(FishTaskAuto var0) {
-      try {
-         JSONObject var1 = var0.callApi(CYCLE_INFO_API, "1.0", RhLocationContext.jsonPairObj(), "探测圈数");
-         if (var1 == null || !CYCLE_INFO_API.equals(var1.optString("api"))) {
-            return 0;
-         }
-         JSONObject var2 = var1.optJSONObject("data");
-         JSONArray var3 = var2 == null ? null : var2.optJSONArray("tierList");
-         if (var3 == null) {
-            return 0;
-         }
-         int var4 = 0;
-         java.util.Set<String> var7 = var0.readCycleClaimed();
-         for (int var5 = 0; var5 < var3.length(); var5++) {
-            JSONObject var6 = var3.optJSONObject(var5);
-            if (var6 != null && "AWARD".equalsIgnoreCase(var6.optString("status", ""))
-                  && !var7.contains(cycleDay() + "|" + parseNum(var6.optString("cycle", "0")))) {
-               var4++;
-            }
-         }
-         return var4;
-      } catch (Throwable var7) {
-         return 0;
       }
    }
 
@@ -251,7 +213,7 @@ public final class FishTaskAuto {
          if (var2 != null && !var2.cycleChallenge) {
             var1.report.append("[圈数挑战] 开关已关闭，先在常用功能里打开\n");
          } else {
-            var1.maybeClaimCycleReward();
+            var1.mapTasks.maybeClaimCycleReward();
          }
       } catch (Throwable var3) {
          var1.report.append("[圈数挑战] 异常 ").append(var3).append('\n');
@@ -290,7 +252,7 @@ public final class FishTaskAuto {
       }
    }
 
-   private static void toast(String var0) {
+   static void toast(String var0) {
       if (toastOn && appCtx != null) {
          try {
             new Handler(Looper.getMainLooper()).post(() -> {
@@ -480,11 +442,11 @@ public final class FishTaskAuto {
                         FishTaskAuto.log("[probe] runnable=" + var6 + (var8 && !var7 ? " (force)" : "") + " -> launch");
                         var4 = System.currentTimeMillis();
                         // 圈数挑战独占可领时切 claim_only：跳过浏览段，只做签到+掷骰+圈数/奖桶领取
-                        String var13x = cycleClaimOnly ? "{\"claim_only\":true,\"polish\":false}" : "{}";
-                        if (cycleClaimOnly) {
+                        String var13x = MapTasks.cycleClaimOnly ? "{\"claim_only\":true,\"polish\":false}" : "{}";
+                        if (MapTasks.cycleClaimOnly) {
                            FishTaskAuto.log("[probe] cycle award pending -> claim_only run");
                         }
-                        cycleClaimOnly = false;
+                        MapTasks.cycleClaimOnly = false;
                         FishTaskAuto.launch(var0, var13x);
                         var3 = 3;
                         var1 = 300000L;
@@ -560,16 +522,16 @@ public final class FishTaskAuto {
          }
 
          if (opt(var4, "mapRoll", true)) {
-            this.doMapRoll();
-            this.maybeClaimCycleReward(); // 掷骰推进圈数后查 AWARD 档位并领取
+            this.mapTasks.doMapRoll();
+            this.mapTasks.maybeClaimCycleReward(); // 掷骰推进圈数后查 AWARD 档位并领取
          }
 
          if (opt(var4, "bagUse", true)) {
-            this.doBagUse();
+            this.mapTasks.doBagUse();
          }
 
          if (var6) {
-            this.runPolish();
+            this.mapTasks.runPolish();
          }
 
          if (var7) {
@@ -1329,614 +1291,6 @@ public final class FishTaskAuto {
       }
    }
 
-   private void doMapRoll() {
-      try {
-         JSONObject var1 = this.callApi("mtop.taobao.idle.treasure.hunt.map.init", "1.0", "{" + RhLocationContext.jsonPair() + "\"version\":4}", "地图状态");
-         JSONObject var2 = var1 == null ? null : var1.optJSONObject("data");
-         // 圈数挑战日奖：init 拿到 data 就顺手查一次可领状态（todayHasIssue=false 且服务端判定到点才发）
-         this.maybeClaimDailyReward(var2);
-         JSONObject var3 = var2 == null ? null : var2.optJSONObject("userInfo");
-         if (var3 == null) {
-            this.report.append("[前进钓鱼] 地图状态获取失败，跳过\n");
-            return;
-         }
-
-         long var4 = (long)parseNum(var3.optString("location", "0"));
-         int var6 = parseNum(var3.optString("remainStep", "0"));
-         String var7 = "11";
-         JSONArray var8 = var2.optJSONArray("mapResource");
-         if (var8 != null && var8.length() > 0) {
-            var7 = var8.optJSONObject(0).optString("mapVersion", "11");
-         }
-
-         if (var6 <= 0) {
-            this.report.append("[前进钓鱼] 无剩余步数，跳过\n");
-            return;
-         }
-
-         int var9 = 0;
-         int var10 = 0;
-         int var11 = 0;
-         int var12 = 0;
-         String var13 = null;
-
-         while (var6 > 0 && var9 < 60) {
-            String var14 = "{\"diceType\":\"FORWARD_STEP\","
-               + RhLocationContext.jsonPair()
-               + "\"locationBefore\":"
-               + var4
-               + ",\"mapVersion\":\""
-               + var7
-               + "\",\"outId\":"
-               + System.currentTimeMillis()
-               + ",\"version\":3}";
-            JSONObject var15 = this.callApi("mtop.taobao.idle.treasure.hunt.map.roll", "1.0", var14, "前进掷骰");
-            String var16 = firstRet(var15);
-            if (var16 == null || !var16.contains("SUCCESS")) {
-               var13 = var16 == null ? "无响应" : var16;
-               break;
-            }
-
-            var9++;
-            JSONObject var17 = var15.optJSONObject("data");
-            if (var17 == null) {
-               var13 = "响应无 data";
-               break;
-            }
-
-            var10 += parseNum(var17.optString("diceResult", "0"));
-            JSONArray var18 = var17.optJSONArray("contentList");
-            if (var18 != null) {
-               for (int var19 = 0; var19 < var18.length(); var19++) {
-                  JSONObject var20 = var18.optJSONObject(var19);
-                  if (var20 != null && "coin".equals(var20.optString("contentType"))) {
-                     var11 += parseNum(var20.optString("rewardNum", "0"));
-                  }
-               }
-            }
-
-            JSONArray var28 = var17.optJSONArray("settleList");
-            if (var28 != null) {
-               for (int var29 = 0; var29 < var28.length(); var29++) {
-                  JSONObject var21 = var28.optJSONObject(var29);
-                  if (var21 != null && "treasureMapPoint".equals(var21.optString("contentType"))) {
-                     var11 += parseNum(var21.optString("rewardNum", "0"));
-                  }
-               }
-            }
-
-            long var30 = var17.optJSONObject("userInfo") == null
-               ? var4
-               : (long)parseNum(var17.optJSONObject("userInfo").optString("location", String.valueOf(var4)));
-            var6 = stepOf(var17);
-            boolean var22 = "true".equalsIgnoreCase(var17.optString("isNeedRefresh", "false"));
-            if (var30 == var4 && var6 > 0) {
-               if (var12 >= 5) {
-                  var13 = "位置未推进";
-                  break;
-               }
-
-               var12++;
-               JSONObject var31 = this.callApi("mtop.taobao.idle.treasure.hunt.map.init", "1.0", "{" + RhLocationContext.jsonPair() + "\"version\":4}", "地图重试");
-               JSONObject var32 = var31 == null ? null : var31.optJSONObject("data");
-               JSONObject var33 = var32 == null ? null : var32.optJSONObject("userInfo");
-               if (var33 == null) {
-                  var13 = "重试初始化失败";
-                  break;
-               }
-
-               var4 = (long)parseNum(var33.optString("location", String.valueOf(var4)));
-               var6 = stepOf(var31);
-            } else {
-               var4 = var30;
-               if (var22) {
-                  if (var12 >= 5) {
-                     var13 = "刷新超限";
-                     break;
-                  }
-
-                  var12++;
-                  JSONObject var23 = this.callApi(
-                     "mtop.taobao.idle.treasure.hunt.map.init", "1.0", "{" + RhLocationContext.jsonPair() + "\"version\":4}", "地图刷新"
-                  );
-                  JSONObject var24 = var23 == null ? null : var23.optJSONObject("data");
-                  JSONObject var25 = var24 == null ? null : var24.optJSONObject("userInfo");
-                  if (var25 == null) {
-                     var13 = "刷新地图失败";
-                     break;
-                  }
-
-                  var4 = (long)parseNum(var25.optString("location", String.valueOf(var30)));
-                  var6 = stepOf(var23);
-                  JSONArray var26 = var24.optJSONArray("mapResource");
-                  if (var26 != null && var26.length() > 0) {
-                     var7 = var26.optJSONObject(0).optString("mapVersion", var7);
-                  }
-               }
-            }
-         }
-
-         if (var9 == 0) {
-            this.report.append("[前进钓鱼] ").append(var13 == null ? "掷骰失败" : var13).append('\n');
-         } else {
-            this.report
-               .append("[前进钓鱼] 掷骰 ")
-               .append(var9)
-               .append(" 次 · 前进 ")
-               .append(var10)
-               .append(" 步 · 收币 ")
-               .append(var11)
-               .append(" · 剩余步数 ")
-               .append(var6)
-               .append(var13 != null ? "（中断:" + var13 + "）" : "")
-               .append('\n');
-            toast("✓ 前进钓鱼 +" + var11 + "币");
-            log("[map-roll] rolls=" + var9 + " steps=" + var10 + " coins=" + var11 + " remain=" + var6);
-         }
-      } catch (Throwable var27) {
-         this.report.append("[前进钓鱼] 异常 ").append(var27).append('\n');
-      }
-   }
-
-   /**
-    * 圈数挑战每日步数奖励：map.init 的 data.dailyReward 携带今日发放状态。
-    * todayHasIssue=true → 今日已发，跳过；否则打一发 daily.reward 让服务端判定
-    * （未到点服务端回 FAIL，无副作用）。主跑批 + finish 收尾各有一次 init，天然一日最多两次尝试。
-    * LVL 机制（@dailyReward）：领取成功 / 已发放各记一次，累计 2 次后当日所有后续批次直接跳过；
-    * FAIL 不记档，后续批次照常重试（步数可能晚点才达标）。
-    */
-   private void maybeClaimDailyReward(JSONObject var0) {
-      try {
-         // LVL 闸门：今日累计判定 2 次（领取成功 / 已发放）后整天不再尝试，省掉每轮跑批的重复调用
-         if (this.lvlOnRun && LvlLedger.skip(K_DAILY_REWARD)) {
-            return;
-         }
-         JSONObject var1 = var0 == null ? null : var0.optJSONObject("dailyReward");
-         if (var1 == null) {
-            return; // 老版本页面无此字段，直接跳过
-         }
-         if ("true".equalsIgnoreCase(var1.optString("todayHasIssue", "false"))) {
-            // 今日已发放 = 服务端判定完成，记一次 LVL（与 signin 的 SIGNED 分支同款语义）
-            if (this.lvlOnRun) {
-               LvlLedger.bump(K_DAILY_REWARD, this.lvlBumpedThisRun);
-            }
-            return;
-         }
-         String var2 = RhLocationContext.jsonPairObj();
-         JSONObject var3 = this.callApi(MAP_DAILY_REWARD_API, "1.0", var2, "圈数日奖");
-         String var4 = firstRet(var3);
-         boolean var5 = var4 != null && var4.contains("SUCCESS");
-         int var6 = parseNum(var1.optString("todayNum", "0"));
-         if (var5) {
-            this.report.append("[圈数日奖] SUCCESS +").append(var6).append("币\n");
-            toast("✓ 圈数挑战日奖 +" + var6 + "币");
-            log("[daily-reward] claimed +" + var6);
-            // 领取成功记一次 LVL；FAIL（未到点/步数不足）不记，后续跑批继续重试
-            if (this.lvlOnRun) {
-               LvlLedger.bump(K_DAILY_REWARD, this.lvlBumpedThisRun);
-            }
-         } else {
-            // 未到点/无可领，只落日志不进报告，避免噪音
-            log("[daily-reward] not claimable: " + (var4 == null ? "无响应" : var4));
-         }
-      } catch (Throwable var7) {
-         this.report.append("[圈数日奖] 异常 ").append(var7).append('\n');
-      }
-   }
-
-   /**
-    * 7天圈数挑战奖励：cycle.challenge.info 返回 tierList，status==AWARD 的档位逐个领。
-    * 请求体 {cycle, recordId, fishAdCode, gps}；响应 {rewardTitle, success}。
-    * 调用时机：doMapRoll 之后（掷骰推进圈数后查才有新 AWARD）+ finish 收尾。
-    * 注意：info 尾段与 treasure.layout.info 同落 rh_resp_info.json，用响应自带 api 字段校验防误读。
-    */
-   private void maybeClaimCycleReward() {
-      try {
-         // UI 开关（常用功能「7天圈数挑战」）：关了就不查档不领取
-         ConfigManager var15 = ConfigManager.load();
-         if (var15 != null && !var15.cycleChallenge) {
-            log("[cycle-challenge] 开关关闭，跳过");
-            return;
-         }
-         JSONObject var0 = this.callApi(CYCLE_INFO_API, "1.0", RhLocationContext.jsonPairObj(), "圈数挑战");
-         if (var0 == null || !CYCLE_INFO_API.equals(var0.optString("api"))) {
-            log("[cycle-challenge] info 不可用（超时或通道撞车）");
-            return;
-         }
-         JSONObject var1 = var0.optJSONObject("data");
-         if (var1 == null) {
-            log("[cycle-challenge] info 无 data（活动未开启）");
-            return;
-         }
-         String var2 = var1.optString("recordId", "");
-         int var3 = parseNum(var1.optString("currentCycle", "0"));
-         JSONArray var4 = var1.optJSONArray("tierList");
-         if (var4 == null || var2.length() == 0) {
-            log("[cycle-challenge] tierList/recordId 缺失");
-            return;
-         }
-         // 本地领取去重：服务端发奖异步，status 短时间仍显示 AWARD，必须按档记档防重复领取
-         java.util.Set<String> var14 = readCycleClaimed();
-         for (int var5 = 0; var5 < var4.length(); var5++) {
-            JSONObject var6 = var4.optJSONObject(var5);
-            // v1.4.4 修复（2026-11-11 主机侧）：REACHED（已到达未领）也算可领——
-            // 实测 cycle=18 REACHED 2000 币手动 CALL reward 成功到账，原逻辑只认 AWARD 漏领
-            if (var6 != null && ("AWARD".equalsIgnoreCase(var6.optString("status", ""))
-                    || "REACHED".equalsIgnoreCase(var6.optString("status", "")))) {
-               int var7 = parseNum(var6.optString("cycle", "0"));
-               if (var14.contains(cycleDay() + "|" + var7)) {
-                  log("[cycle-challenge] cycle=" + var7 + " 今日已领（本地档），跳过");
-                  continue;
-               }
-               String var8 = var6.optString("rewardTitle", "");
-               String var9 = "{\"cycle\":" + var7
-                  + "," + RhLocationContext.jsonPair()
-                  + "\"recordId\":\"" + var2 + "\"}";
-               JSONObject var10 = this.callApi(CYCLE_REWARD_API, "1.0", var9, "圈数奖励");
-               String var11 = firstRet(var10);
-               boolean var12 = var10 != null && var11 != null && var11.contains("SUCCESS");
-               if (var12) {
-                  markCycleClaimed(var7);
-                  this.report.append("[圈数挑战] 领取 第").append(var7).append("圈 ")
-                     .append(var8).append("（当前").append(var3).append("圈）\n");
-                  toast("✓ 圈数挑战 " + var8);
-                  log("[cycle-challenge] claimed cycle=" + var7 + " " + var8);
-               } else {
-                  log("[cycle-challenge] claim fail cycle=" + var7 + ": " + (var11 == null ? "无响应" : var11));
-               }
-            }
-         }
-      } catch (Throwable var13) {
-         this.report.append("[圈数挑战] 异常 ").append(var13).append('\n');
-      }
-   }
-
-   /** 本地领取档 key：yyMMdd|cycle，文件 cacheDir/rh_cycle_claim.txt，跨天自然失效（读时按 day 前缀过滤） */
-   private static String cycleDay() {
-      java.text.SimpleDateFormat var0 = new java.text.SimpleDateFormat("yyMMdd");
-      return var0.format(new java.util.Date());
-   }
-
-   private java.util.Set<String> readCycleClaimed() {
-      java.util.Set<String> var0 = new java.util.HashSet<>();
-      try {
-         String var1 = this.readFile(this.cacheDir + "/rh_cycle_claim.txt");
-         if (var1 != null) {
-            for (String var3 : var1.split("\n")) {
-               if (var3.startsWith(cycleDay() + "|")) {
-                  var0.add(var3.trim());
-               }
-            }
-         }
-      } catch (Throwable ignored) {
-      }
-      return var0;
-   }
-
-   private void markCycleClaimed(int var0) {
-      try {
-         String var1 = this.readFile(this.cacheDir + "/rh_cycle_claim.txt");
-         String var2 = (var1 == null ? "" : var1.trim() + "\n") + cycleDay() + "|" + var0 + "\n";
-         this.writeFile(this.cacheDir + "/rh_cycle_claim.txt", var2);
-      } catch (Throwable ignored) {
-      }
-   }
-
-   private void doBagUse() {
-      try {
-         ConfigManager var1 = ConfigManager.load();
-         if (var1 == null) {
-            return;
-         }
-
-         Object[][] var2 = new Object[][]{
-            {"LUCKY_DICE", var1.bagLuckOn, var1.bagLuckNum, "好运骰"},
-            {"SURFACE8_DICE", var1.bag8On, var1.bag8Num, "八面骰"},
-            {"SURFACE12_DICE", var1.bag12On, var1.bag12Num, "十二面骰"},
-            {"ROCKET_DICE", var1.bagRocketOn, var1.bagRocketNum, "火箭骰子"},
-            {"DOUBLE_DICE", var1.bagDoubleOn, var1.bagDoubleNum, "双倍骰子"},
-            {"BENEFIT_GGK", var1.bagGgkOn, var1.bagGgkNum, "刮刮卡"},
-            {"BENEFIT_DZP_SPRING", var1.bagDzpOn, var1.bagDzpNum, "大转盘"}
-         };
-         boolean var3 = false;
-
-         for (Object[] var7 : var2) {
-            if ((Boolean)var7[1]) {
-               var3 = true;
-               break;
-            }
-         }
-
-         if (!var3) {
-            return;
-         }
-
-         JSONObject var39 = this.callApi(
-            "mtop.taobao.idle.play.prop.list",
-            "1.0",
-            objJson("bizCode", "coinMap", "fishAdCode", RhLocationContext.fishAdCode(), "gps", RhLocationContext.gps()),
-            "背包列表"
-         );
-         JSONObject var40 = var39 == null ? null : var39.optJSONObject("data");
-         JSONArray var41 = var40 == null ? null : var40.optJSONArray("propInfos");
-         if (var41 == null) {
-            this.report.append("[背包] 列表获取失败，跳过\n");
-            return;
-         }
-
-         long var42 = 0L;
-         String var9 = "11";
-         boolean var10 = false;
-         JSONObject var11 = this.callApi("mtop.taobao.idle.treasure.hunt.map.init", "1.0", "{" + RhLocationContext.jsonPair() + "\"version\":4}", "背包地图");
-         JSONObject var12 = var11 == null ? null : var11.optJSONObject("data");
-         JSONObject var13 = var12 == null ? null : var12.optJSONObject("userInfo");
-         if (var13 != null) {
-            var42 = (long)parseNum(var13.optString("location", "0"));
-            var10 = true;
-         }
-
-         JSONArray var14 = var12 == null ? null : var12.optJSONArray("mapResource");
-         if (var14 != null && var14.length() > 0) {
-            var9 = var14.optJSONObject(0).optString("mapVersion", var9);
-         }
-
-         for (Object[] var18 : var2) {
-            String var19 = (String)var18[0];
-            boolean var20 = (Boolean)var18[1];
-            int var21 = (Integer)var18[2];
-            String var22 = (String)var18[3];
-            if (var20) {
-               int var23 = 0;
-               String var24 = null;
-               String var25 = null;
-               // 大转盘每张独立 propId（amount 各 1），逐张核销必须按张取 id；GGK 仍沿用首个 id
-               java.util.ArrayList<String> varIds = new java.util.ArrayList<String>();
-
-               for (int var26 = 0; var26 < var41.length(); var26++) {
-                  JSONObject var27 = var41.optJSONObject(var26);
-                  if (var27 != null && var19.equals(var27.optString("propType"))) {
-                     var23 += parseNum(var27.optString("amount", "0"));
-                     if (var24 == null) {
-                        var24 = var27.optString("configId", null);
-                     }
-
-                     if (var25 == null) {
-                        var25 = var27.optString("id", null);
-                     }
-
-                     if (var27.optString("id", null) != null) {
-                        varIds.add(var27.optString("id"));
-                     }
-                  }
-               }
-
-               if (var24 != null && var23 > 0) {
-                  int var43 = var21 < 0 ? 0 : Math.max(0, var23 - var21);
-                  if (var23 <= var43) {
-                     this.report.append("[背包] ").append(var22).append(" 已达目标（剩 ").append(var23).append("）\n");
-                  } else {
-                     // GGK 与 DZP 走 prop.use 直兑；其余（骰子）走地图掷骰，需地图状态可用
-                     boolean var44 = !"BENEFIT_GGK".equals(var19) && !"BENEFIT_DZP_SPRING".equals(var19);
-                     if (var44 && !var10) {
-                        this.report.append("[背包] ").append(var22).append(" 地图状态不可用，跳过\n");
-                     } else {
-                        int var28 = var23 - var43;
-                        int var29 = 0;
-                        int var30 = 0;
-                        int var31 = 0;
-                        String var32 = null;
-                        int var33 = 0;
-
-                        while (var29 < var28 && var33++ < 120) {
-                           if (var44) {
-                              JSONObject var45 = this.callApi(
-                                 "mtop.taobao.idle.treasure.hunt.map.roll",
-                                 "1.0",
-                                 "{\"diceId\":"
-                                    + var24
-                                    + ",\"diceType\":\""
-                                    + var19
-                                    + "\","
-                                    + RhLocationContext.jsonPair()
-                                    + "\"locationBefore\":"
-                                    + var42
-                                    + ",\"mapVersion\":\""
-                                    + var9
-                                    + "\",\"outId\":"
-                                    + System.currentTimeMillis()
-                                    + ",\"version\":3}",
-                                 "背包掷骰"
-                              );
-                              String var47 = firstRet(var45);
-                              if (var47 == null || !var47.contains("SUCCESS")) {
-                                 var32 = var47 == null ? "无响应" : var47;
-                                 break;
-                              }
-
-                              JSONObject var36 = var45.optJSONObject("data");
-                              int var37 = var36 == null ? 0 : parseNum(var36.optString("diceResult", "0"));
-                              var30 += var37;
-                              var42 += (long)var37;
-                              var31 += rollCoins(var36);
-                           } else {
-                              // DZP：第 var29 次使用取第 var29 张的 id（快照序）；GGK 沿用首个 id
-                              String varUseId = var25;
-                              if ("BENEFIT_DZP_SPRING".equals(var19) && varIds.size() > 0) {
-                                 varUseId = (String)varIds.get(Math.min(var29, varIds.size() - 1));
-                              }
-
-                              JSONObject var34 = this.callApi(
-                                 "mtop.taobao.idle.play.prop.use",
-                                 "1.0",
-                                 objJson(
-                                    "id",
-                                    varUseId,
-                                    "bizCode",
-                                    "coinMap",
-                                    "configId",
-                                    var24,
-                                    "outId",
-                                    "rh" + System.currentTimeMillis(),
-                                    "fishAdCode",
-                                    RhLocationContext.fishAdCode(),
-                                    "gps",
-                                    RhLocationContext.gps()
-                                 ),
-                                 "背包" + ("BENEFIT_DZP_SPRING".equals(var19) ? "转盘" : "刮卡")
-                              );
-                              String var35 = firstRet(var34);
-                              if (var35 == null || !var35.contains("SUCCESS")) {
-                                 var32 = var35 == null ? "无响应" : var35;
-                                 break;
-                              }
-
-                              var31 += ggkReward(var34.optJSONObject("data"));
-                              sleep(400L);
-                           }
-
-                           var29++;
-                           sleepJitter(1200L);
-                        }
-
-                        StringBuilder var46 = new StringBuilder("[背包] ").append(var22).append(" 使用 ").append(var29).append("/").append(var28);
-                        if (var44) {
-                           var46.append(" · 前进 ").append(var30).append(" 步");
-                        }
-
-                        var46.append(" · 收益 ").append(var31);
-                        if (var32 != null) {
-                           var46.append(" · 中断:").append(var32);
-                        }
-
-                        this.report.append(var46).append('\n');
-                        if (var29 > 0) {
-                           toast("✓ 背包 " + var22 + " 用 " + var29 + " 个");
-                        }
-
-                        log(
-                           "[bag-use] "
-                              + var22
-                              + " used="
-                              + var29
-                              + "/"
-                              + var28
-                              + (var44 ? " steps=" + var30 : "")
-                              + " coins="
-                              + var31
-                              + (var32 != null ? " err=" + var32 : "")
-                        );
-                     }
-                  }
-               } else {
-                  this.report.append("[背包] ").append(var22).append(" 背包无货，跳过\n");
-               }
-            }
-         }
-      } catch (Throwable var38) {
-         this.report.append("[背包] 异常 ").append(var38).append('\n');
-      }
-   }
-
-   private static int rollCoins(JSONObject var0) {
-      if (var0 == null) {
-         return 0;
-      } else {
-         int var1 = 0;
-         JSONArray var2 = var0.optJSONArray("contentList");
-         if (var2 != null) {
-            for (int var3 = 0; var3 < var2.length(); var3++) {
-               JSONObject var4 = var2.optJSONObject(var3);
-               if (var4 != null && "coin".equals(var4.optString("contentType"))) {
-                  var1 += parseNum(var4.optString("rewardNum", "0"));
-               }
-            }
-         }
-
-         JSONArray var6 = var0.optJSONArray("settleList");
-         if (var6 != null) {
-            for (int var7 = 0; var7 < var6.length(); var7++) {
-               JSONObject var5 = var6.optJSONObject(var7);
-               if (var5 != null && "treasureMapPoint".equals(var5.optString("contentType"))) {
-                  var1 += parseNum(var5.optString("rewardNum", "0"));
-               }
-            }
-         }
-
-         return var1;
-      }
-   }
-
-   private static int ggkReward(JSONObject var0) {
-      if (var0 == null) {
-         return 0;
-      } else {
-         JSONObject var1 = var0.optJSONObject("attributes");
-         JSONObject var2 = var1 == null ? null : var1.optJSONObject("benefitResult");
-         if (var2 == null) {
-            return 0;
-         } else {
-            JSONObject var3 = var2.optJSONObject("extraData");
-            return var3 == null ? 0 : parseNum(var3.optString("amount", "0"));
-         }
-      }
-   }
-
-   private static int stepOf(JSONObject var0) {
-      int var1 = parseNum(var0.optString("remainStep", ""));
-      if (var1 > 0) {
-         return var1;
-      } else {
-         JSONObject var2 = var0.optJSONObject("userInfo");
-         return var2 == null ? 0 : parseNum(var2.optString("remainStep", "0"));
-      }
-   }
-
-   private void runPolish() {
-      String var1 = new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date());
-      String var2 = this.cacheDir + "/rh_pref.json";
-      JSONObject var3 = parseObj(this.readFile(var2).trim().isEmpty() ? "{}" : this.readFile(var2));
-      if (var1.equals(var3.optString("polish_date"))) {
-         this.report.append("[擦亮] 今日已擦亮（每日一次标记），跳过\n");
-      } else {
-         JSONObject var4 = this.callApi("mtop.taobao.idle.item.polish", "2.0", "{\"type\":\"originaljson\"}", "擦亮");
-         String var5 = firstRet(var4);
-         int var6 = 0;
-         if (var4 != null) {
-            JSONObject var7 = var4.optJSONObject("data");
-            JSONArray var8 = var7 == null ? null : var7.optJSONArray("exposureItems");
-            if (var8 != null) {
-               var6 = var8.length();
-            }
-         }
-
-         if (var5 != null && var5.contains("SUCCESS")) {
-            this.report.append(var6 > 0 ? "[擦亮] SUCCESS：已擦亮 " + var6 + " 个宝贝\n" : "[擦亮] SUCCESS：服务端受理（今日已擦过或无可擦宝贝）\n");
-            if (var6 > 0) {
-               toast("✓ 擦亮 " + var6 + " 个宝贝");
-            }
-
-            this.markPolished(var2, var3, var1);
-         } else if (var5 != null && var5.contains("POLISH_AGAIN")) {
-            this.report.append("[擦亮] 今日已擦亮过（服务端判重）\n");
-            this.markPolished(var2, var3, var1);
-         } else if (var5 != null && var5.contains("POLISH_FAILED3")) {
-            this.report.append("[擦亮] 今日擦亮次数已用完（服务端限制）\n");
-            this.markPolished(var2, var3, var1);
-         } else {
-            this.report.append("[擦亮] ").append(var5 == null ? "无响应，下次重试" : var5).append('\n');
-         }
-      }
-   }
-
-   private void markPolished(String var1, JSONObject var2, String var3) {
-      try {
-         var2.put("polish_date", var3);
-         this.writeFile(var1, var2.toString());
-      } catch (Throwable var5) {
-         log("markPolished fail: " + var5);
-      }
-   }
-
    /** v1.5.5 P1-3：浏览任务「需真实行为」当日标记（静态，跨轮生效；进程重启复位，按日期自动失效）。 */
    private static volatile String browseDeadDay = "";
 
@@ -2242,10 +1596,10 @@ public final class FishTaskAuto {
       // v1.5.5 改进 D：map.init 结果 60s 内复用（响应 6.9KB、分钟级内容不变）。
       // 静态缓存——coinBalanceLogger 每 30s new 一个实例，实例字段会失效。
       // 收益：探针请求量减半以上，直调频率降下来直接降低被 WAF 拦的概率（见批次2日志分析）。
-      if (MAP_INIT_API.equals(var1)) {
+      if (MapTasks.MAP_INIT_API.equals(var1)) {
          long varN = System.currentTimeMillis();
-         long[] varT = MAP_INIT_TS;
-         JSONObject varC = MAP_INIT_CACHE;
+         long[] varT = MapTasks.MAP_INIT_TS;
+         JSONObject varC = MapTasks.MAP_INIT_CACHE;
          if (varC != null && varN - varT[0] < 60000L) {
             log("[tasks] " + var4 + " -> (cache 60s) " + firstRet(varC));
             return varC;
@@ -2303,9 +1657,9 @@ public final class FishTaskAuto {
                   String var13 = firstRet(var12);
                   log("[tasks] " + var4 + " -> " + var13);
                   // 改进 D：map.init 成功响应进 60s 缓存
-                  if (MAP_INIT_API.equals(var1) && var13 != null && var13.contains("SUCCESS")) {
-                     MAP_INIT_CACHE = var12;
-                     MAP_INIT_TS[0] = System.currentTimeMillis();
+                  if (MapTasks.MAP_INIT_API.equals(var1) && var13 != null && var13.contains("SUCCESS")) {
+                     MapTasks.MAP_INIT_CACHE = var12;
+                     MapTasks.MAP_INIT_TS[0] = System.currentTimeMillis();
                   }
                   return var12;
                } catch (Throwable var14) {
@@ -2345,7 +1699,7 @@ public final class FishTaskAuto {
       }
    }
 
-   private String readFile(String var1) {
+   String readFile(String var1) {
       try {
          FileInputStream var2 = new FileInputStream(var1);
          byte[] var3 = new byte[var2.available()];
@@ -2357,7 +1711,7 @@ public final class FishTaskAuto {
       }
    }
 
-   private void writeFile(String var1, String var2) {
+   void writeFile(String var1, String var2) {
       try {
          FileWriter var3 = new FileWriter(var1, false);
          var3.write(var2);
@@ -2391,8 +1745,8 @@ public final class FishTaskAuto {
    }
 
    private void finish(long var1) {
-      this.doMapRoll();
-      this.maybeClaimCycleReward(); // 收尾再查一次：跑批期间浏览/游戏攒的步数可能又过档
+      this.mapTasks.doMapRoll();
+      this.mapTasks.maybeClaimCycleReward(); // 收尾再查一次：跑批期间浏览/游戏攒的步数可能又过档
       this.report.append("耗时 ").append((System.currentTimeMillis() - var1) / 1000L).append("s\n");
       String var3 = this.report.toString();
       this.writeFile(this.reportDir + "/rh_tasks_result.txt", var3);
@@ -2454,7 +1808,7 @@ public final class FishTaskAuto {
       }
    }
 
-   private static void sleep(long var0) {
+   static void sleep(long var0) {
       try {
          Thread.sleep(var0);
       } catch (InterruptedException var3) {
@@ -2520,7 +1874,7 @@ public final class FishTaskAuto {
    /** 执行器节奏等待：任意固定等待过 jitterMs（设备系数×±40% 抖动）——
     *  2026-11-15 节奏整形补全：执行器内 18 处固定字面量与浏览流步进间隔统一走这里，
     *  消除任务间等间隔脉冲；<1000ms 的轮询小间隔保持原 sleep 不抖。 */
-   private static void sleepJitter(long centerMs) {
+   static void sleepJitter(long centerMs) {
       sleep(jitterMs(centerMs));
    }
 
