@@ -4,6 +4,7 @@ import android.content.Context;
 
 import com.piggyhand.fish.core.EngineHook;
 import com.piggyhand.fish.core.RhFileLog;
+import com.piggyhand.fish.core.VdKeepAlive;
 
 import de.robv.android.xposed.XposedBridge;
 
@@ -33,6 +34,13 @@ public final class TaskRegistry implements EngineHook {
 
     @Override
     public void onEngineReady(Context appCtx) {
+        // 虚拟屏保活：闲鱼退后台 ~15s 即被 HyperOS 冻结（2026-11-16 真机基线），
+        // 引擎就绪时按 cfg(vdKeepAliveOn) 初值立即挂窗抬 procstate，先于一切自启线
+        try {
+            VdKeepAlive.startIfEnabled(appCtx);
+        } catch (Throwable t) {
+            log("[vdka] fail: " + t);
+        }
         // 原 FishMtopHook 418~439 就绪自启段原样迁入（时序零变化）
         try {
             FishTaskAuto.autoRunDaily(appCtx);
@@ -93,6 +101,12 @@ public final class TaskRegistry implements EngineHook {
     public String onCommand(String cmd, Context ctx, String arg) {
         if (cmd == null || ctx == null) return null;
         switch (cmd) {
+            case "VD_ON": // v1.5.6 后台保活：UI 开关实时建屏（不回读 cfg，避免 override 异步写竞态）
+                VdKeepAlive.applyEnabled(ctx, true);
+                return "OK vd-on";
+            case "VD_OFF": // v1.5.6 后台保活：UI 开关实时拆窗
+                VdKeepAlive.applyEnabled(ctx, false);
+                return "OK vd-off";
             case "LAUNCH_TASKS": // MTOP_CALL 广播 __RUN_TASKS__
                 FishTaskAuto.launch(ctx, arg);
                 log("[tasks] engine launched via broadcast");

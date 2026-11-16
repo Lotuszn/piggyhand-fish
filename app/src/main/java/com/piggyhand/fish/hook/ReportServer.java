@@ -167,6 +167,12 @@ final class ReportServer {
                            } else if (req != null && req.startsWith("CLEAR_MARKS")) {
                               // v1.5.3 清除全部当日任务标记（同步执行并回显；Phase 2b 分发迁 TaskRegistry）
                               body = FishMtopHook.dispatch("CLEAR_MARKS", null, "FAIL no-hook");
+                           } else if (req != null && req.startsWith("VD_OFF")) {
+                              // v1.5.6 后台保活：UI 开关实时拆窗（必须先于 VD_ON 前缀判断无冲突，二者独立）
+                              body = FishMtopHook.dispatch("VD_OFF", null, "OK");
+                           } else if (req != null && req.startsWith("VD_ON")) {
+                              // v1.5.6 后台保活：UI 开关实时建窗
+                              body = FishMtopHook.dispatch("VD_ON", null, "OK");
                            } else if (req != null && req.startsWith("GAME_REPORT")) {
                               // v1.2.9 游戏任务报告读取（必须先于 GAME 的前缀匹配）
                               body = RespStore.readReportFile("rh_tasks_game.txt");
