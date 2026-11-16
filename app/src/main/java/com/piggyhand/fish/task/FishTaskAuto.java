@@ -8,10 +8,6 @@ import com.piggyhand.fish.net.ApiDirect;
 import com.piggyhand.fish.net.RhReport;
 
 import android.app.Application;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
-import android.app.Notification.BigTextStyle;
-import android.app.Notification.Builder;
 import android.content.Context;
 import android.net.Uri;
 import android.os.Handler;
@@ -1751,7 +1747,7 @@ public final class FishTaskAuto {
       String var3 = this.report.toString();
       this.writeFile(this.reportDir + "/rh_tasks_result.txt", var3);
       log("=== task auto done ===\n" + var3);
-      this.notifyDone(var3);
+      // 状态栏通知已移除（2026-11-16 用户指令）：报告仍落 rh_tasks_result.txt 供 REPORT 回读，toast 汇总保留
       int var4 = 0;
       int var5 = 0;
 
@@ -1764,48 +1760,6 @@ public final class FishTaskAuto {
       }
 
       toast("钓鱼完成 · 成功 " + var4 + (var5 > 0 ? " · 失败 " + var5 : "") + " · 用时 " + (System.currentTimeMillis() - var1) / 1000L + "s");
-   }
-
-   private void notifyDone(String var1) {
-      try {
-         Context var2 = appCtx;
-         if (var2 == null) {
-            return;
-         }
-
-         NotificationManager var3 = (NotificationManager)var2.getSystemService("notification");
-         if (var3 == null) {
-            return;
-         }
-
-         String var4 = "reward_hook";
-         if (VERSION.SDK_INT >= 26) {
-            var3.createNotificationChannel(new NotificationChannel(var4, "任务引擎结果", 3));
-         }
-
-         int var5 = 0;
-         int var6 = 0;
-
-         for (String var10 : var1.split("\n")) {
-            if (var10.startsWith("领取成功")) {
-               var5 = parseCount(var10);
-            } else if (var10.startsWith("领取失败")) {
-               var6 = parseCount(var10);
-            }
-         }
-
-         String var12 = var5 <= 0 && var6 <= 0 ? "钓鱼完成（无领取动作）" : "领取 " + var5 + " 笔" + (var6 > 0 ? "，失败 " + var6 + " 笔" : "");
-         Builder var13 = VERSION.SDK_INT >= 26 ? new Builder(var2, var4) : new Builder(var2);
-         var13.setSmallIcon(17301584)
-            .setContentTitle("咸鱼小猪手 · " + var12)
-            .setContentText(var12)
-            .setStyle(new BigTextStyle().bigText(var1.length() > 3500 ? var1.substring(0, 3500) : var1))
-            .setAutoCancel(true);
-         var3.notify(1001, var13.build());
-         log("notification sent: " + var12);
-      } catch (Throwable var11) {
-         log("notify FAILED: " + var11);
-      }
    }
 
    static void sleep(long var0) {
