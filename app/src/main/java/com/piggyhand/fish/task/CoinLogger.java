@@ -76,13 +76,31 @@ final class CoinLogger {
       log("[coinlog] balance logger armed (90s±30% jitter, engine-mutex, first in 20s)");
    }
 
-   /** v1.5.5 改进 B：币余额探针熔断——连续 3 次网关拒绝（GATEWAY_REJECT）后停探 10 分钟。
-    *  静态：logger 与跑批共用同一判定；SUCCESS 清零。 */
+   /** v1.5.5 改进 B：币余额探针熔断——连续 3 次网关拒绝（GATEWAY_REJECT）后停探。
+    *  v1.5.71 P1-B: 固定 10min 改阶梯退避——同一波拒绝潮里越退越深（10/30/60min），
+    *  晚间 00~01/19~23 拒绝潮实测可持续数小时，固定 10min 只会反复撞墙扩大风控窗口。
+    *  网络断连（NETWORK_LOST，v1.5.71 P1-C 新归因）同样计入熔断——包没到，探针继续打也是空打。
+    *  静态：logger 与跑批共用同一判定；SUCCESS 清零（等级也清零，恢复后从头爬阶梯）。 */
    private static final java.util.concurrent.atomic.AtomicInteger GW_FAIL_STREAK =
            new java.util.concurrent.atomic.AtomicInteger(0);
    private static volatile long gwBlockedUntil = 0L;
+   /** v1.5.71 P1-B: 退避等级 0/1/2 -> 10/30/60min；封顶 60min 直到出现一次成功 */
+   private static final java.util.concurrent.atomic.AtomicInteger GW_BACKOFF_LVL =
+           new java.util.concurrent.atomic.AtomicInteger(0);
 
    static void coinBalanceSnapshot(Context var0) {
+      // v1.5.71 P1-B: 高发失败窗（00~01 点、19~23 点，三份用户日志互证）按 65% 概率跳轮——
+      // 等效把该时段探针频率降到约 1/3，不动调度器结构（90s±30% 原样，compat 红线外）
+      try {
+         java.util.Calendar varCal = java.util.Calendar.getInstance();
+         int varH = varCal.get(java.util.Calendar.HOUR_OF_DAY);
+         if ((varH <= 1 || varH >= 19)
+                 && java.util.concurrent.ThreadLocalRandom.current().nextInt(100) < 65) {
+            return;
+         }
+      } catch (Throwable ignored) {
+      }
+
       // v1.5.5 改进 B：熔断窗内直接跳过本轮探针（不打请求、不占 30s 窗口）
       long varNow = System.currentTimeMillis();
       if (varNow < gwBlockedUntil) {
@@ -95,18 +113,25 @@ final class CoinLogger {
          // 借 FishTaskAuto 实例走响应通道（callApi 含节奏整形 + api 级互斥，与跑批同规矩）
          FishTaskAuto var3 = new FishTaskAuto(var1, var2);
          JSONObject var4 = var3.callApi("mtop.taobao.idle.treasure.hunt.map.init", "1.0", "{" + RhLocationContext.jsonPair() + "\"version\":4}", "币余额");
-         // 改进 B：连续 3 次网关拒绝 → 停探 10 分钟（期间日志每 90s 静默跳过一次）
+         // 改进 B + P1-B: 连续 3 次拒绝（网关拒绝或连接层失败）→ 按阶梯等级停探 10/30/60min
          String varRet0 = firstRet(var4);
-         if (varRet0 != null && varRet0.contains("GATEWAY_REJECT")) {
+         if (varRet0 != null
+                 && (varRet0.contains("GATEWAY_REJECT") || varRet0.contains("NETWORK_LOST"))) {
             int varStreak = GW_FAIL_STREAK.incrementAndGet();
             if (varStreak >= 3) {
-               gwBlockedUntil = System.currentTimeMillis() + 600000L;
+               int varLvl = GW_BACKOFF_LVL.get();
+               long varPauseMin = varLvl == 0 ? 10L : (varLvl == 1 ? 30L : 60L);
+               gwBlockedUntil = System.currentTimeMillis() + varPauseMin * 60000L;
                GW_FAIL_STREAK.set(0);
-               log("[coinlog] gateway reject x3, balance probe paused 10min");
+               if (varLvl < 2) GW_BACKOFF_LVL.incrementAndGet(); // 已到 60min 档就钉死，成功才回零
+               String varKind = varRet0.contains("NETWORK_LOST") ? "network-lost" : "gateway-reject";
+               log("[coinlog] " + varKind + " x3, balance probe paused " + varPauseMin
+                       + "min (backoff lvl " + (varLvl + 1) + ")");
             }
             return;
          }
          GW_FAIL_STREAK.set(0);
+         GW_BACKOFF_LVL.set(0); // v1.5.71 P1-B: 成功即回零，下次拒绝潮从 10min 重新爬
          JSONObject var5 = var4 == null ? null : var4.optJSONObject("data");
          if (var5 == null) {
             return;

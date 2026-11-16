@@ -32,6 +32,10 @@ public final class Diag {
     public static final String PARAM = "PARAM";
     public static final String RISK = "RISK";
     public static final String TIMEOUT = "TIMEOUT";
+    /** v1.5.71 P1-C: 连接层失败（-205/-405、bytedata/headerFields 全 null）——
+     *  与网关拒绝分开归因：网关拒绝 = 服务端 WAF 有响应地拒；NETWORK_LOST = 包都没到。
+     *  处置不同：前者降频熔断，后者换网/等网络恢复，不该计入网关熔断计数。 */
+    public static final String NETWORK_LOST = "NETWORK_LOST";
     public static final String UNKNOWN = "UNKNOWN";
 
     /**
@@ -47,6 +51,12 @@ public final class Diag {
             {RISK, "访问频繁"},
             {NOT_FOUNDED, "API_NOT_FOUNDED"},
             {NOT_FOUNDED, "API_NOT_FOUND"},
+            // v1.5.71 P1-C: MtopResponse toString 的连接层失败特征。
+            // 放在 PARAM/参数 之前：-205/-405 的 toString 不含业务关键词，
+            // 但 bytedata=null 可能与空载荷混淆，必须先于泛化规则命中。
+            {NETWORK_LOST, "responseCode=-205"},
+            {NETWORK_LOST, "responseCode=-405"},
+            {NETWORK_LOST, "bytedata=null"},
             {PARAM, "PARAM_ILLEGAL"},
             {PARAM, "TASK_CONFIG_INVALID"},
             {PARAM, "ILLEGAL_ARGUMENT"},

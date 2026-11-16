@@ -1669,6 +1669,11 @@ public final class FishTaskAuto {
                // v1.5.5 改进 C 衔接：网关拒绝不是业务失败，不锁不重试本轮，下一轮自然再来
                this.report.append("[领取] ").append(var2).append(" -> 网关拒绝（").append(var6)
                      .append("），下轮重试\n");
+            } else if (var6 != null && var6.contains("NETWORK_LOST")) {
+               // v1.5.71 P1-C: 连接层失败（-205/-405 包未到达）——弱网/换网/时段性断连，
+               // 与网关拒绝分开写报告：用户看到「弱网」会去查网络，看到「网关拒绝」只会干等
+               this.report.append("[领取] ").append(var2)
+                     .append(" -> 连接层失败（弱网/断连，请求未到达），下轮重试\n");
             } else {
                this.report.append("[领取] ").append(var2).append(" -> ").append(var6 == null ? "无响应" : var6).append('\n');
             }
@@ -1723,10 +1728,20 @@ public final class FishTaskAuto {
                if (varBad.exists() && varBad.lastModified() >= varSentAt) {
                   String varHead = varBad.length() > 0 ? this.readFile(varBad.getAbsolutePath()) : "";
                   varBad.delete();
-                  log("[tasks] " + var4 + " -> GATEWAY_REJECT (" + varHead.length() + "B)");
+                  // v1.5.71 P1-C: 连接层失败分流——.bad 里是 MtopResponse toString
+                  // （responseCode=-205/-405、bytedata=null、headerFields=null）说明包根本没到服务端，
+                  // 这不是网关拒绝：不误导熔断计数、不在报告里写「网关拒绝」。真网关拒绝才有 HTML/JSON 拒绝页原文。
+                  boolean varNetLost = varHead.contains("responseCode=-205")
+                          || varHead.contains("responseCode=-405")
+                          || (varHead.contains("bytedata=null") && varHead.contains("headerFields=null"));
+                  String varKind = varNetLost ? "NETWORK_LOST" : "GATEWAY_REJECT";
+                  log("[tasks] " + var4 + " -> " + varKind + " (" + varHead.length() + "B)");
                   JSONObject varR = new JSONObject();
-                  varR.put("ret", new JSONArray().put("FAIL_GATEWAY_REJECT::网关拒绝非JSON响应: "
-                          + varHead.substring(0, Math.min(60, varHead.length()))));
+                  varR.put("ret", new JSONArray().put(varNetLost
+                          ? "FAIL_NETWORK_LOST::连接层失败（非网关拒绝，包未到达）: "
+                            + varHead.substring(0, Math.min(60, varHead.length()))
+                          : "FAIL_GATEWAY_REJECT::网关拒绝非JSON响应: "
+                            + varHead.substring(0, Math.min(60, varHead.length()))));
                   return varR;
                }
             } catch (Throwable varBadErr) {

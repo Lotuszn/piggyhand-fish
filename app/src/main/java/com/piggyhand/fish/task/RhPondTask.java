@@ -55,6 +55,53 @@ public final class RhPondTask {
     /** feedId 持久档：投喂成功后写一次，冷启动后仍可用（external files 不被闲鱼清理） */
     private static final String FEEDID_FILE = "rh_pond_feedid.txt";
 
+    /* ==================== v1.5.71 P0-A: auto-run 标记结果化 ====================
+     * 病灶（2026-11-17 用户C日志）：auto-run 无论成败都落当日标记 → 鱼塘全败后全天 skip，
+     * 用户看到「鱼塘任务没有做」且当天再也救不回来。
+     * 修复：run/runFeed 结束时把「完成度」放进 ThreadLocal（1=完成 0=未完成），
+     * auto-run 线程取本线程分数决定是否落标记——全败不落标记，下次打开闲鱼重试。
+     * 零回归保障：
+     *   1) 正常用户（第一轮就成功）行为与旧版完全一致：跑一次、LVL 计一次、落标记；
+     *   2) 「无事可做」也算完成（任务全做完/余额本来就空）——否则正常用户每天会被多跑几轮；
+     *   3) ThreadLocal 隔离手动 POND 轮的竞态（auto-run 与手动分属不同线程）；
+     *   4) try 计数与 RhGameTask/RhOlivertask 同构（yyyyMMdd N，同日 3 次封顶），跨天归零。 */
+    private static final ThreadLocal<Integer> TL_SCORE = new ThreadLocal<>();
+
+    /** auto-run 线程专用：紧跟在本线程 run()/runFeed() 调用后取完成度；未跑返回 -1 */
+    static int lastThreadScore() {
+        Integer v = TL_SCORE.get();
+        return v == null ? -1 : v;
+    }
+
+    /** 同日自动尝试计数（格式：yyyyMMdd N，与 RhGameTask.try 档同构）；跨天自动归零 */
+    private static int bumpTry(Context ctx, String fileName) {
+        File f = new File(ctx.getFilesDir() != null ? ctx.getFilesDir()
+                : new File("/data/data/com.taobao.idlefish/files"), fileName);
+        String today = new java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
+                .format(new java.util.Date());
+        int n = 0;
+        try {
+            if (f.exists()) {
+                String s = new String(java.nio.file.Files.readAllBytes(f.toPath()), "UTF-8").trim();
+                int sp = s.indexOf(' ');
+                // 只有同一日期才沿用计数，跨天从 0 起
+                if (sp > 0 && today.equals(s.substring(0, sp))) {
+                    n = Integer.parseInt(s.substring(sp + 1).trim());
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        n++;
+        try {
+            java.io.FileWriter w = new java.io.FileWriter(f, false);
+            w.write(today + " " + n);
+            w.close();
+        } catch (Throwable t) {
+            RhFileLog.write("[pond] bumpTry write fail: " + t);
+        }
+        return n;
+    }
+
     /**
      * 打开闲鱼自动跑一次（用户语义：开启状态打开闲鱼就自动跑）。
      * 当日标记存闲鱼 internal files（external cache 会被闲鱼清理）；
@@ -104,30 +151,43 @@ public final class RhPondTask {
                 return;
             }
 
+            // v1.5.71 P0-A: 同日自动尝试计数（与 game/oliver 引擎同构，3 次封顶防断网日反复空跑）
+            final int tries = bumpTry(ctx, "rh_pond_try.txt");
+            if (tries > 3) {
+                RhFileLog.write("[pond] auto-run give up today, tries=" + tries + " (手动 POND 不受限)");
+                return;
+            }
+
             // 40s 等 mtop 通道热 + 闲鱼初始化完成
-            RhFileLog.write("[pond] auto-run scheduled in 40s");
+            RhFileLog.write("[pond] auto-run scheduled in 40s (try " + tries + "/3)");
             new Thread(new Runnable() {
                 @Override
                 public void run() {
                     try {
                         Thread.sleep(40000);
                         RhPondTask.run(ctx);
-                        // v1.4.1 LVL 计数：本轮调度无论成败都计一次（与签到类引擎语义一致）
-                        LvlLedger.bumpShared(ctx, LVL_KEY_TASK);
-                        // 落当日标记
-                        try {
-                            String td = new java.text.SimpleDateFormat("yyyyMMdd",
-                                    java.util.Locale.US).format(new java.util.Date());
-                            java.io.File d2 = ctx.getFilesDir();
-                            java.io.File m2 = new java.io.File(d2 != null ? d2
-                                    : new java.io.File("/data/data/com.taobao.idlefish/files"),
-                                    "rh_pond_date.txt");
-                            java.io.FileWriter w = new java.io.FileWriter(m2, false);
-                            w.write(td);
-                            w.close();
-                        } catch (Throwable ignored) {
+                        // v1.5.71 P0-A: 标记结果化——只有完成度=1（有推进或无事可做）才落
+                        // 当日标记与 LVL 计数；全败不落标记，下次打开闲鱼重试
+                        if (RhPondTask.lastThreadScore() > 0) {
+                            // v1.4.1 LVL 计数：仅真正完成时计一次
+                            LvlLedger.bumpShared(ctx, LVL_KEY_TASK);
+                            // 落当日标记
+                            try {
+                                String td = new java.text.SimpleDateFormat("yyyyMMdd",
+                                        java.util.Locale.US).format(new java.util.Date());
+                                java.io.File d2 = ctx.getFilesDir();
+                                java.io.File m2 = new java.io.File(d2 != null ? d2
+                                        : new java.io.File("/data/data/com.taobao.idlefish/files"),
+                                        "rh_pond_date.txt");
+                                java.io.FileWriter w = new java.io.FileWriter(m2, false);
+                                w.write(td);
+                                w.close();
+                            } catch (Throwable ignored) {
+                            }
+                            RhFileLog.write("[pond] auto-run finished, mark saved");
+                        } else {
+                            RhFileLog.write("[pond] auto-run incomplete, no mark, will retry on next launch");
                         }
-                        RhFileLog.write("[pond] auto-run finished, mark saved");
                     } catch (Throwable t) {
                         RhFileLog.write("[pond] auto-run fail: " + t);
                     }
@@ -189,28 +249,42 @@ public final class RhPondTask {
                 return;
             }
 
-            RhFileLog.write("[pondfeed] auto-run scheduled in 46s (until drained)");
+            // v1.5.71 P0-A: 同日自动尝试计数（与 pond 引擎同构，3 次封顶）
+            final int triesF = bumpTry(ctx, "rh_pondfeed_try.txt");
+            if (triesF > 3) {
+                RhFileLog.write("[pondfeed] auto-run give up today, tries=" + triesF
+                        + " (手动 PONDFEED 不受限)");
+                return;
+            }
+
+            RhFileLog.write("[pondfeed] auto-run scheduled in 46s (until drained, try " + triesF + "/3)");
             new Thread(new Runnable() {
                 @Override
                 public void run() {
                     try {
                         Thread.sleep(46000);
                         RhPondTask.runFeed(ctx);
-                        LvlLedger.bumpShared(ctx, LVL_KEY_FEED);
-                        // 落当日标记
-                        try {
-                            String td = new java.text.SimpleDateFormat("yyyyMMdd",
-                                    java.util.Locale.US).format(new java.util.Date());
-                            java.io.File d2 = ctx.getFilesDir();
-                            java.io.File m2 = new java.io.File(d2 != null ? d2
-                                    : new java.io.File("/data/data/com.taobao.idlefish/files"),
-                                    "rh_pondfeed_date.txt");
-                            java.io.FileWriter w = new java.io.FileWriter(m2, false);
-                            w.write(td);
-                            w.close();
-                        } catch (Throwable ignored) {
+                        // v1.5.71 P0-A: 标记结果化——余额本来就空也按完成落标记（无事可做），
+                        // 投喂全败不落标记，下次打开闲鱼重试
+                        if (RhPondTask.lastThreadScore() > 0) {
+                            LvlLedger.bumpShared(ctx, LVL_KEY_FEED);
+                            // 落当日标记
+                            try {
+                                String td = new java.text.SimpleDateFormat("yyyyMMdd",
+                                        java.util.Locale.US).format(new java.util.Date());
+                                java.io.File d2 = ctx.getFilesDir();
+                                java.io.File m2 = new java.io.File(d2 != null ? d2
+                                        : new java.io.File("/data/data/com.taobao.idlefish/files"),
+                                        "rh_pondfeed_date.txt");
+                                java.io.FileWriter w = new java.io.FileWriter(m2, false);
+                                w.write(td);
+                                w.close();
+                            } catch (Throwable ignored) {
+                            }
+                            RhFileLog.write("[pondfeed] auto-run finished, mark saved");
+                        } else {
+                            RhFileLog.write("[pondfeed] auto-run incomplete, no mark, will retry on next launch");
                         }
-                        RhFileLog.write("[pondfeed] auto-run finished, mark saved");
                     } catch (Throwable t) {
                         RhFileLog.write("[pondfeed] auto-run fail: " + t);
                     }
@@ -309,6 +383,8 @@ public final class RhPondTask {
         if (feedId <= 0) {
             sb.append("[1] feedId 未拿到：请先在鱼塘页手动投喂一次（页面动作会把投喂记录带进协议缓存），")
                     .append("之后本功能即可全自动\n");
+            // v1.5.71 P0-A: feedId 拿不到=未完成（用户手动投喂一次后即可自愈），不落当日标记
+            TL_SCORE.set(0);
             finishFeed(ctx, sb, t0);
             return sb.toString();
         }
@@ -371,6 +447,9 @@ public final class RhPondTask {
         sb.append("[2] 投喂: 成功").append(okCnt).append(" 发(=−").append(okCnt * 10)
                 .append("g) 失败").append(failCnt).append(" 发，当前余额 ")
                 .append(balance >= 0 ? String.valueOf(balance) : "?").append("g\n");
+        // v1.5.71 P0-A: 完成度——有成功发数=完成；零成功零失败=余额本来就空（无事可做，与旧版一致）；
+        // 零成功有失败=服务端拦截/断连，未完成，auto-run 不落当日标记
+        TL_SCORE.set(okCnt > 0 || (okCnt == 0 && failCnt == 0) ? 1 : 0);
         finishFeed(ctx, sb, t0);
         return sb.toString();
     }
@@ -614,6 +693,8 @@ public final class RhPondTask {
         }
         if (tasks == null) {
             sb.append("[1] 任务列表拉取失败 ").append(briefRet(showBody)).append('\n');
+            // v1.5.71 P0-A: 列表都拉不到=未完成，auto-run 不落当日标记
+            TL_SCORE.set(0);
             finish(ctx, sb, t0);
             return sb.toString();
         }
@@ -907,6 +988,12 @@ public final class RhPondTask {
             }
         }
         sb.append("[5] 复核: 剩余待领 AWARD=").append(nAward2 < 0 ? "查询失败" : String.valueOf(nAward2)).append('\n');
+        // v1.5.71 P0-A: 完成度判定——
+        //   有推进（触发/领奖/气泡任一成功）= 完成；
+        //   零推进但零失败（任务当天全做完、无气泡可领）= 无事可做，也算完成，
+        //     与旧版行为一致（否则正常用户每天会被 auto-run 多跑几轮）；
+        //   有失败且零推进（列表失败/网络断连/网关拒绝）= 未完成，auto-run 不落当日标记。
+        TL_SCORE.set((pushOk + okCnt + bubOk > 0) || (pushFail + failCnt + bubFail == 0) ? 1 : 0);
         finish(ctx, sb, t0);
         return sb.toString();
     }

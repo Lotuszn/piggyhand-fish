@@ -116,6 +116,8 @@ public class MainActivity extends Activity {
    private TextView[] tabLabels;
    private int cur = 0;
    private boolean pillReady = false;
+   /** v1.5.71 P1-A: 报告 Dialog 单例——新报告弹出前关旧报告，防同页叠加 */
+   private Dialog reportDialog = null;
    private TextView tvVersion;
    private TextView tvStatus;
    private TextView tvStatusMeta;
@@ -2834,7 +2836,25 @@ public class MainActivity extends Activity {
 
    private void showReportCard(String var1, String var2, String var3) {
       try {
+         // v1.5.71 P1-A: 非「主页」tab 不弹 Dialog——用户反馈日志页叠报告弹窗属禁止行为。
+         // 降级为长 toast（显示摘要），全文回主页重新点击对应行查看。
+         if (this.cur != 0) {
+            String varMsg = (var2 != null && var2.length() != 0) ? var2 : var3;
+            if (varMsg == null) varMsg = "";
+            if (varMsg.length() > 120) varMsg = varMsg.substring(0, 120) + "…";
+            Toast.makeText(this, var1 + "（回主页查看全文）\n" + varMsg, 1).show();
+            return;
+         }
+         // v1.5.71 P1-A: Dialog 单例——连续触发时先关旧报告再弹新的，主页也不允许叠
+         if (this.reportDialog != null) {
+            try {
+               this.reportDialog.dismiss();
+            } catch (Throwable ignored) {
+            }
+            this.reportDialog = null;
+         }
          final Dialog var4 = new Dialog(this);
+         this.reportDialog = var4;
          LinearLayout var5 = new LinearLayout(this);
          var5.setOrientation(1);
          GradientDrawable var6 = new GradientDrawable();
@@ -2858,6 +2878,7 @@ public class MainActivity extends Activity {
          var8.setOnClickListener(new OnClickListener() {
             public void onClick(View var1) {
                var4.dismiss();
+               reportDialog = null; // v1.5.71 P1-A: 关闭后清引用
             }
          });
          ScrollView var9 = new ScrollView(this);
