@@ -424,12 +424,12 @@
                                             </TextView>
                                         </LinearLayout>
                                         <!-- swAutoRun 自动钓鱼：宿主启动超间隔自动跑一轮 -->
-                                        <com.piggyhand.fish.LiquidSwitch
+                                        <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swAutoRun"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
                                         >
-                                        </com.piggyhand.fish.LiquidSwitch>
+                                        </com.piggyhand.fish.ui.LiquidSwitch>
                                     </LinearLayout>
                                     <View
     android:background="#0f17181c"
@@ -487,12 +487,12 @@
                                             </TextView>
                                         </LinearLayout>
                                         <!-- swMtop mtop 直调：借壳协议栈免签名发送 -->
-                                        <com.piggyhand.fish.LiquidSwitch
+                                        <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swMtop"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
                                         >
-                                        </com.piggyhand.fish.LiquidSwitch>
+                                        </com.piggyhand.fish.ui.LiquidSwitch>
                                     </LinearLayout>
                                     <View
     android:background="#0f17181c"
@@ -550,12 +550,12 @@
                                             </TextView>
                                         </LinearLayout>
                                         <!-- swAds 响应净化：去广告 / 过滤 / 排序 -->
-                                        <com.piggyhand.fish.LiquidSwitch
+                                        <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swAds"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
                                         >
-                                        </com.piggyhand.fish.LiquidSwitch>
+                                        </com.piggyhand.fish.ui.LiquidSwitch>
                                     </LinearLayout>
                                     <View
     android:background="#0f17181c"
@@ -615,12 +615,12 @@
                                             </TextView>
                                         </LinearLayout>
                                         <!-- swScout 侦察器：扫宿主方法找广告任务点（参数在 scoutArgs 行） -->
-                                        <com.piggyhand.fish.LiquidSwitch
+                                        <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swScout"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
                                         >
-                                        </com.piggyhand.fish.LiquidSwitch>
+                                        </com.piggyhand.fish.ui.LiquidSwitch>
                                     </LinearLayout>
                                     <View
     android:background="#0f17181c"
@@ -678,12 +678,12 @@
                                             </TextView>
                                         </LinearLayout>
                                         <!-- swPolish 每日擦亮：自动擦亮全部在售宝贝 -->
-                                        <com.piggyhand.fish.LiquidSwitch
+                                        <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swPolish"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
                                         >
-                                        </com.piggyhand.fish.LiquidSwitch>
+                                        </com.piggyhand.fish.ui.LiquidSwitch>
                                     </LinearLayout>
                                     <View
     android:background="#0f17181c"
@@ -741,12 +741,12 @@
                                             </TextView>
                                         </LinearLayout>
                                         <!-- swToast 任务完成逐项气泡提醒 -->
-                                        <com.piggyhand.fish.LiquidSwitch
+                                        <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swToast"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
                                         >
-                                        </com.piggyhand.fish.LiquidSwitch>
+                                        </com.piggyhand.fish.ui.LiquidSwitch>
                                     </LinearLayout>
                                     <View
     android:background="#0f17181c"
@@ -809,12 +809,12 @@
                                             >
                                             </TextView>
                                         </LinearLayout>
-                                        <com.piggyhand.fish.LiquidSwitch
+                                        <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swOlivertask"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
                                         >
-                                        </com.piggyhand.fish.LiquidSwitch>
+                                        </com.piggyhand.fish.ui.LiquidSwitch>
                                     </LinearLayout>
                                     <View
     android:background="#0f17181c"
@@ -876,12 +876,12 @@
                                             >
                                             </TextView>
                                         </LinearLayout>
-                                        <com.piggyhand.fish.LiquidSwitch
+                                        <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swGameTask"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
                                         >
-                                        </com.piggyhand.fish.LiquidSwitch>
+                                        </com.piggyhand.fish.ui.LiquidSwitch>
                                     </LinearLayout>
                                     <View
     android:background="#0f17181c"
@@ -943,12 +943,12 @@
                                             >
                                             </TextView>
                                         </LinearLayout>
-                                        <com.piggyhand.fish.LiquidSwitch
+                                        <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swCycleChallenge"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
                                         >
-                                        </com.piggyhand.fish.LiquidSwitch>
+                                        </com.piggyhand.fish.ui.LiquidSwitch>
                                     </LinearLayout>
                                 </LinearLayout>
                             </LinearLayout>
@@ -1087,12 +1087,12 @@
                                         >
                                         </TextView>
                                     </LinearLayout>
-                                    <com.piggyhand.fish.LiquidSwitch
+                                    <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swPondTask"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
                                     >
-                                    </com.piggyhand.fish.LiquidSwitch>
+                                    </com.piggyhand.fish.ui.LiquidSwitch>
                                 </LinearLayout>
                                 <View
     android:background="#0f17181c"
@@ -1156,12 +1156,12 @@
                                         >
                                         </TextView>
                                     </LinearLayout>
-                                    <com.piggyhand.fish.LiquidSwitch
+                                    <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swPondFeed"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
                                     >
-                                    </com.piggyhand.fish.LiquidSwitch>
+                                    </com.piggyhand.fish.ui.LiquidSwitch>
                                 </LinearLayout>
                             </LinearLayout>
                         </LinearLayout>
@@ -1298,12 +1298,12 @@
                                         >
                                         </TextView>
                                     </LinearLayout>
-                                    <com.piggyhand.fish.LiquidSwitch
+                                    <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swCoinGame"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
                                     >
-                                    </com.piggyhand.fish.LiquidSwitch>
+                                    </com.piggyhand.fish.ui.LiquidSwitch>
                                 </LinearLayout>
                                 <View
     android:background="#0f17181c"
@@ -1367,12 +1367,12 @@
                                         >
                                         </TextView>
                                     </LinearLayout>
-                                    <com.piggyhand.fish.LiquidSwitch
+                                    <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swCoinExchange"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
                                     >
-                                    </com.piggyhand.fish.LiquidSwitch>
+                                    </com.piggyhand.fish.ui.LiquidSwitch>
                                 </LinearLayout>
                             </LinearLayout>
                         </LinearLayout>
@@ -1505,12 +1505,12 @@
                                         </TextView>
                                     </LinearLayout>
                                     <!-- swNoSplash 去开屏广告：冷/热启动都跳过 -->
-                                    <com.piggyhand.fish.LiquidSwitch
+                                    <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swNoSplash"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
                                     >
-                                    </com.piggyhand.fish.LiquidSwitch>
+                                    </com.piggyhand.fish.ui.LiquidSwitch>
                                 </LinearLayout>
                                 <View
     android:background="#0f17181c"
@@ -1570,12 +1570,12 @@
                                         </TextView>
                                     </LinearLayout>
                                     <!-- swFishMedia 无水印保存：商品大图/视频页右下角保存原图 -->
-                                    <com.piggyhand.fish.LiquidSwitch
+                                    <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swFishMedia"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
                                     >
-                                    </com.piggyhand.fish.LiquidSwitch>
+                                    </com.piggyhand.fish.ui.LiquidSwitch>
                                 </LinearLayout>
                                 <View
     android:background="#0f17181c"
@@ -1635,12 +1635,12 @@
                                         </TextView>
                                     </LinearLayout>
                                     <!-- swNoChatSwipe 聊天列表防误滑 -->
-                                    <com.piggyhand.fish.LiquidSwitch
+                                    <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swNoChatSwipe"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
                                     >
-                                    </com.piggyhand.fish.LiquidSwitch>
+                                    </com.piggyhand.fish.ui.LiquidSwitch>
                                 </LinearLayout>
                                 <View
     android:background="#0f17181c"
@@ -1700,12 +1700,12 @@
                                         </TextView>
                                     </LinearLayout>
                                     <!-- swHideIcon 隐藏桌面图标：隐藏后经闲鱼 socket 指令 UI 拉回本界面 -->
-                                    <com.piggyhand.fish.LiquidSwitch
+                                    <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swHideIcon"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
                                     >
-                                    </com.piggyhand.fish.LiquidSwitch>
+                                    </com.piggyhand.fish.ui.LiquidSwitch>
                                 </LinearLayout>
                                 <View
     android:background="#0f17181c"
@@ -1781,13 +1781,13 @@
                                     >
                                     </EditText>
                                     <!-- swFeedCols 启用列数修改 -->
-                                    <com.piggyhand.fish.LiquidSwitch
+                                    <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swFeedCols"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:layout_marginStart="8.0dip"
                                     >
-                                    </com.piggyhand.fish.LiquidSwitch>
+                                    </com.piggyhand.fish.ui.LiquidSwitch>
                                 </LinearLayout>
                                 <View
     android:background="#0f17181c"
@@ -1863,13 +1863,13 @@
                                     >
                                     </EditText>
                                     <!-- swUiScale 启用界面缩放 -->
-                                    <com.piggyhand.fish.LiquidSwitch
+                                    <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swUiScale"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:layout_marginStart="8.0dip"
                                     >
-                                    </com.piggyhand.fish.LiquidSwitch>
+                                    </com.piggyhand.fish.ui.LiquidSwitch>
                                 </LinearLayout>
                             </LinearLayout>
                         </LinearLayout>
@@ -2031,13 +2031,13 @@
                                     >
                                     </EditText>
                                     <!-- swBagLuck 幸运袋启用 -->
-                                    <com.piggyhand.fish.LiquidSwitch
+                                    <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swBagLuck"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:layout_marginStart="8.0dip"
                                     >
-                                    </com.piggyhand.fish.LiquidSwitch>
+                                    </com.piggyhand.fish.ui.LiquidSwitch>
                                 </LinearLayout>
                                 <View
     android:background="#0f17181c"
@@ -2098,13 +2098,13 @@
                                     >
                                     </EditText>
                                     <!-- swBag8 8 连开启用 -->
-                                    <com.piggyhand.fish.LiquidSwitch
+                                    <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swBag8"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:layout_marginStart="8.0dip"
                                     >
-                                    </com.piggyhand.fish.LiquidSwitch>
+                                    </com.piggyhand.fish.ui.LiquidSwitch>
                                 </LinearLayout>
                                 <View
     android:background="#0f17181c"
@@ -2165,13 +2165,13 @@
                                     >
                                     </EditText>
                                     <!-- swBag12 12 连开启用 -->
-                                    <com.piggyhand.fish.LiquidSwitch
+                                    <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swBag12"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:layout_marginStart="8.0dip"
                                     >
-                                    </com.piggyhand.fish.LiquidSwitch>
+                                    </com.piggyhand.fish.ui.LiquidSwitch>
                                 </LinearLayout>
                                 <View
     android:background="#0f17181c"
@@ -2232,13 +2232,13 @@
                                     >
                                     </EditText>
                                     <!-- swBagRocket 火箭启用 -->
-                                    <com.piggyhand.fish.LiquidSwitch
+                                    <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swBagRocket"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:layout_marginStart="8.0dip"
                                     >
-                                    </com.piggyhand.fish.LiquidSwitch>
+                                    </com.piggyhand.fish.ui.LiquidSwitch>
                                 </LinearLayout>
                                 <View
     android:background="#0f17181c"
@@ -2299,13 +2299,13 @@
                                     >
                                     </EditText>
                                     <!-- swBagDouble 双倍卡启用 -->
-                                    <com.piggyhand.fish.LiquidSwitch
+                                    <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swBagDouble"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:layout_marginStart="8.0dip"
                                     >
-                                    </com.piggyhand.fish.LiquidSwitch>
+                                    </com.piggyhand.fish.ui.LiquidSwitch>
                                 </LinearLayout>
                                 <View
     android:background="#0f17181c"
@@ -2366,13 +2366,13 @@
                                     >
                                     </EditText>
                                     <!-- swBagGgk 刮刮卡启用 -->
-                                    <com.piggyhand.fish.LiquidSwitch
+                                    <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swBagGgk"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:layout_marginStart="8.0dip"
                                     >
-                                    </com.piggyhand.fish.LiquidSwitch>
+                                    </com.piggyhand.fish.ui.LiquidSwitch>
                                 </LinearLayout>
                                 <View
     android:background="#0f17181c"
@@ -2433,13 +2433,13 @@
                                     >
                                     </EditText>
                                     <!-- swBagDzp 大转盘启用 -->
-                                    <com.piggyhand.fish.LiquidSwitch
+                                    <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swBagDzp"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:layout_marginStart="8.0dip"
                                     >
-                                    </com.piggyhand.fish.LiquidSwitch>
+                                    </com.piggyhand.fish.ui.LiquidSwitch>
                                 </LinearLayout>
                                 <View
     android:background="#0f17181c"
@@ -2664,13 +2664,13 @@
                                         >
                                         </TextView>
                                     </LinearLayout>
-                                    <com.piggyhand.fish.LiquidSwitch
+                                    <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swCashJoin"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:layout_marginStart="10.0dip"
                                     >
-                                    </com.piggyhand.fish.LiquidSwitch>
+                                    </com.piggyhand.fish.ui.LiquidSwitch>
                                 </LinearLayout>
                                 <View
     android:background="#0f17181c"
@@ -2731,13 +2731,13 @@
                                         >
                                         </TextView>
                                     </LinearLayout>
-                                    <com.piggyhand.fish.LiquidSwitch
+                                    <com.piggyhand.fish.ui.LiquidSwitch
     android:id="@+id/swCashClaim"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:layout_marginStart="10.0dip"
                                     >
-                                    </com.piggyhand.fish.LiquidSwitch>
+                                    </com.piggyhand.fish.ui.LiquidSwitch>
                                 </LinearLayout>
                                 <View
     android:background="#0f17181c"
