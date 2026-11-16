@@ -23,6 +23,8 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
@@ -176,6 +178,7 @@ public class MainActivity extends Activity {
    private TextView tvCashClaimState;
    private View linkPicker;
    private LiquidSwitch swAutoRun;
+   private LiquidSwitch swVdAlive;
    private LiquidSwitch swMtop;
    private LiquidSwitch swAds;
    private LiquidSwitch swScout;
@@ -265,6 +268,7 @@ public class MainActivity extends Activity {
       this.rowQQGroup = this.findViewById(R.id.rowQQGroup);
       this.rowClearMarks = this.findViewById(R.id.rowClearMarks);
       this.swAutoRun = (LiquidSwitch)this.findViewById(R.id.swAutoRun);
+      this.swVdAlive = (LiquidSwitch)this.findViewById(R.id.swVdAlive);
       this.swMtop = (LiquidSwitch)this.findViewById(R.id.swMtop);
       this.swAds = (LiquidSwitch)this.findViewById(R.id.swAds);
       this.swNoSplash = (LiquidSwitch)this.findViewById(R.id.swNoSplash);
@@ -478,6 +482,33 @@ public class MainActivity extends Activity {
          @Override
          public void onToggle(boolean var1) {
             MainActivity.this.put("noChatSwipe", var1);
+         }
+      });
+      // 后台保活：cfg 落盘 + socket VD_ON/VD_OFF 实时通知引擎建/拆窗；命令丢失时由引擎
+      // onResume 对齐兜底（闲鱼解冻即按 cfg 纠正），此处失败仅提示
+      this.swVdAlive.setOnSilent(var7.optBoolean("vdKeepAliveOn", true));
+      this.swVdAlive.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+         @Override
+         public void onToggle(boolean var1) {
+            MainActivity.this.put("vdKeepAliveOn", var1);
+            final boolean var2 = var1;
+            new Thread(new Runnable() {
+               @Override
+               public void run() {
+                  final String var3 = socketCmd(var2 ? "VD_ON" : "VD_OFF");
+                  if (var3 == null) {
+                     MainActivity.this.runOnUiThread(new Runnable() {
+                        public void run() {
+                           Toast.makeText(MainActivity.this,
+                              "\u26a0 闲鱼未连通：开关已保存，下次打开闲鱼自动生效", 0).show();
+                        }
+                     });
+                  }
+               }
+            }, "rh-vd-toggle").start();
+            Toast.makeText(MainActivity.this, var1
+                    ? "\ud83d\udee1 后台保活已开启：闲鱼退后台/息屏不再冻结"
+                    : "\ud83d\udee1 后台保活已关闭：闲鱼退后台将按系统策略冻结", 0).show();
          }
       });
       boolean var10 = var7.optBoolean("hideIcon", false);
@@ -1014,7 +1045,7 @@ public class MainActivity extends Activity {
                      public void run() {
                         boolean var1x = var1 != null && var1.contains("OK");
                         MainActivity.this.btnRun.setText(var1x ? "已触发 · 闲鱼内执行中…" : "未连通 · 打开闲鱼后重试");
-                        Toast.makeText(MainActivity.this, var1x ? "引擎已启动，钓鱼进行中，完成后通知栏推送" : "socket 未连通：请先打开闲鱼（引擎随进程加载），再点开始钓鱼", 1).show();
+                        Toast.makeText(MainActivity.this, var1x ? "引擎已启动，钓鱼进行中，完成后在本页查看" : "socket 未连通：请先打开闲鱼（引擎随进程加载），再点开始钓鱼", 1).show();
                         if (!var1x) {
                            try {
                               Intent var2 = MainActivity.this.getPackageManager().getLaunchIntentForPackage("com.taobao.idlefish");
@@ -1028,7 +1059,7 @@ public class MainActivity extends Activity {
                         MainActivity.this.btnRun.postDelayed(new Runnable() {
                            @Override
                            public void run() {
-                              MainActivity.this.btnRun.setText("开始钓鱼");
+                              MainActivity.this.btnRun.setText("开始钓鱼·没事儿别点我！");
                            }
                         }, 5000L);
                      }
@@ -1210,6 +1241,13 @@ public class MainActivity extends Activity {
                      var2 = MainActivity.this.lspLogHasSameUserFish();
                   }
 
+                  boolean var3 = false;
+                  if (!var1 && !var2) {
+                     // 静态判定：直接读 LSPosed 配置库（模块 enabled=1 + 作用域含闲鱼），
+                     // 不再要求闲鱼至少启动过一次才有 socket/日志证据
+                     var3 = MainActivity.this.lspConfigSaysEnabledForFish();
+                  }
+
                   Log.i(
                      "RhState",
                      "[state] userId="
@@ -1222,8 +1260,10 @@ public class MainActivity extends Activity {
                         + var1
                         + " logHit="
                         + var2
+                        + " configHit="
+                        + var3
                   );
-                  final boolean var4 = var1 || var2;
+                  final boolean var4 = var1 || var2 || var3;
                   MainActivity.this.runOnUiThread(new Runnable() {
                      @Override
                      public void run() {
@@ -1285,6 +1325,79 @@ public class MainActivity extends Activity {
          + ": .*\\(com\\.taobao\\.idlefish\\)\\[com\\.piggyhand\\.fish' \"$f\" 2>/dev/null; done | wc -l";
       String var4 = suExec(var3, 12);
       return parseIntSafe(var4) > 0;
+   }
+
+   private boolean lspConfigSaysEnabledForFish() {
+      // LSPosed 配置库双候选：新版 modules_config.db / 旧版 modules.db
+      String[] var1 = new String[]{"/data/adb/lspd/config/modules_config.db", "/data/adb/lspd/config/modules.db"};
+      String var2 = new File(this.getCacheDir(), "rh_lspd.db").getAbsolutePath();
+
+      for(int var3 = 0; var3 < var1.length; ++var3) {
+         String var4 = var1[var3];
+         File var5 = new File(var2);
+         var5.delete();
+         // root 重定向拷贝；-wal/-shm 一并带上，避免 WAL 未 checkpoint 时读到旧档
+         String var6 = "cat '" + var4 + "' > '" + var2 + "' 2>/dev/null; cat '" + var4
+            + "-wal' > '" + var2 + "-wal' 2>/dev/null; cat '" + var4
+            + "-shm' > '" + var2 + "-shm' 2>/dev/null";
+         suExec(var6, 8);
+         // 长度过小说明拷贝失败或非 SQLite 文件，直接试下一个候选
+         if (var5.exists() && var5.length() >= 100L) {
+            SQLiteDatabase var7 = null;
+
+            try {
+               var7 = SQLiteDatabase.openDatabase(var2, null, 1);
+               // 新版 schema（LSPosed 1.8.6+）：modules 带 mid/enabled 列
+               if (lspQueryHit(var7,
+                     "SELECT 1 FROM modules m JOIN scope s ON m.mid = s.mid"
+                        + " WHERE m.module_pkg_name = 'com.piggyhand.fish'"
+                        + " AND m.enabled = 1"
+                        + " AND s.app_pkg_name = 'com.taobao.idlefish' LIMIT 1")) {
+                  return true;
+               }
+
+               // 老版 schema：modules 表行存在即启用，scope 按包名直接关联
+               if (lspQueryHit(var7,
+                     "SELECT 1 FROM scope s WHERE s.module_pkg_name = 'com.piggyhand.fish'"
+                        + " AND s.app_pkg_name = 'com.taobao.idlefish'"
+                        + " AND EXISTS(SELECT 1 FROM modules m WHERE m.module_pkg_name = 'com.piggyhand.fish')"
+                        + " LIMIT 1")) {
+                  return true;
+               }
+            } catch (Throwable var16) {
+               // 表结构不匹配 → 试下一个候选；都失败则由既有 socket/日志检测兜底
+            } finally {
+               if (var7 != null) {
+                  try {
+                     var7.close();
+                  } catch (Throwable var15) {
+                  }
+               }
+            }
+         }
+      }
+
+      return false;
+   }
+
+   private static boolean lspQueryHit(SQLiteDatabase var0, String var1) {
+      Cursor var2 = null;
+
+      try {
+         var2 = var0.rawQuery(var1, (String[])null);
+         boolean var3 = var2.moveToFirst();
+         return var3;
+      } catch (Throwable var6) {
+         // 单条 SQL 失败（列名/表名不匹配）按未命中处理，让上层继续试老 schema
+         return false;
+      } finally {
+         if (var2 != null) {
+            try {
+               var2.close();
+            } catch (Throwable var5) {
+            }
+         }
+      }
    }
 
    private int fishPackageUid() {
