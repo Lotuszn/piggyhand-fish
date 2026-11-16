@@ -288,6 +288,72 @@ public final class RhCoinTask {
                   String appkey = gm != null ? gm.optString("appkey", "") : t.optString("appkey", "");
                   String scene = t.optString("taskScene", "");
                   if (scene.length() == 0) scene = "GAME_CHANNEL";
+                  String ttype = t.optString("taskType", "");
+
+                  // v1.5.6-fix（2026-11-16 真机实证）：channel_click 类（去闲鱼币频道逛一逛）
+                  // 任务项不带 appkey 字段，detail.query / complete 双双报
+                  // FAIL_SYS_BIZPARAM_MISSED::缺少业务参数appkey（rh_resp_4bad88a1 / ec43db45 实录）。
+                  // 而 App 自身对入口类任务的上报走 channel.revisit.complete，只带
+                  // {reportId, sourceId:"zhurukou"} 即 SUCCESS（16:09:36 旁档实录，无 appkey）。
+                  // 所以 channel_click 先按 App 样本最小化打 revisit（两个 sourceId 各一发），
+                  // 命中即领奖；两发都不认再落回原 complete 链留证。
+                  if ("channel_click".equals(ttype)) {
+                     // sourceId 语义必须与真实入口一致才翻转任务状态：revisit 回 SUCCESS≠推进——
+                     // 2026-11-16 实证 TASK_RECOMMEND 连发两轮 result:true 但任务仍 ACCEPTED
+                     // （11-11 桌面快捷方式任务同坑：换 sourceId 立刻转 AWARD）。
+                     // 所以每发后复核 taskStatus，翻 AWARD/COMPLETE 才算命中；zhurukou（主入口）
+                     // 放首位——App 16:09:36 对频道入口类任务亲证用的就是它。
+                     String[] srcs = {"zhurukou", "TASK_RECOMMEND", "desktop_shortcut"};
+                     boolean revisitOk = false;
+                     for (String src : srcs) {
+                        JSONObject rb = new JSONObject();
+                        rb.put("reportId", rid("revisit"));
+                        rb.put("sourceId", src);
+                        JSONObject ro = parse(RhPondTask.callAndWait(ctx, API_CH_REVISIT, "1.0", rb.toString(), "chr", 6000L));
+                        boolean ok = ro != null && hasSuccess(ro);
+                        rep.append("    · ").append(label).append(" revisit(").append(src).append(") → ")
+                           .append(briefRet(ro)).append('\n');
+                        if (ok) {
+                           sleep(1200L);
+                           String st2 = channelTaskStatus(ctx, tid);
+                           if ("AWARD".equals(st2) || "COMPLETE".equals(st2)) {
+                              revisitOk = true;
+                              rep.append("    · ").append(label).append(" 已推进（status=").append(st2).append("）\n");
+                              break;
+                           }
+                        }
+                        sleep(800L);
+                     }
+                     if (revisitOk) {
+                        sleep(800L);
+                        int got = awardChannel(ctx, tid, appkey, scene);
+                        if (got >= 0) {
+                           doneAward++;
+                           earned += got;
+                           rep.append("    ✓ 频道任务+领奖 ").append(label).append(" +").append(got).append(" 币\n");
+                        } else {
+                           rep.append("    · revisit 成功 ").append(label).append("，领奖未发放（复扫再收）\n");
+                        }
+                        sleep(700L);
+                        continue;
+                     }
+                     // revisit 三连都 SUCCESS 但不推进（只翻 channel_revisit 类）→
+                     // 走 WebView 真实上下文链（CLK 埋点在 goldlog 通道，协议直调覆盖不了）
+                     int wvgot = runWebViewChannelClick(ctx, t, tid, label, rep);
+                     if (wvgot >= 0) {
+                        doneAward++;
+                        earned += wvgot;
+                        rep.append("    ✓ WebView链 ").append(label).append(" +").append(wvgot).append(" 币\n");
+                        sleep(700L);
+                        continue;
+                     }
+                     if (wvgot == -2) {
+                        // CLK 已发、服务端配对判定中：等复扫收口，不落 complete 链
+                        sleep(700L);
+                        continue;
+                     }
+                     // -1（WebView 链不可用/未推进）：不 continue，落回 complete 链（万一服务端已放开 appkey 校验）
+                  }
 
                   // 前置登记：detail.query 带 appkey+taskScene 返回 SUCCESS/ACCEPTED，
                   // 之后 complete 才认这个 taskId。失败不阻断，继续按原流程试（部分场景无需登记）。
@@ -306,7 +372,6 @@ public final class RhCoinTask {
                   cb.put("taskScene", scene);
                   cb.put("reportId", UUID.randomUUID().toString());
                   if (appkey.length() > 0) cb.put("appkey", appkey);
-                  String ttype = t.optString("taskType", "");
                   String taction = t.optString("taskAction", "");
                   int tval = parseInt(t.optString("taskValue", "1"), 1);
                   if ("action".equals(ttype) && taction.length() > 0) {
@@ -496,9 +561,105 @@ public final class RhCoinTask {
       return null;
    }
 
+   /** 渠道清单里单个任务当前的 taskStatus；查询失败返回 null */
+   private static String channelTaskStatus(Context ctx, String taskId) {
+      JSONObject cho = parse(RhPondTask.callAndWait(ctx, API_CH_QUERY, "1.0", baseBody().toString(), "chq2", 8000L));
+      if (cho != null && hasSuccess(cho) && cho.optJSONObject("data") != null) {
+         JSONArray ts = cho.optJSONObject("data").optJSONArray("tasks");
+         for (int i = 0; ts != null && i < ts.length(); i++) {
+            JSONObject x = ts.optJSONObject(i);
+            if (x != null && taskId.equals(x.optString("taskId"))) {
+               return x.optString("taskStatus");
+            }
+         }
+      }
+      return null;
+   }
+
    /** 兼容旧调用：不带 appkey/场景，按 GAME_CHANNEL 领 */
    private static int awardChannel(Context ctx, String taskId) {
       return awardChannel(ctx, taskId, "", "GAME_CHANNEL");
+   }
+
+   /**
+    * WebView 真实上下文链（channel_click 专属，2026-11-16 取证定版）：
+    *   ① revisit.complete SUCCESS 不推进 channel_click（只翻 channel_revisit 类）；
+    *   ② 带参真实打开频道页：mtop 流完整 + 曝光埋点已发 + 停留 90s，仍 ACCEPTED
+    *      —— 缺的是 game_click CLK 埋点（goldlog/gm.mmstat 通道，非 mtop）；
+    *   ③ 页面点击 handler 语义（coin_home_index.js F 函数）：
+    *      entry/page/game_exposure（EXP）→ game_click（CLK）→ LZ 带参跳转。
+    * 做法：容器 WebView 里 evaluateJavascript 按页面自身 LI() 格式发 4 连埋点 +
+    * location.href 带参跳转 —— asac/spm/cna 由真实页面上下文天然补齐。
+    * 返回领奖币数；-1 = 链路不可用或未推进。
+    */
+   private static int runWebViewChannelClick(Context ctx, JSONObject t, String taskId, String label, RhReport rep) {
+      String jurl = t.optString("jumpUrl", "");
+      if (jurl.length() == 0) return -1;
+      // ① 无可用容器 WebView 时先拉起带参页（URL 参数 = LZ 等价，页面加载即抓到实例）
+      String desc = WebViewProvider.describe();
+      if ("none".equals(desc)) {
+         String u = jurl + (jurl.contains("?") ? "&" : "?")
+               + "from=game_task_center&taskId=" + taskId + "&taskType=channel_click&taskValue=1";
+         WebViewProvider.openPage(ctx, u);
+         rep.append("    · 拉起频道页等容器 WebView\n");
+         sleep(15000L);
+         desc = WebViewProvider.describe();
+      }
+      if ("none".equals(desc)) {
+         rep.append("    ✗ WebView 链不可用（无容器实例）\n");
+         return -1;
+      }
+      // ② 注入 4 连埋点 + 延迟跳转；gokey 字段对齐页面 F 函数的 r 对象
+      String session = "rh" + System.currentTimeMillis();
+      String gokeyBase = "open_session_id=" + session
+            + "&gameid=&appkey=&taskid=" + taskId
+            + "&task_type=channel_click&task_status=ACCEPTED&task_action="
+            + "&card_source=task&section=TASK&index=1&target=1&reward_amount=100";
+      String jump = jurl + (jurl.contains("?") ? "&" : "?")
+            + "from=game_task_center&taskId=" + taskId + "&taskType=channel_click&taskValue=1";
+      String js = "(function(){try{"
+            + "window.goldlog_queue=window.goldlog_queue||[];"
+            + "var q=window.goldlog_queue,go=" + jq(gokeyBase) + ",tj=" + jq(jump) + ";"
+            + "q.push({action:'goldlog.record',arguments:['/gamecenter_taskcenter_entry_exposure','EXP',go,'POST']});"
+            + "q.push({action:'goldlog.record',arguments:['/gamecenter_taskcenter_page_exposure','EXP',go,'POST']});"
+            + "q.push({action:'goldlog.record',arguments:['/gamecenter_taskcenter_game_exposure','EXP',go,'POST']});"
+            + "q.push({action:'goldlog.record',arguments:['/gamecenter_taskcenter_game_click','CLK',go,'POST']});"
+            + "setTimeout(function(){location.href=tj;},900);"
+            + "return 'queued:'+q.length;"
+            + "}catch(e){return 'err:'+e}})()";
+      boolean ok = WebViewProvider.evalJs(js);
+      rep.append("    · WebView 注入 ").append(ok ? "OK" : "FAIL").append("（exposure×3+game_click+跳转 @").append(desc).append("）\n");
+      if (!ok) return -1;
+      // ③ 等跳转加载 + 服务端行为配对判定
+      sleep(25000L);
+      // ④ 复核 + 领奖
+      String st2 = channelTaskStatus(ctx, taskId);
+      rep.append("    · WebView 链复核 status=").append(st2).append('\n');
+      if ("AWARD".equals(st2) || "COMPLETE".equals(st2)) {
+         JSONObject gm2 = t.optJSONObject("game");
+         String akv2 = gm2 != null ? gm2.optString("appkey", "") : t.optString("appkey", "");
+         return awardChannel(ctx, taskId, akv2, "GAME_CHANNEL");
+      }
+      if ("ACCEPTED".equals(st2)) {
+         // CLK 已发但服务端配对判定有延迟（18:04 实证：注入后 25s 仍 ACCEPTED，
+         // ~3 分钟翻 AWARD）。返回 -2 让调用方跳过 complete 链（避免再打缺 appkey
+         // 的误导性失败），交给 [3] 复扫机制自动收口。
+         rep.append("    · CLK 已发，服务端判定中（复扫收口）\n");
+         return -2;
+      }
+      return -1;
+   }
+
+   /** JS 字符串字面量转义（注入脚本内嵌 URL/gokey 用） */
+   private static String jq(String s) {
+      StringBuilder b = new StringBuilder("\"");
+      for (int i = 0; i < s.length(); i++) {
+         char c = s.charAt(i);
+         if (c == '"' || c == '\\') b.append('\\').append(c);
+         else if (c == '\n') b.append("\\n");
+         else b.append(c);
+      }
+      return b.append('"').toString();
    }
 
    /**
@@ -545,8 +706,47 @@ public final class RhCoinTask {
     *   mini.game.sign.in  → 页面上的「点击签到」（阶梯奖励，幂等，已签返回 signed=true）
     *   play.sign.in       → 游戏中心签到记录（signInDays 累加在这里）
     */
+   /** 游戏币体系已知签到实例（2026-11-16 真机实证双实例并存、服务端独立计数）：
+    *   playId=4   赚游戏币页连续签到阶梯（连签 3 天档 +100）
+    *   playId=110 游戏中心页「点击签到」——App 16:10 亲证 sign.in.query{playId:110}
+    *              返回 signedToday=false/continuousDays=0，而引擎当天只签了 4，
+    *              用户页面按钮永远显示未签 = 用户反馈的「点击签到没有自动」。
+    *  rh_sign_playid.txt 仍可覆盖（存在则只签该值，兼容老配置）。 */
+   private static final long[] SIGN_PLAY_IDS = {4L, 110L};
+
    private static String playSign(Context ctx) {
-      long pid = signPlayId(ctx);
+      long[] ids = signPlayIds(ctx);
+      StringBuilder out = new StringBuilder();
+      for (int i = 0; i < ids.length; i++) {
+         if (i > 0) {
+            sleep(600L);
+            out.append(" ｜ ");
+         }
+         out.append(signOne(ctx, ids[i]));
+      }
+      return out.toString();
+   }
+
+   /** 签到 playId 集：rh_sign_playid.txt 覆盖（可选，只签该值）→ 内置 {4, 110} */
+   private static long[] signPlayIds(Context ctx) {
+      try {
+         File dir = ctx.getExternalFilesDir(null);
+         if (dir == null) dir = ctx.getFilesDir();
+         File f = new File(dir, "rh_sign_playid.txt");
+         if (f.exists() && f.length() > 0) {
+            byte[] b = new byte[(int) f.length()];
+            java.io.FileInputStream in = new java.io.FileInputStream(f);
+            in.read(b);
+            in.close();
+            String s = new String(b, "UTF-8").trim();
+            if (s.length() > 0) return new long[]{Long.parseLong(s)};
+         }
+      } catch (Throwable ignored) {
+      }
+      return SIGN_PLAY_IDS;
+   }
+
+   private static String signOne(Context ctx, long pid) {
       StringBuilder out = new StringBuilder();
 
       /* --- ① 阶梯签到：mini.game.sign.in{playId} --- */
@@ -594,25 +794,6 @@ public final class RhCoinTask {
                  .append(" awarded=").append(hd.optString("signInAwarded", "?"));
       }
       return out.toString();
-   }
-
-   /** 签到 playId：rh_sign_playid.txt 覆盖（可选）→ 内置 4（游戏中心） */
-   private static long signPlayId(Context ctx) {
-      try {
-         File dir = ctx.getExternalFilesDir(null);
-         if (dir == null) dir = ctx.getFilesDir();
-         File f = new File(dir, "rh_sign_playid.txt");
-         if (f.exists() && f.length() > 0) {
-            byte[] b = new byte[(int) f.length()];
-            java.io.FileInputStream in = new java.io.FileInputStream(f);
-            in.read(b);
-            in.close();
-            String s = new String(b, "UTF-8").trim();
-            if (s.length() > 0) return Long.parseLong(s);
-         }
-      } catch (Throwable ignored) {
-      }
-      return 4L;
    }
 
    /** playId 解析：持久档 → 旁档 jsonl 里最近的 play.sign.in 请求 */

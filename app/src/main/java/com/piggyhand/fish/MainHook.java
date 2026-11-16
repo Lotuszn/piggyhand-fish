@@ -3,6 +3,7 @@ package com.piggyhand.fish;
 import com.piggyhand.fish.config.ConfigManager;
 import com.piggyhand.fish.core.Reflect;
 import com.piggyhand.fish.core.RhFileLog;
+import com.piggyhand.fish.core.VdKeepAlive;
 import com.piggyhand.fish.hook.FishMtopHook;
 import com.piggyhand.fish.hook.RhChatHook;
 import com.piggyhand.fish.hook.RhSplashAd;
@@ -46,6 +47,10 @@ public class MainHook implements IXposedHookLoadPackage {
             // Phase 2b 装配点：引擎事件（就绪/命令/币值）经 core.EngineHook 下发 TaskRegistry，
             // hook() 内就绪段为异步延迟触发，此处同步装配必然先于回调到达
             FishMtopHook.setEngineHook(TaskRegistry.get());
+            // 虚拟屏保活配套：闲鱼侧 getDisplays 枚举遮蔽（防风控采集虚拟屏，自家建屏不受影响）
+            VdKeepAlive.maskDisplays(lpp.classLoader);
+            // WebView 供给器：抓 H5 容器实例供游戏频道任务（channel_click）真实上下文注入
+            com.piggyhand.fish.task.WebViewProvider.install(lpp.classLoader);
             // v1.0.8 🎣 悬浮工具钮（详情页原图/视频保存，Flutter 容器注入）
             RhFishFloat.hook(lpp.classLoader);
         }

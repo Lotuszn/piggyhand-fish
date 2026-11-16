@@ -470,8 +470,11 @@ public final class FishTaskAuto {
       this.lvlOnRun = var11;
       // 2026-11-15：假曝光闸。play.ad.event.push 的 eventType=complete 是纯伪造，
       // 服务端与广告平台（优量汇/穿山甲）对账时缺真实曝光回传，客户端侧无法补。
-      // 默认关；确需跑广告任务时显式传 {"adEvent":true}。
-      boolean varAdEvent = opt(var4, "adEvent", false);
+      // 2026-11-16 改默认开：11-12 实证（RhCoinTask.runRewardVideoAd，渠道任务 1047271694
+      // ACCEPTED→COMPLETE 领 +100）把服务端下发的 adEventPush 原样 push 回去即认定观看完成，
+      // 不校验 CSJ 会话——「假曝光毒化当日窗口」的旧担忧不成立。默认关的直接后果是
+      // 106538/106181（看15秒视频×2，loopTimes=4）全天挂 0/4 一动不动（今日真机实证）。
+      boolean varAdEvent = opt(var4, "adEvent", true);
       if (var10) {
          var9 = false;
       }
@@ -587,7 +590,11 @@ public final class FishTaskAuto {
             //          → 塞进 var57「视频任务」→ runAdEventTask 再伪造 4 次 complete
             // 对已经没有任何东西可给的任务反复刷接口，就是 FAIL_BIZ_IDL_COIN_TASK_RMB_CHECK 的直接来源。
             JSONObject varProg = var26.optJSONObject("progressDTO");
-            boolean varQuotaFull = LvlLedger.quotaFull(var26);
+            String var30 = str(var26, "idleTaskStatus");
+            // 2026-11-16 回归修复：AWARD = 已做完待领奖，progressDTO 天然 times=maxTimes、reachLimit=true
+            // —— quotaFull 拦 AWARD 会把倒计时任务（58233）永远卡在「当日额度已满」，领奖入口被误杀
+            // （今日真机实证：58233 挂 AWARD 一整天，面板「领取奖励」按钮亮着，引擎零请求）。
+            boolean varQuotaFull = !"AWARD".equals(var30) && LvlLedger.quotaFull(var26);
             if (varQuotaFull && var27 != null) {
                // 记入 var23 去重集，避免同一批内重复判定同一任务
                var23.add(var27);
@@ -597,13 +604,20 @@ public final class FishTaskAuto {
                      .append(varProg.optInt("times", 0)).append("/")
                      .append(varProg.optInt("maxTimes", 0)).append("），不发请求\n");
             } else if (var27 != null && !var23.contains(var27) && !rejectedToday.contains(var27)) {
-               if (var11 && LvlLedger.skip(var27)) {
+               // 2026-11-16 视频任务豁免 LVL 台账：106181/106538 在旧版 eventType 改写毒化期被 bump 到 2，
+               // skip 恒真 → 永远进不了 var57（真机台账实证 "106181":2,"106538":2，报告 视频任务:0）。
+               // push 路径有服务端 times/maxTimes 权威进度 + 每轮复核，幂等安全，防重不靠持久台账；
+               // 真实防重由 push 全败 markRejected（内存态，当日有效）承担，见 runAdEventTask 尾部。
+               JSONObject varAdChk = var26.optJSONObject("materialDTO");
+               boolean varLvlExempt = "ACCEPTED".equals(var30) && varAdChk != null
+                     && optStr(varAdChk, "action").contains("showAds");
+               if (var11 && !varLvlExempt && LvlLedger.skip(var27)) {
                   var24++;
                } else {
                   var23.add(var27);
                   JSONObject var28 = var26.optJSONObject("materialDTO");
                   JSONObject var29 = var26.optJSONObject("taskBenefitDTO");
-                  String var30 = str(var26, "idleTaskStatus");
+                  // var30 已在 quotaFull 判定前取好（AWARD 豁免需要它），这里直接复用
                   String var31 = var28 == null ? "" : optStr(var28, "actionType");
                   String var32 = var28 == null ? "?" : optStr(var28, "title");
                   String var33 = var28 == null ? "" : optStr(var28, "action");
@@ -941,7 +955,9 @@ public final class FishTaskAuto {
 
             String var4 = URLDecoder.decode(var2, "UTF-8");
             JSONObject var5 = new JSONObject(var4);
-            var5.put("eventType", "complete");
+            // 2026-11-16：不再改写 eventType——服务端按下发原值（firstEvent+countdown）对账，
+            // 改写成 complete 反而不认（11-12 RhCoinTask.runRewardVideoAd 实证：firstEvent
+            // 一发即 AWARD；改值后服务端视作未知事件）。
             return var5.toString();
          }
       } catch (Throwable var6) {
@@ -950,9 +966,16 @@ public final class FishTaskAuto {
    }
 
    private void runAdEventTask(String var1, String var2, List<String> var3, List<String> var4) {
+      // 2026-11-16 重构（对齐 RhCoinTask.runRewardVideoAd 的 11-12 实证路径）：
+      // 每轮 push 后复核 times/status——AWARD/COMPLETE 立即停，times 不再增长也停
+      // （当日额度满或服务端不认，硬刷只会砸出 reach_upper_limit / RMB_CHECK）；
+      // 旧逻辑一口气连推 4 次再复核，既容易撞当日上限也不利于节奏整形。
       byte var5 = 4;
       int var6 = 0;
       int var7 = 0;
+      // ret 失败计数（非 reach_upper_limit）：全败且零成功 → 内存态当日拒绝，不写持久台账
+      int varFail = 0;
+      int prevTimes = -1;
 
       for (int var8 = 0; var8 < var5 && !this.abort; var8++) {
          JSONObject var9 = this.callApi("mtop.taobao.idle.play.ad.event.push", "1.0", var2, "广告事件 " + (var8 + 1));
@@ -961,16 +984,34 @@ public final class FishTaskAuto {
             var7++;
             this.report.append("[广告] 第 ").append(var8 + 1).append(" 次 无响应（7.28.30 响应不落盘，继续）\n");
             sleepJitter(5000L);
-         } else {
-            if (var10 == null || !var10.contains("SUCCESS")) {
-               this.report.append("[广告] 第 ").append(var8 + 1).append(" 次 -> ").append(var10).append('\n');
+         } else if (var10 == null || !var10.contains("SUCCESS")) {
+            boolean capped = var10 != null && var10.contains("reach_upper_limit");
+            this.report.append("[广告] 第 ").append(var8 + 1).append(" 次 -> ")
+                  .append(capped ? "已达上限（按已达成处理）" : var10).append('\n');
+            if (!capped) {
+               varFail++;
                break;
             }
-
+            sleepJitter(2000L);
+         } else {
             var6++;
-            this.report.append("[广告] 第 ").append(var8 + 1).append(" 次 complete -> ").append(var10).append('\n');
-            sleepJitter(5000L);
+            this.report.append("[广告] 第 ").append(var8 + 1).append(" 次 push -> ").append(var10).append('\n');
+            sleepJitter(2500L);
          }
+
+         int[] tp = adTaskProgress(var1);
+         if (tp[2] > 0) {
+            break; // AWARD/COMPLETE，收口交给尾部复核
+         }
+         if (tp[1] > 0 && tp[0] >= tp[1]) {
+            break; // loopTimes 推满
+         }
+         if (prevTimes >= 0 && tp[0] <= prevTimes) {
+            this.report.append("[广告] times 未增长(").append(tp[0]).append('/').append(tp[1])
+                  .append(")，停止推送\n");
+            break;
+         }
+         prevTimes = tp[0];
       }
 
       int var18 = -1;
@@ -1014,6 +1055,53 @@ public final class FishTaskAuto {
       if ("AWARD".equals(var20) || "COMPLETE".equals(var20) || var19 > 0 && var18 >= var19 || var6 > 0) {
          this.claimOne(var1, "视频任务", var3, var4);
       }
+      // 台账出台：push 有推进（var6>0）说明旧失败原因已消除，清掉毒化期遗留计数，
+      // 后续轮次不再被 LvlLedger.skip 拦（配合主循环 varLvlExempt 双保险）
+      if (var6 > 0 && this.lvlOnRun && LvlLedger.get(var1) > 0) {
+         LvlLedger.reset(var1);
+         this.report.append("[广告] ").append(var1).append(" push 推进，LVL 旧账已清\n");
+      }
+      // push 全 ret 败且零成功：内存态当日拒绝（进程重启复位，给新版代码次日重试机会）；
+      // 不写持久台账——视频任务与 trigger 型任务不同，服务端有权威进度，撞错不该永久记仇
+      if (varFail > 0 && var6 == 0) {
+         markRejected(var1);
+         this.report.append("[广告] ").append(var1).append(" push 全败，当日内存态拒绝\n");
+      }
+   }
+
+   /** 视频任务轻量进度复核：返回 {times, maxTimes, awardFlag}；awardFlag=1 表示 AWARD/COMPLETE。
+    *  供推送循环每轮调用——比整表 extractTasks 少一次对象重建，失败静默回 0。 */
+   private int[] adTaskProgress(String deliveryId) {
+      int[] out = new int[]{0, 0, 0};
+      try {
+         List var11 = this.extractTasks(this.callApi("mtop.taobao.idle.task.queryolivertasklist",
+               "2.0", "{\"sceneId\":496}", "广告进度"));
+         if (var11 != null) {
+            for (Object var13o : var11) {
+               JSONObject var13 = (JSONObject) var13o;
+               if (deliveryId.equals(str(var13, "deliveryId"))) {
+                  String st = str(var13, "idleTaskStatus");
+                  if ("AWARD".equals(st) || "COMPLETE".equals(st)) {
+                     out[2] = 1;
+                  }
+                  JSONObject pd = var13.optJSONObject("progressDTO");
+                  if (pd != null) {
+                     try {
+                        out[0] = Integer.parseInt(str(pd, "times"));
+                     } catch (Throwable ignored) {
+                     }
+                     try {
+                        out[1] = Integer.parseInt(str(pd, "maxTimes"));
+                     } catch (Throwable ignored) {
+                     }
+                  }
+                  break;
+               }
+            }
+         }
+      } catch (Throwable ignored) {
+      }
+      return out;
    }
 
    private List<String> itemPool() {
