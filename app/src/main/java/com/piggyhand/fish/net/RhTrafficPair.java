@@ -41,6 +41,11 @@ public final class RhTrafficPair {
     /** 请求侧登记（createMtopContext 之后调用；api/data 均为最终发出值） */
     public static void onRequest(String api, String data) {
         if (api == null || api.length() == 0) return;
+        // P1-D：mini.game 请求体 appkey 收割（宿主+模块全量，精确 taskId→appkey）
+        try {
+            RhAppkeyIndex.noteBody(api, data);
+        } catch (Throwable ignored) {
+        }
         try {
             String key = api.toLowerCase(Locale.US);
             Deque<Req> q = PENDING.get(key);
@@ -81,6 +86,8 @@ public final class RhTrafficPair {
                 }
             }
             if (r != null) {
+                // P0-C 时序门信号源：首个成功响应配对即证明 mtop 通道存活
+                RhChGate.noteSuccess(respBody);
                 return "[pair] MATCHED api=" + key
                         + " elapsed=" + (t1 - r.t0) + "ms"
                         + " req=" + r.dataSum

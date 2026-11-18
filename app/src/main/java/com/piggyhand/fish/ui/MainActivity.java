@@ -137,6 +137,8 @@ public class MainActivity extends Activity {
    private View rowUpdate;
    private View rowCoolapk;
    private View rowQQGroup;
+   // 关于页「支持一下」：赞赏码弹窗（松鼠小猪手同款）
+   private View rowDonate;
    // v1.5.3 清除今日任务标记（通用卡内，确认后 socket 清标记 + root 重启闲鱼）
    private View rowClearMarks;
    private View drawerHead;
@@ -268,6 +270,7 @@ public class MainActivity extends Activity {
       this.rowUpdate = this.findViewById(R.id.rowUpdate);
       this.rowCoolapk = this.findViewById(R.id.rowCoolapk);
       this.rowQQGroup = this.findViewById(R.id.rowQQGroup);
+      this.rowDonate = this.findViewById(R.id.rowDonate);
       this.rowClearMarks = this.findViewById(R.id.rowClearMarks);
       this.swAutoRun = (LiquidSwitch)this.findViewById(R.id.swAutoRun);
       this.swVdAlive = (LiquidSwitch)this.findViewById(R.id.swVdAlive);
@@ -1087,6 +1090,12 @@ public class MainActivity extends Activity {
             } else {
                MainActivity.this.showDownloadPicker();
             }
+         }
+      });
+      // 支持一下 = 赞赏码弹窗（可保存到相册），松鼠小猪手同款
+      this.rowDonate.setOnClickListener(new OnClickListener() {
+         public void onClick(View var1) {
+            DonateDialog.show(MainActivity.this);
          }
       });
       this.rowCoolapk.setOnClickListener(new OnClickListener() {
@@ -1988,6 +1997,10 @@ public class MainActivity extends Activity {
    }
 
    public void onBackPressed() {
+      // 赞赏码弹窗开着先关弹窗（同松鼠小猪手 handleBack 语义）
+      if (DonateDialog.handleBack()) {
+         return;
+      }
       if (this.linkPicker != null) {
          this.dismissPicker();
       } else {

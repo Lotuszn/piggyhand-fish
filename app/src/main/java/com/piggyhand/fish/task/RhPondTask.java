@@ -164,7 +164,8 @@ public final class RhPondTask {
                 @Override
                 public void run() {
                     try {
-                        Thread.sleep(40000);
+                        // P0-C 时序门：保底 40s（正常用户时序不变），通道未见成功响应则顺延等首个 MATCHED（+90s 封顶）
+                        com.piggyhand.fish.net.RhChGate.awaitChannel(40000L, 90000L);
                         RhPondTask.run(ctx);
                         // v1.5.71 P0-A: 标记结果化——只有完成度=1（有推进或无事可做）才落
                         // 当日标记与 LVL 计数；全败不落标记，下次打开闲鱼重试
@@ -262,7 +263,8 @@ public final class RhPondTask {
                 @Override
                 public void run() {
                     try {
-                        Thread.sleep(46000);
+                        // P0-C 时序门：保底 46s，通道未证实则顺延（+90s 封顶）
+                        com.piggyhand.fish.net.RhChGate.awaitChannel(46000L, 90000L);
                         RhPondTask.runFeed(ctx);
                         // v1.5.71 P0-A: 标记结果化——余额本来就空也按完成落标记（无事可做），
                         // 投喂全败不落标记，下次打开闲鱼重试

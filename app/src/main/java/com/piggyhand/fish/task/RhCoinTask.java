@@ -139,7 +139,8 @@ public final class RhCoinTask {
             @Override
             public void run() {
                try {
-                  Thread.sleep(AUTO_DELAY);
+                  // P0-C 时序门：保底 AUTO_DELAY，通道未证实则顺延（+90s 封顶）
+                  com.piggyhand.fish.net.RhChGate.awaitChannel(AUTO_DELAY, 90000L);
                   String r = RhCoinTask.run(ctx);
                   RhFileLog.write("[coin] auto-run done(try " + tryN + "): " + (r == null ? "null" : r.replace('\n', ' ')));
                } catch (Throwable t) {
@@ -264,7 +265,7 @@ public final class RhCoinTask {
       if (jurl.contains("showAds") && jurl.contains("adType=rewardVideo")) {
          // 激励视频：协议可通，不必真播 —— 见 runRewardVideoAd 的方法注释（2026-11-12 实证）
          JSONObject gmv = t.optJSONObject("game");
-         String akv = gmv != null ? gmv.optString("appkey", "") : t.optString("appkey", "");
+         String akv = resolveAppkey(t, gmv, tid);
          String scv = t.optString("taskScene", "");
          if (scv.length() == 0) scv = "GAME_CHANNEL";
          int got = runRewardVideoAd(ctx, jurl, tid, akv, scv, label, rep);
@@ -285,7 +286,7 @@ public final class RhCoinTask {
                   //   taskScene 必须带（值取任务自身的 taskScene，缺省 GAME_CHANNEL）——
                   //   少了它服务端按默认场景找 taskId，找不到就 TASK_NOT_FOUND。
                   JSONObject gm = t.optJSONObject("game");
-                  String appkey = gm != null ? gm.optString("appkey", "") : t.optString("appkey", "");
+                  String appkey = resolveAppkey(t, gm, tid);
                   String scene = t.optString("taskScene", "");
                   if (scene.length() == 0) scene = "GAME_CHANNEL";
                   String ttype = t.optString("taskType", "");
@@ -500,10 +501,12 @@ public final class RhCoinTask {
                         JSONObject t = ts3.optJSONObject(i);
                         if (t == null || !"AWARD".equals(t.optString("taskStatus"))) continue;
                         JSONObject g3 = t.optJSONObject("game");
-                        String ak3 = g3 != null ? g3.optString("appkey", "") : "";
+                        String tid3 = t.optString("taskId");
+                        // P1-D：复扫领奖同样走解析链（任务项缺 appkey 时从流量索引补）
+                        String ak3 = resolveAppkey(t, g3, tid3);
                         String sc3 = t.optString("taskScene", "");
                         if (sc3.length() == 0) sc3 = "GAME_CHANNEL";
-                        int g = awardChannel(fc, t.optString("taskId"), ak3, sc3);
+                        int g = awardChannel(fc, tid3, ak3, sc3);
                         if (g >= 0) {
                            got3 += g;
                            sb.append("    ✓ ").append(taskLabel(t)).append(" +").append(g).append(" 币\n");
@@ -544,6 +547,27 @@ public final class RhCoinTask {
     *  导致用户报来的日志无法定性（2026-11-12 实测踩坑）。 */
    private static volatile String chqLastErr = null;
 
+   /**
+    * P1-D appkey 解析链：任务项自带 → 流量收割索引（taskId 精确 → gameId 兜底）→ 空串。
+    * channel.query 部分任务项不带 appkey（1047278691 / 1047276220 系实测），服务端
+    * 2026-11-17 起对 detail.query / complete 强校验，缺参必 FAIL_SYS_BIZPARAM_MISSED。
+    * appkey 全程动态取（宿主流量/响应树，RhAppkeyIndex），不写死；取不到返回空串，
+    * 调用方按既有约定省略字段（不 put 空串），行为等同旧版，不会更差。
+    */
+   private static String resolveAppkey(JSONObject t, JSONObject gm, String tid) {
+      String ak = gm != null ? gm.optString("appkey", "") : "";
+      if (ak.length() == 0) ak = t.optString("appkey", "");
+      if (ak.length() == 0 && tid != null && tid.length() > 0) {
+         ak = com.piggyhand.fish.net.RhAppkeyIndex.byTask(tid);
+      }
+      if (ak.length() == 0 && gm != null) {
+         String gid = gm.optString("gameId", "");
+         if (gid.length() == 0) gid = gm.optString("id", "");
+         if (gid.length() > 0) ak = com.piggyhand.fish.net.RhAppkeyIndex.byGame(gid);
+      }
+      return ak;
+   }
+
    private static JSONArray channelTasks(Context ctx) {
       chqLastErr = null;
       for (int round = 0; round < 3; round++) {
@@ -551,7 +575,10 @@ public final class RhCoinTask {
          String body = round >= 2 ? "{}" : baseBody().toString();
          JSONObject o = parse(RhPondTask.callAndWait(ctx, API_CH_QUERY, "1.0", body, "chq", 8000L));
          if (o != null && hasSuccess(o) && o.optJSONObject("data") != null) {
-            JSONArray a = o.optJSONObject("data").optJSONArray("tasks");
+            JSONObject dchq = o.optJSONObject("data");
+            // P1-D：清单响应树收割（recommendGames / tasks 全量 appkey 入索引）
+            com.piggyhand.fish.net.RhAppkeyIndex.harvestTree(dchq);
+            JSONArray a = dchq.optJSONArray("tasks");
             if (a != null) return a;
          }
          String br = briefRet(o);
@@ -565,7 +592,10 @@ public final class RhCoinTask {
    private static String channelTaskStatus(Context ctx, String taskId) {
       JSONObject cho = parse(RhPondTask.callAndWait(ctx, API_CH_QUERY, "1.0", baseBody().toString(), "chq2", 8000L));
       if (cho != null && hasSuccess(cho) && cho.optJSONObject("data") != null) {
-         JSONArray ts = cho.optJSONObject("data").optJSONArray("tasks");
+         JSONObject d2 = cho.optJSONObject("data");
+         // P1-D：状态复核响应同样收割（顺带补索引）
+         com.piggyhand.fish.net.RhAppkeyIndex.harvestTree(d2);
+         JSONArray ts = d2.optJSONArray("tasks");
          for (int i = 0; ts != null && i < ts.length(); i++) {
             JSONObject x = ts.optJSONObject(i);
             if (x != null && taskId.equals(x.optString("taskId"))) {

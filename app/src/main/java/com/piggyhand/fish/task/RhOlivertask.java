@@ -96,7 +96,8 @@ public final class RhOlivertask {
                 @Override
                 public void run() {
                     try {
-                        Thread.sleep(45000);
+                        // P0-C 时序门：保底 45s，通道未证实则顺延（+90s 封顶）
+                        com.piggyhand.fish.net.RhChGate.awaitChannel(45000L, 90000L);
                         String rep = RhOlivertask.run(ctx);
                         RhFileLog.write("[oliver] auto-run done(try " + tries + "): "
                                 + (rep == null ? "null" : rep.replace('\n', ' ')));

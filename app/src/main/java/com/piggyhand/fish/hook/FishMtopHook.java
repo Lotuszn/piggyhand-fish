@@ -991,6 +991,14 @@ public final class FishMtopHook {
                 && !la.contains("item.recommend")
                 && !la.contains("bubble.show")) {
             String body = respBody(resp, -1);
+            // P1-D：mini.game 响应树 appkey 收割（channel/center/detail 全覆盖，宿主+模块两侧）
+            if (la.contains("mini.game")) {
+                try {
+                    com.piggyhand.fish.net.RhAppkeyIndex.harvestTree(
+                            new org.json.JSONObject(body).optJSONObject("data"));
+                } catch (Throwable ignored) {
+                }
+            }
             boolean written = RespStore.writeTaskResp(a, body);
             if (written) {
                 log("[task-resp] captured " + a);

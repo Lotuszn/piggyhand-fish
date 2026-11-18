@@ -131,6 +131,24 @@ final class MapTasks {
             JSONObject var15 = owner.callApi("mtop.taobao.idle.treasure.hunt.map.roll", "1.0", var14, "前进掷骰");
             String var16 = firstRet(var15);
             if (var16 == null || !var16.contains("SUCCESS")) {
+               // LOCATION_NOT_MATCH 专项兜底（与背包掷骰同款）：账本错位时重 init 拿新状态重试，
+               // 拒绝发生在消耗前（不扣步数），复用 var12 既有封顶（≥5 break），失败路径才触发
+               if (var16 != null && var16.contains("LOCATION_NOT_MATCH") && var12 < 5) {
+                  JSONObject varRj = owner.callApi("mtop.taobao.idle.treasure.hunt.map.init", "1.0",
+                     "{" + RhLocationContext.jsonPair() + "\"version\":4}", "前进地图重试");
+                  JSONObject varRk = varRj == null ? null : varRj.optJSONObject("data");
+                  JSONObject varRl = varRk == null ? null : varRk.optJSONObject("userInfo");
+                  if (varRl != null) {
+                     var4 = (long) parseNum(varRl.optString("location", String.valueOf(var4)));
+                     JSONArray varRm = varRk.optJSONArray("mapResource");
+                     if (varRm != null && varRm.length() > 0) {
+                        var7 = varRm.optJSONObject(0).optString("mapVersion", var7);
+                     }
+                     var12++;
+                     FishTaskAuto.sleep(600L);
+                     continue; // 重试同一次掷骰（var9 不计成功次数）
+                  }
+               }
                var13 = var16 == null ? "无响应" : var16;
                break;
             }
@@ -488,6 +506,7 @@ final class MapTasks {
                         int var31 = 0;
                         String var32 = null;
                         int var33 = 0;
+                        int varRef = 0; // LOCATION_NOT_MATCH 重 init 计数（独立于 var33 循环上限，封顶 3 次）
 
                         while (var29 < var28 && var33++ < 120) {
                            if (var44) {
@@ -511,6 +530,29 @@ final class MapTasks {
                               );
                               String var47 = firstRet(var45);
                               if (var47 == null || !var47.contains("SUCCESS")) {
+                                 // LOCATION_NOT_MATCH 专项兜底：与 doMapRoll「位置未推进→重新 init」同款。
+                                 // 账本错位（locationBefore/mapVersion 与服务端不一致）时重新 init 拿新状态，
+                                 // 重试同一次掷骰（var29 不消耗）。LOCATION_NOT_MATCH 是消耗前预校验拒绝，
+                                 // 不扣骰子（2026-11-16/11-18 两份日志实证：反复全灭背包数量不变），无重试双扣风险。
+                                 if (var47 != null && var47.contains("LOCATION_NOT_MATCH") && varRef < 3) {
+                                    JSONObject varRi = owner.callApi(
+                                       MAP_INIT_API, "1.0",
+                                       "{" + RhLocationContext.jsonPair() + "\"version\":4}", "背包地图重试"
+                                    );
+                                    JSONObject varRd = varRi == null ? null : varRi.optJSONObject("data");
+                                    JSONObject varRu = varRd == null ? null : varRd.optJSONObject("userInfo");
+                                    if (varRu != null) {
+                                       var42 = (long) parseNum(varRu.optString("location", String.valueOf(var42)));
+                                       JSONArray varRr = varRd.optJSONArray("mapResource");
+                                       if (varRr != null && varRr.length() > 0) {
+                                          var9 = varRr.optJSONObject(0).optString("mapVersion", var9);
+                                       }
+                                       var10 = true;
+                                       varRef++;
+                                       FishTaskAuto.sleep(600L);
+                                       continue; // 同一次掷骰带新账本状态重打
+                                    }
+                                 }
                                  var32 = var47 == null ? "无响应" : var47;
                                  break;
                               }

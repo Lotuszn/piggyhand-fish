@@ -3327,6 +3327,61 @@
                                 >
                                 </TextView>
                             </LinearLayout>
+                            <!-- rowDonate 支持一下：赞赏码弹窗（松鼠小猪手同款样式，置于版本更新下） -->
+                            <View
+    android:background="#0f17181c"
+    android:layout_width="fill_parent"
+    android:layout_height="1.0dip"
+                            >
+                            </View>
+                            <LinearLayout
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:id="@+id/rowDonate"
+    android:paddingTop="12.0dip"
+    android:paddingBottom="12.0dip"
+    android:focusable="true"
+    android:clickable="true"
+    android:layout_width="fill_parent"
+    android:layout_height="wrap_content"
+    android:foreground="?android:selectableItemBackground"
+    android:minHeight="56.0dip"
+                            >
+                                <LinearLayout
+    android:orientation="vertical"
+    android:layout_width="0.0dip"
+    android:layout_height="wrap_content"
+    android:layout_weight="1.0"
+                                >
+                                    <TextView
+    android:textSize="12.5sp"
+    android:textStyle="bold"
+    android:textColor="@color/dot_red"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:text="支持一下"
+                                    >
+                                    </TextView>
+                                    <TextView
+    android:textSize="10.0sp"
+    android:textStyle="bold"
+    android:textColor="@color/dot_red"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="2.0dip"
+    android:text="请我喝杯咖啡"
+                                    >
+                                    </TextView>
+                                </LinearLayout>
+                                <TextView
+    android:textSize="18.0sp"
+    android:textColor="@color/text_faint"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:text="›"
+                                >
+                                </TextView>
+                            </LinearLayout>
                         </LinearLayout>
                         <!-- 尾注文案 -->
                         <TextView

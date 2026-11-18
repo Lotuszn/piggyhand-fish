@@ -116,7 +116,8 @@ public final class RhGameTask {
             @Override
             public void run() {
                try {
-                  Thread.sleep(50000L);
+                  // P0-C 时序门：保底 50s，通道未证实则顺延（+90s 封顶）
+                  com.piggyhand.fish.net.RhChGate.awaitChannel(50000L, 90000L);
                   String var1 = RhGameTask.run(var0);
                   RhFileLog.write("[game] auto-run done(try " + var7 + "): " + (var1 == null ? "null" : var1.replace('\n', ' ')));
                   if (RhGameTask.isDoneToday(var0)) {
