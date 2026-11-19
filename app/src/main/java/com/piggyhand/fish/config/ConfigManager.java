@@ -108,6 +108,22 @@ public class ConfigManager {
     public String scoutPattern = "reward|bonus|coin";
     public int maxScoutMethods = 400;
 
+    /* ---- 延迟时间配置（v1.5.73 UI「延迟时间配置」无极滑块写入）----
+     * 0 = 该键未设置（旧配置 / 从未打开过模块界面），引擎侧按设备首跑随机值兜底。
+     * 范围即 UI 滑块区间，parse 时逐项 clamp，越界值一律拉回，避免手改配置把节奏拖死。 */
+    /** 查询类请求间隔中心值（800~8000ms） */
+    public int paceQueryMs = 0;
+    /** 触发类（提交完成）请求间隔中心值（800~10000ms） */
+    public int paceSubmitMs = 0;
+    /** 领取类请求间隔中心值（800~12000ms） */
+    public int paceClaimMs = 0;
+    /** 触发→领取之间的拟人延迟中心值（2000~30000ms） */
+    public int paceClaimGapMs = 0;
+    /** 抖动幅度百分比（10~60） */
+    public int paceAmpPercent = 0;
+    /** 用户是否手动调过任一滑块（仅状态标记；false 时五键里的是首跑固化的随机值） */
+    public boolean paceManual = false;
+
     public final List<String> targets = new ArrayList<>();
     public final List<Rule> rules = new ArrayList<>();
 
@@ -219,6 +235,12 @@ public class ConfigManager {
         return builtin != null ? builtin : new ConfigManager();
     }
 
+    /** 节奏参数越界拉回：0 原样保留（= 未设置），其余夹到 [lo,hi] */
+    private static int clampPace(int v, int lo, int hi) {
+        if (v <= 0) return 0;
+        return Math.max(lo, Math.min(hi, v));
+    }
+
     public static ConfigManager parse(String json, String from) {
         ConfigManager c = new ConfigManager();
         try {
@@ -261,6 +283,13 @@ public class ConfigManager {
             c.uiScalePercent = Math.max(40, Math.min(100, o.optInt("uiScalePercent", 80)));
             c.pondFishAdCode = o.optString("pondFishAdCode", "");
             c.pondGps = o.optString("pondGps", "");
+            // 延迟时间配置：0 视为未设置（决策见 rhythmPace 注释），非 0 才 clamp
+            c.paceQueryMs = clampPace(o.optInt("paceQueryMs", 0), 800, 8000);
+            c.paceSubmitMs = clampPace(o.optInt("paceSubmitMs", 0), 800, 10000);
+            c.paceClaimMs = clampPace(o.optInt("paceClaimMs", 0), 800, 12000);
+            c.paceClaimGapMs = clampPace(o.optInt("paceClaimGapMs", 0), 2000, 30000);
+            c.paceAmpPercent = clampPace(o.optInt("paceAmpPercent", 0), 10, 60);
+            c.paceManual = o.optBoolean("paceManual", false);
             // 1.1.2 迁移：旧版内置默认值（重庆）视为未配置，改走动态定位
             if ("500107".equals(c.pondFishAdCode)) c.pondFishAdCode = ""; // AUDIT-ALLOW 迁移清理：识别旧测试区码并清除，非提交参数
             if ("29.524374,106.471423".equals(c.pondGps)) c.pondGps = ""; // AUDIT-ALLOW 迁移清理：识别旧测试坐标并清除，非提交参数

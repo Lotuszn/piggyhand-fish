@@ -29,3 +29,6 @@ _bak/
 build.trash_*
 build_out.txt
 _dev/
+
+# 会话工作目录（记忆/日志/技能，不入库）
+.workbuddy/

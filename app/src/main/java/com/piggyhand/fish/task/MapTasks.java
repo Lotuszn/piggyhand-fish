@@ -56,6 +56,16 @@ final class MapTasks {
    static volatile JSONObject MAP_INIT_CACHE = null;
    static final long[] MAP_INIT_TS = new long[]{0L};
 
+   /**
+    * 地图账本已变（map.roll 成功 / 骰子核销）→ 立即作废 60s init 缓存。
+    * 缓存只对「只读探针」语义安全；写操作之后继续读缓存 = 拿旧的 location/remainStep 去拼请求，
+    * 这是 11-19 日志里 6 次 LOCATION_NOT_MATCH 空转、以及 remain=0 后仍继续掷骰的来源。
+    */
+   static void invalidateMapCache() {
+      MAP_INIT_CACHE = null;
+      MAP_INIT_TS[0] = 0L;
+   }
+
    /* ---------------- 圈数探测（probeCycleAward，static——autoRunDaily 探针调用） ---------------- */
 
    /** 圈数挑战 tierList 里 status==AWARD 的档位数；info 不可用/通道撞车返回 0 */
@@ -109,6 +119,7 @@ final class MapTasks {
 
          if (var6 <= 0) {
             owner.report.append("[前进钓鱼] 无剩余步数，跳过\n");
+            log("[map-roll] skip: remainStep=0 location=" + var4);
             return;
          }
 
@@ -135,7 +146,7 @@ final class MapTasks {
                // 拒绝发生在消耗前（不扣步数），复用 var12 既有封顶（≥5 break），失败路径才触发
                if (var16 != null && var16.contains("LOCATION_NOT_MATCH") && var12 < 5) {
                   JSONObject varRj = owner.callApi("mtop.taobao.idle.treasure.hunt.map.init", "1.0",
-                     "{" + RhLocationContext.jsonPair() + "\"version\":4}", "前进地图重试");
+                     "{" + RhLocationContext.jsonPair() + "\"version\":4}", "前进地图重试", true);
                   JSONObject varRk = varRj == null ? null : varRj.optJSONObject("data");
                   JSONObject varRl = varRk == null ? null : varRk.optJSONObject("userInfo");
                   if (varRl != null) {
@@ -193,7 +204,7 @@ final class MapTasks {
                }
 
                var12++;
-               JSONObject var31 = owner.callApi("mtop.taobao.idle.treasure.hunt.map.init", "1.0", "{" + RhLocationContext.jsonPair() + "\"version\":4}", "地图重试");
+               JSONObject var31 = owner.callApi("mtop.taobao.idle.treasure.hunt.map.init", "1.0", "{" + RhLocationContext.jsonPair() + "\"version\":4}", "地图重试", true);
                JSONObject var32 = var31 == null ? null : var31.optJSONObject("data");
                JSONObject var33 = var32 == null ? null : var32.optJSONObject("userInfo");
                if (var33 == null) {
@@ -213,7 +224,7 @@ final class MapTasks {
 
                   var12++;
                   JSONObject var23 = owner.callApi(
-                     "mtop.taobao.idle.treasure.hunt.map.init", "1.0", "{" + RhLocationContext.jsonPair() + "\"version\":4}", "地图刷新"
+                     "mtop.taobao.idle.treasure.hunt.map.init", "1.0", "{" + RhLocationContext.jsonPair() + "\"version\":4}", "地图刷新", true
                   );
                   JSONObject var24 = var23 == null ? null : var23.optJSONObject("data");
                   JSONObject var25 = var24 == null ? null : var24.optJSONObject("userInfo");
@@ -249,6 +260,9 @@ final class MapTasks {
             FishTaskAuto.toast("✓ 前进钓鱼 +" + var11 + "币");
             log("[map-roll] rolls=" + var9 + " steps=" + var10 + " coins=" + var11 + " remain=" + var6);
          }
+         // 本轮掷过骰子 → 服务端 location/remainStep 已变，作废 init 缓存；
+         // 下一轮跑批或收尾再进来时拿的是真账本，不再用旧位置拼 locationBefore
+         if (var9 > 0) invalidateMapCache();
       } catch (Throwable var27) {
          owner.report.append("[前进钓鱼] 异常 ").append(var27).append('\n');
       }
@@ -537,7 +551,7 @@ final class MapTasks {
                                  if (var47 != null && var47.contains("LOCATION_NOT_MATCH") && varRef < 3) {
                                     JSONObject varRi = owner.callApi(
                                        MAP_INIT_API, "1.0",
-                                       "{" + RhLocationContext.jsonPair() + "\"version\":4}", "背包地图重试"
+                                       "{" + RhLocationContext.jsonPair() + "\"version\":4}", "背包地图重试", true
                                     );
                                     JSONObject varRd = varRi == null ? null : varRi.optJSONObject("data");
                                     JSONObject varRu = varRd == null ? null : varRd.optJSONObject("userInfo");
@@ -601,6 +615,9 @@ final class MapTasks {
                            var29++;
                            FishTaskAuto.sleepJitter(1200L);
                         }
+
+                        // 掷过骰子 → 地图账本已变，作废 init 缓存（刮卡/转盘只动道具，不动位置，无需失效）
+                        if (var44 && var29 > 0) invalidateMapCache();
 
                         StringBuilder var46 = new StringBuilder("[背包] ").append(var22).append(" 使用 ").append(var29).append("/").append(var28);
                         if (var44) {

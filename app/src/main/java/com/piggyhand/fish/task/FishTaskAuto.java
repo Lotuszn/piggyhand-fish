@@ -87,15 +87,23 @@ public final class FishTaskAuto {
    private static final long PROBE_INTERVAL_MS = 900000L;
    private static final long PROBE_BURST_MS = 300000L;
    private static final long PROBE_FAIL_MS = 180000L;
-   /** ---- 风控节奏整形（2026-11-15 用户定参）：触发 3s / 领取 5s / 查询 2s 中心值，
-    *  ±40% 抖动，设备系数 [0.7,1.5] 首跑固化（pref rh_pace/device_factor）——
-    *  消除「300ms 等间隔脉冲」与「全量设备同一节奏」两类最强机器特征。
+   /** ---- 风控节奏整形（v1.5.73 用户可配版）----
+    *  五个中心值由模块 UI「延迟时间配置」无极滑块写入 config，范围：
+    *    查询 800~8000 / 触发 800~10000 / 领取 800~12000 / 领取前延迟 2000~30000 / 抖动 10~60%
+    *  配置里为 0（旧配置或从未打开过模块界面）时，按设备首跑随机固化到 pref rh_pace。
+    *  2026-11-19 定稿：删掉设备系数（会乘走用户设定值）与 800ms 硬地板（与滑块左端重合
+    *  会导致最左端约一半间隔精确等于 800，形成新的固定节奏特征）。
     *  pace() 统一收口在 callApi 发送前，任务执行器零改动。 ---- */
-   private static final long PACE_SUBMIT_MS = 3000L;
-   private static final long PACE_CLAIM_MS = 5000L;
-   private static final long PACE_QUERY_MS = 2000L;
-   private static final double PACE_AMP = 0.4D;
-   private static volatile double devicePaceFactor = Double.NaN;
+   private static final long PACE_Q_DEF = 2000L;
+   private static final long PACE_S_DEF = 3000L;
+   private static final long PACE_C_DEF = 5000L;
+   private static final long PACE_G_DEF = 11500L;
+   private static final int  PACE_A_DEF = 40;
+   private static volatile long paceQueryMs = PACE_Q_DEF;
+   private static volatile long paceSubmitMs = PACE_S_DEF;
+   private static volatile long paceClaimMs = PACE_C_DEF;
+   private static volatile long paceClaimGapMs = PACE_G_DEF;
+   private static volatile double paceAmp = PACE_A_DEF / 100D;
    private static final Set<String> rejectedToday = ConcurrentHashMap.newKeySet();
    private static volatile String rejectedDay = "";
    // LVL 当日台账（lvlDay/lvlDir/lvlMap/lvlLoaded/LVL_FILE）与 RMB 锁已迁 LvlLedger（优化5簇1）；
@@ -232,6 +240,8 @@ public final class FishTaskAuto {
             ConfigManager var2 = ConfigManager.load();
             toastOn = var2 == null || var2.toastNotify;
             polishOn = var2 == null || var2.polish;
+            // v1.5.73：每轮跑批前刷新节奏参数（UI 滑块改值 → 重启闲鱼 → 这里读到新值）
+            applyPace(var2);
          } catch (Throwable var4) {
          }
 
@@ -1682,10 +1692,20 @@ public final class FishTaskAuto {
    }
 
    JSONObject callApi(String var1, String var2, String var3, String var4) {
+      return callApi(var1, var2, var3, var4, false);
+   }
+
+   /**
+    * @param skipCache true = 跳过 map.init 的 60s 复用，强制真实请求。
+    *   只给「失败重试」路径用（LOCATION_NOT_MATCH 重 init / 位置未推进重 init / isNeedRefresh 刷新）——
+    *   这些路径的语义就是「要拿服务端当前账本」，命中缓存等于没重试，
+    *   11-19 日志里 6 次同参数空转就是这么来的。
+    */
+   JSONObject callApi(String var1, String var2, String var3, String var4, boolean skipCache) {
       // v1.5.5 改进 D：map.init 结果 60s 内复用（响应 6.9KB、分钟级内容不变）。
       // 静态缓存——coinBalanceLogger 每 30s new 一个实例，实例字段会失效。
       // 收益：探针请求量减半以上，直调频率降下来直接降低被 WAF 拦的概率（见批次2日志分析）。
-      if (MapTasks.MAP_INIT_API.equals(var1)) {
+      if (!skipCache && MapTasks.MAP_INIT_API.equals(var1)) {
          long varN = System.currentTimeMillis();
          long[] varT = MapTasks.MAP_INIT_TS;
          JSONObject varC = MapTasks.MAP_INIT_CACHE;
@@ -1708,7 +1728,7 @@ public final class FishTaskAuto {
       // 先发先收；不同 api 完全并行。锁覆盖 send+轮询全程。
       synchronized (com.piggyhand.fish.net.RespChannel.lockFor(var1)) {
 
-      pace(var1); // 节奏整形：替代原固定 sleep(300L)——按 api 类别 2/3/5s ×设备系数 ±40% 抖动
+      pace(var1); // 节奏整形：替代原固定 sleep(300L)——按 api 类别取用户设定的中心值 ±抖动
       String var6 = this.fileFp(var5);
       long varSentAt = System.currentTimeMillis();
       boolean var7 = ApiDirect.send(this.cl, var1, var2, var3);
@@ -1873,66 +1893,81 @@ public final class FishTaskAuto {
       }
    }
 
-   /** 设备节奏系数：首跑随机 [0.7,1.5] 并固化到 pref（rh_pace/device_factor），
-    *  之后每台设备有自己稳定的中心节奏——同参数设备轨迹互不相同。 */
-   private static double paceFactor() {
-      double f = devicePaceFactor;
-      if (f == f) return f;
-      synchronized (FishTaskAuto.class) {
-         if (devicePaceFactor == devicePaceFactor) return devicePaceFactor;
-         double v = 0.7D + java.util.concurrent.ThreadLocalRandom.current().nextDouble() * 0.8D;
-         try {
-            Context c = appCtx;
-            if (c != null) {
-               android.content.SharedPreferences sp = c.getSharedPreferences("rh_pace", 0);
-               String saved = sp.getString("device_factor", null);
-               if (saved != null) {
-                  try {
-                     v = Double.parseDouble(saved);
-                  } catch (Throwable ignored) {
-                  }
-               } else {
-                  sp.edit().putString("device_factor", String.valueOf(v)).apply();
-               }
-            }
-         } catch (Throwable ignored) {
-         }
-         devicePaceFactor = v;
-         return v;
-      }
-   }
+   /** 设备节奏系数：已废弃（2026-11-19 定稿）。
+    *  原实现 [0.7,1.5] 会乘走用户在滑块上填的值——填 2000 实际跑 1400~3000，
+    *  「填了不准」。设备差异化改由首跑随机默认值 fixedPace() 承担。 */
 
-   /** 中心值 ±40% 抖动，下限 800ms 防抖出瞬时连发 */
+   /** 中心值 ±paceAmp 抖动，不乘系数、不做硬地板截断 */
    private static long jitterMs(long center) {
-      long v = (long) (center * paceFactor());
-      double amp = v * PACE_AMP;
-      return Math.max(800L, v + (long) ((java.util.concurrent.ThreadLocalRandom.current().nextDouble() * 2D - 1D) * amp));
+      double amp = center * paceAmp;
+      long v = center + (long) ((java.util.concurrent.ThreadLocalRandom.current().nextDouble() * 2D - 1D) * amp);
+      return Math.max(1L, v); // 中心值最低 800、amp ≤ 60%，理论不会到 0；兜底防 sleep(负数) 抛 IllegalArgument
    }
 
-   /** 发送前节奏等待：按 api 类别取中心值（领取 5s / 触发 3s / 查询 2s）×设备系数±40%。
+   /** 发送前节奏等待：按 api 类别取中心值（领取 / 触发 / 查询），再叠用户设定的抖动百分比。
     *  收口点——所有 mtop 直调只经 callApi 一处，任务执行器零改动。 */
    private static void pace(String api) {
       long center;
       if (api.contains("benefit") || api.contains("claim") || api.contains("signin")) {
-         center = PACE_CLAIM_MS;
+         center = paceClaimMs;
       } else if (api.contains("trigger") || api.contains("polish") || api.contains("bet") || api.contains("lottery")) {
-         center = PACE_SUBMIT_MS;
+         center = paceSubmitMs;
       } else {
-         center = PACE_QUERY_MS;
+         center = paceQueryMs;
       }
       sleep(jitterMs(center));
    }
 
-   /** 触发→领取拟人延迟：中心 11.5s±40%（约 7~16s），模拟「人完成任务再回来领」的间隔 */
+   /** 触发→领取拟人延迟：用户设定中心值 ±抖动（默认 11.5s ±40%，约 7~16s） */
    private static void claimHumanGap() {
-      sleep(jitterMs(11500L));
+      sleep(jitterMs(paceClaimGapMs));
    }
 
-   /** 执行器节奏等待：任意固定等待过 jitterMs（设备系数×±40% 抖动）——
-    *  2026-11-15 节奏整形补全：执行器内 18 处固定字面量与浏览流步进间隔统一走这里，
+   /** 执行器节奏等待：任意固定等待过 jitterMs（叠用户设定的抖动）——
+    *  2026-11-15 节奏整形补全：执行器内固定字面量与浏览流步进间隔统一走这里，
     *  消除任务间等间隔脉冲；<1000ms 的轮询小间隔保持原 sleep 不抖。 */
    static void sleepJitter(long centerMs) {
       sleep(jitterMs(centerMs));
+   }
+
+   /**
+    * 注入用户配置的节奏参数（launch 时每轮刷新一次）。
+    * 五个键各自独立兜底：配置有值用配置值 → 没有取本机固化值 → 再没有随机生成并固化。
+    * 引擎侧独立固化是为了覆盖「从不打开模块界面、只在 LSPosed 里勾选作用域」的设备，
+    * 这类设备同样需要一组与他人不同的节奏，否则全量设备回到同一拍。
+    */
+   static void applyPace(ConfigManager cfg) {
+      paceQueryMs = cfg != null && cfg.paceQueryMs > 0 ? cfg.paceQueryMs : fixedPace("q", 1200, 3000, PACE_Q_DEF);
+      paceSubmitMs = cfg != null && cfg.paceSubmitMs > 0 ? cfg.paceSubmitMs : fixedPace("s", 1800, 4200, PACE_S_DEF);
+      paceClaimMs = cfg != null && cfg.paceClaimMs > 0 ? cfg.paceClaimMs : fixedPace("c", 3000, 6000, PACE_C_DEF);
+      paceClaimGapMs = cfg != null && cfg.paceClaimGapMs > 0 ? cfg.paceClaimGapMs : fixedPace("g", 8000, 15000, PACE_G_DEF);
+      int amp = cfg != null && cfg.paceAmpPercent > 0
+            ? cfg.paceAmpPercent
+            : (int) fixedPace("a", 30, 50, PACE_A_DEF);
+      paceAmp = Math.max(10, Math.min(60, amp)) / 100D;
+      log("[pace] q=" + paceQueryMs + " s=" + paceSubmitMs + " c=" + paceClaimMs
+            + " gap=" + paceClaimGapMs + " amp=" + Math.round(paceAmp * 100) + "%"
+            + (cfg != null && cfg.paceManual ? " (manual)" : " (auto)"));
+   }
+
+   /**
+    * 本机固化值：首跑在 [lo,hi] 内随机取一个写进 pref（rh_pace/<key>），之后每轮读同一个。
+    * 用 int 存，与旧版 device_factor（String）不同键，互不影响。
+    */
+   private static long fixedPace(String key, int lo, int hi, long def) {
+      try {
+         Context c = appCtx;
+         if (c != null) {
+            android.content.SharedPreferences sp = c.getSharedPreferences("rh_pace", 0);
+            int saved = sp.getInt(key, -1);
+            if (saved > 0) return saved;
+            int v = lo + java.util.concurrent.ThreadLocalRandom.current().nextInt(hi - lo + 1);
+            sp.edit().putInt(key, v).apply();
+            return v;
+         }
+      } catch (Throwable ignored) {
+      }
+      return def;
    }
 
    /**

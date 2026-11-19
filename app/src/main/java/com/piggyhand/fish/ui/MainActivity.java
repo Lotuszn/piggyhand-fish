@@ -75,6 +75,7 @@ import java.util.Comparator;
 import java.util.Date;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -171,6 +172,22 @@ public class MainActivity extends Activity {
    private final AtomicBoolean drawerBusyCoin = new AtomicBoolean(false);
    private LiquidSwitch swCoinGame;
    private LiquidSwitch swCoinExchange;
+   // v1.5.73 「延迟时间配置」一级菜单：5 条无极滑块（松手落盘，无保存按钮）
+   private View drawerHeadPace;
+   private View drawerContentPace;
+   private TextView tvDrawerArrowPace;
+   private boolean drawerOpenPace = false;
+   private final AtomicBoolean drawerBusyPace = new AtomicBoolean(false);
+   private LiquidSlider slPaceQuery;
+   private LiquidSlider slPaceSubmit;
+   private LiquidSlider slPaceClaim;
+   private LiquidSlider slPaceGap;
+   private LiquidSlider slPaceAmp;
+   private TextView tvPaceQueryVal;
+   private TextView tvPaceSubmitVal;
+   private TextView tvPaceClaimVal;
+   private TextView tvPaceGapVal;
+   private TextView tvPaceAmpVal;
    private LiquidSwitch swPondFeed;
    private final AtomicBoolean drawerBusy = new AtomicBoolean(false);
    private final AtomicBoolean drawerBusy2 = new AtomicBoolean(false);
@@ -333,6 +350,21 @@ public class MainActivity extends Activity {
       this.tvDrawerArrowCoin = (TextView)this.findViewById(R.id.tvDrawerArrowCoin);
       this.swCoinGame = (LiquidSwitch)this.findViewById(R.id.swCoinGame);
       this.swCoinExchange = (LiquidSwitch)this.findViewById(R.id.swCoinExchange);
+      // v1.5.73 「延迟时间配置」一级菜单：初值/随机固化/松手落盘都在 bindPaceSliders 内
+      this.drawerHeadPace = this.findViewById(R.id.drawerHeadPace);
+      this.drawerContentPace = this.findViewById(R.id.drawerContentPace);
+      this.tvDrawerArrowPace = (TextView)this.findViewById(R.id.tvDrawerArrowPace);
+      this.slPaceQuery = (LiquidSlider)this.findViewById(R.id.slPaceQuery);
+      this.slPaceSubmit = (LiquidSlider)this.findViewById(R.id.slPaceSubmit);
+      this.slPaceClaim = (LiquidSlider)this.findViewById(R.id.slPaceClaim);
+      this.slPaceGap = (LiquidSlider)this.findViewById(R.id.slPaceGap);
+      this.slPaceAmp = (LiquidSlider)this.findViewById(R.id.slPaceAmp);
+      this.tvPaceQueryVal = (TextView)this.findViewById(R.id.tvPaceQueryVal);
+      this.tvPaceSubmitVal = (TextView)this.findViewById(R.id.tvPaceSubmitVal);
+      this.tvPaceClaimVal = (TextView)this.findViewById(R.id.tvPaceClaimVal);
+      this.tvPaceGapVal = (TextView)this.findViewById(R.id.tvPaceGapVal);
+      this.tvPaceAmpVal = (TextView)this.findViewById(R.id.tvPaceAmpVal);
+      this.bindPaceSliders();
 
       this.etPattern = (EditText)this.findViewById(R.id.etPattern);
       this.etMax = (EditText)this.findViewById(R.id.etMax);
@@ -941,6 +973,26 @@ public class MainActivity extends Activity {
                         .setDuration(MainActivity.this.drawerOpenCoin ? 260L : 200L)
                         .start();
                      MainActivity.this.animateDrawer((ViewGroup)MainActivity.this.drawerContentCoin, MainActivity.this.drawerOpenCoin, MainActivity.this.drawerBusyCoin);
+                  }
+               }
+            }
+         );
+      // v1.5.73 「延迟时间配置」抽屉展开/收起（与鱼塘同一套动画）
+      this.drawerHeadPace
+         .setOnClickListener(
+            new OnClickListener() {
+               public void onClick(View var1) {
+                  if (!MainActivity.this.drawerBusyPace.get()) {
+                     MainActivity.this.drawerOpenPace = !MainActivity.this.drawerOpenPace;
+                     MainActivity.this.tvDrawerArrowPace
+                        .animate()
+                        .rotation(MainActivity.this.drawerOpenPace ? 0.0F : -90.0F)
+                        .setDuration(MainActivity.this.drawerOpenPace ? 260L : 200L)
+                        .start();
+                     MainActivity.this.animateDrawer(
+                        (ViewGroup)MainActivity.this.drawerContentPace,
+                        MainActivity.this.drawerOpenPace,
+                        MainActivity.this.drawerBusyPace);
                   }
                }
             }
@@ -3286,6 +3338,72 @@ public class MainActivity extends Activity {
       }
 
       return var0;
+   }
+
+   /**
+    * v1.5.73 延迟时间配置：5 条无极滑块。
+    * 首次打开（配置里没有这组键）按定稿区间随机生成一组并落盘，让每台设备的默认节奏
+    * 各不相同；用户拖过任一滑块后写 paceManual=true，这组随机值不再变。
+    * 五条滑块全部线性映射，不需要对数改造（最大跨度 10 倍，300px 下每像素 ~24ms）。
+    */
+   private void bindPaceSliders() {
+      JSONObject var1 = this.currentConfig();
+      int var2 = var1.optInt("paceQueryMs", 0);      // 查询 800~8000
+      int var3 = var1.optInt("paceSubmitMs", 0);     // 触发 800~10000
+      int var4 = var1.optInt("paceClaimMs", 0);      // 领取 800~12000
+      int var5 = var1.optInt("paceClaimGapMs", 0);   // 领取前延迟 2000~30000
+      int var6 = var1.optInt("paceAmpPercent", 0);   // 抖动 10~60
+      if (var2 <= 0 || var3 <= 0 || var4 <= 0 || var5 <= 0 || var6 <= 0) {
+         ThreadLocalRandom var7 = ThreadLocalRandom.current();
+         if (var2 <= 0) var2 = 1200 + var7.nextInt(1801);   // 1200~3000
+         if (var3 <= 0) var3 = 1800 + var7.nextInt(2401);   // 1800~4200
+         if (var4 <= 0) var4 = 3000 + var7.nextInt(3001);   // 3000~6000
+         if (var5 <= 0) var5 = 8000 + var7.nextInt(7001);   // 8000~15000
+         if (var6 <= 0) var6 = 30 + var7.nextInt(21);       // 30~50
+         try {
+            JSONObject var8 = this.currentConfig();
+            var8.put("paceQueryMs", var2);
+            var8.put("paceSubmitMs", var3);
+            var8.put("paceClaimMs", var4);
+            var8.put("paceClaimGapMs", var5);
+            var8.put("paceAmpPercent", var6);
+            if (!var8.has("paceManual")) var8.put("paceManual", false);
+            this.persistSilent(var8);
+         } catch (Throwable var9) {
+         }
+      }
+      this.bindPaceSlider(this.slPaceQuery, this.tvPaceQueryVal, 800, 8000, var2, "paceQueryMs", false);
+      this.bindPaceSlider(this.slPaceSubmit, this.tvPaceSubmitVal, 800, 10000, var3, "paceSubmitMs", false);
+      this.bindPaceSlider(this.slPaceClaim, this.tvPaceClaimVal, 800, 12000, var4, "paceClaimMs", false);
+      this.bindPaceSlider(this.slPaceGap, this.tvPaceGapVal, 2000, 30000, var5, "paceClaimGapMs", false);
+      this.bindPaceSlider(this.slPaceAmp, this.tvPaceAmpVal, 10, 60, var6, "paceAmpPercent", true);
+   }
+
+   /** 单条滑块绑定：拖动只刷新右侧数值，松手（fromUser）才写盘，避免拖动过程反复 su 写文件 */
+   private void bindPaceSlider(final LiquidSlider var1, final TextView var2, int var3, int var4,
+                               int var5, final String var6, final boolean var7) {
+      if (var1 == null || var2 == null) return;
+      var1.setRange(var3, var4);        // setRange 内的 clamp 依赖旧值，必须先设区间再回填
+      var1.setValueSilent(var5);
+      final int var8 = var1.getValue();
+      var2.setText(var7 ? var8 + "%" : var8 + " ms");
+      var1.setOnValueChangeListener(
+         new LiquidSlider.OnValueChangeListener() {
+            @Override
+            public void onChanged(int value, boolean fromUser) {
+               var2.setText(var7 ? value + "%" : value + " ms");
+               if (fromUser) {
+                  try {
+                     JSONObject var9 = MainActivity.this.currentConfig();
+                     var9.put(var6, value);
+                     var9.put("paceManual", true);
+                     MainActivity.this.persistSilent(var9);
+                  } catch (Throwable var10) {
+                  }
+               }
+            }
+         }
+      );
    }
 
    private void commitNumberInputs() {

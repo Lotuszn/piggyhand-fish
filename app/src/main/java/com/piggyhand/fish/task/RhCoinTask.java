@@ -265,9 +265,10 @@ public final class RhCoinTask {
       if (jurl.contains("showAds") && jurl.contains("adType=rewardVideo")) {
          // 激励视频：协议可通，不必真播 —— 见 runRewardVideoAd 的方法注释（2026-11-12 实证）
          JSONObject gmv = t.optJSONObject("game");
-         String akv = resolveAppkey(t, gmv, tid);
+         // scene 必须先算：appkey 解析链的末级兜底要用它
          String scv = t.optString("taskScene", "");
          if (scv.length() == 0) scv = "GAME_CHANNEL";
+         String akv = resolveAppkey(t, gmv, tid, scv);
          int got = runRewardVideoAd(ctx, jurl, tid, akv, scv, label, rep);
          if (got >= 0) {
             doneAward++;
@@ -286,9 +287,9 @@ public final class RhCoinTask {
                   //   taskScene 必须带（值取任务自身的 taskScene，缺省 GAME_CHANNEL）——
                   //   少了它服务端按默认场景找 taskId，找不到就 TASK_NOT_FOUND。
                   JSONObject gm = t.optJSONObject("game");
-                  String appkey = resolveAppkey(t, gm, tid);
                   String scene = t.optString("taskScene", "");
                   if (scene.length() == 0) scene = "GAME_CHANNEL";
+                  String appkey = resolveAppkey(t, gm, tid, scene);
                   String ttype = t.optString("taskType", "");
 
                   // v1.5.6-fix（2026-11-16 真机实证）：channel_click 类（去闲鱼币频道逛一逛）
@@ -502,10 +503,10 @@ public final class RhCoinTask {
                         if (t == null || !"AWARD".equals(t.optString("taskStatus"))) continue;
                         JSONObject g3 = t.optJSONObject("game");
                         String tid3 = t.optString("taskId");
-                        // P1-D：复扫领奖同样走解析链（任务项缺 appkey 时从流量索引补）
-                        String ak3 = resolveAppkey(t, g3, tid3);
                         String sc3 = t.optString("taskScene", "");
                         if (sc3.length() == 0) sc3 = "GAME_CHANNEL";
+                        // P1-D/P1-E：复扫领奖同样走解析链（任务项缺 appkey 时从流量索引/场景兜底补）
+                        String ak3 = resolveAppkey(t, g3, tid3, sc3);
                         int g = awardChannel(fc, tid3, ak3, sc3);
                         if (g >= 0) {
                            got3 += g;
@@ -554,7 +555,13 @@ public final class RhCoinTask {
     * appkey 全程动态取（宿主流量/响应树，RhAppkeyIndex），不写死；取不到返回空串，
     * 调用方按既有约定省略字段（不 put 空串），行为等同旧版，不会更差。
     */
-   private static String resolveAppkey(JSONObject t, JSONObject gm, String tid) {
+   /**
+    * appkey 解析链：game.appkey → task.appkey → 流量索引(byTask) → 流量索引(byGame) → 场景兜底(byScene)。
+    * 最后一级是 P1-E（2026-11-19）：GAME_CHANNEL 渠道任务项自身不带 appkey，
+    * 前四级全空时用同一场景历史唯一出现的 appkey。场景内 appkey 不唯一时 byScene 返回空，
+    * 行为等同旧版（省略字段），不会因补错值把拒绝原因改成更难排查的那一类。
+    */
+   private static String resolveAppkey(JSONObject t, JSONObject gm, String tid, String scene) {
       String ak = gm != null ? gm.optString("appkey", "") : "";
       if (ak.length() == 0) ak = t.optString("appkey", "");
       if (ak.length() == 0 && tid != null && tid.length() > 0) {
@@ -564,6 +571,11 @@ public final class RhCoinTask {
          String gid = gm.optString("gameId", "");
          if (gid.length() == 0) gid = gm.optString("id", "");
          if (gid.length() > 0) ak = com.piggyhand.fish.net.RhAppkeyIndex.byGame(gid);
+      }
+            if (ak.length() == 0) ak = com.piggyhand.fish.net.RhAppkeyIndex.byScene(scene);
+      // 末级：渠道清单批次兜底（channel_click 类任务项自带无 appkey，前四级全空）
+      if (ak.length() == 0 && scene != null && scene.contains("GAME_CHANNEL")) {
+         ak = com.piggyhand.fish.net.RhAppkeyIndex.channelAk();
       }
       return ak;
    }
@@ -579,6 +591,8 @@ public final class RhCoinTask {
             // P1-D：清单响应树收割（recommendGames / tasks 全量 appkey 入索引）
             com.piggyhand.fish.net.RhAppkeyIndex.harvestTree(dchq);
             JSONArray a = dchq.optJSONArray("tasks");
+            // P1-E：批次频次统计，给「自带无 appkey」的渠道任务兜底
+            com.piggyhand.fish.net.RhAppkeyIndex.noteChannelTasks(a);
             if (a != null) return a;
          }
          String br = briefRet(o);
