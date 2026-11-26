@@ -14,7 +14,11 @@ import de.robv.android.xposed.XposedBridge;
  *    不自己调系统定位（避免权限/弹窗/来源特征不一致）
  *  - 取不到 → 返回 null → 调用方省略字段（服务端对缺字段请求照常服务，
  *    1.1.1 用户4 实测 req={"version":4} map.init SUCCESS）；绝不用任何固定值冒充
- *  - 持久化到闲鱼 cache 目录 rh_loc.json，冷启动后仍有值
+ *  - 持久化到应用内部 files/rh_loc.json，冷启动后仍有值
+ *
+ * 1.5.74 加固：原先写在 getExternalCacheDir()（/sdcard/Android/data/<pkg>/cache），
+ * 该目录在部分 ROM 上对同组应用/文件管理器可读，asac 明文落在那里属于凭据外泄面。
+ * 现改到内部私有目录；旧文件在首次读取时迁移一次并删除，迁移失败则保留可读路径继续工作。
  */
 public final class RhLocationContext {
 
@@ -101,7 +105,16 @@ public final class RhLocationContext {
             try {
                 Context c = RhRuntime.appCtx;
                 if (c != null) {
-                    java.io.File f = new java.io.File(c.getExternalCacheDir(), "rh_loc.json");
+                    java.io.File f = privFile(c);
+                    boolean migrated = false;
+                    if (!f.exists()) {
+                        // 旧版本写在外部 cache，读一次当兜底：老用户升级后不用重新捕获
+                        java.io.File old = legacyFile(c);
+                        if (old.exists()) {
+                            f = old;
+                            migrated = true;
+                        }
+                    }
                     if (f.exists()) {
                         byte[] b = new byte[(int) f.length()];
                         java.io.FileInputStream in = new java.io.FileInputStream(f);
@@ -116,12 +129,27 @@ public final class RhLocationContext {
                         if (v != null) asac = v;
                         XposedBridge.log("[RewardHook] [loc] loaded fishAdCode=" + fishAdCode
                                 + " gps=" + gps + " asac=" + mask(asac));
+                        // 从外部迁来的：写回内部私有目录，成功后删外部文件（删不掉不影响功能）
+                        if (migrated) persist();
                     }
                 }
             } catch (Throwable ignored) {
             }
             loaded = true;
         }
+    }
+
+    /** 内部私有目录（app data/files，非 root 不可读） */
+    private static java.io.File privFile(Context c) {
+        java.io.File dir = c.getFilesDir();
+        if (dir == null) dir = c.getDir("rh", Context.MODE_PRIVATE);
+        return new java.io.File(dir, "rh_loc.json");
+    }
+
+    /** 1.5.74 之前的位置：外部 cache，升级后只读一次 */
+    private static java.io.File legacyFile(Context c) {
+        java.io.File d = c.getExternalCacheDir();
+        return d == null ? null : new java.io.File(d, "rh_loc.json");
     }
 
     private static void persist() {
@@ -132,10 +160,27 @@ public final class RhLocationContext {
             if (fishAdCode != null) j.put("fishAdCode", fishAdCode);
             if (gps != null) j.put("gps", gps);
             if (asac != null) j.put("asac", asac);
-            java.io.File f = new java.io.File(c.getExternalCacheDir(), "rh_loc.json");
-            java.io.FileWriter w = new java.io.FileWriter(f, false);
+            java.io.File f = privFile(c);
+            // 原子写：先落 .tmp 再 rename，避免进程被杀时留下半个 JSON（下次读取解析失败）
+            java.io.File tmp = new java.io.File(f.getParentFile(), f.getName() + ".tmp");
+            java.io.FileWriter w = new java.io.FileWriter(tmp, false);
             w.write(j.toString());
+            w.flush();
             w.close();
+            if (!tmp.renameTo(f)) {
+                // rename 失败（个别 ROM 跨挂载点）：退回覆盖写，至少保证有值
+                java.io.FileWriter w2 = new java.io.FileWriter(f, false);
+                w2.write(j.toString());
+                w2.flush();
+                w2.close();
+                //noinspection ResultOfMethodCallIgnored
+                tmp.delete();
+            }
+            java.io.File old = legacyFile(c);
+            if (old != null && old.exists()) {
+                //noinspection ResultOfMethodCallIgnored
+                old.delete(); // 明文 asac 不再留在外部存储
+            }
         } catch (Throwable ignored) {
         }
     }

@@ -69,6 +69,14 @@ public final class RhCashSignTask {
     /** 进程内防重入：UI 连点 / 自启与手动撞车 */
     private static volatile boolean claiming = false;
     private static volatile boolean opening = false;
+    /**
+     * 已消费过的商城 token。token 是一次性的：连做两个商城任务时 ad.query 响应文件可能还停在
+     * 上一笔（时间戳差在 1.5s 容差内），不挡住就会把旧 token 再推一次，服务端回
+     * FAIL_BIZ_SERVER_ERROR / 重复上报。只保最近若干条，防长跑内存增长。
+     */
+    private static final java.util.LinkedHashSet<String> USED_TOKENS =
+            new java.util.LinkedHashSet<String>();
+    private static final int USED_TOKENS_MAX = 64;
 
     private RhCashSignTask() {
     }
@@ -398,12 +406,16 @@ public final class RhCashSignTask {
                 JSONObject pb = blk.optJSONObject("adEventPush");
                 if (pb == null) continue;
                 if (!code.equals(pb.optString("adPositionCode", ""))) continue;
-                if (pb.optString("token", "").length() == 0) continue;
+                String token = pb.optString("token", "");
+                if (token.length() == 0) continue;
+                // 一次性 token：已经被本进程推过的跳过，继续等商城页新的 ad.query
+                if (isTokenUsed(token)) continue;
+                markTokenUsed(token);
                 // 服务端只认四字段：adPositionCode / eventType / token / implId
                 JSONObject out = new JSONObject();
                 out.put("adPositionCode", pb.optString("adPositionCode", ""));
                 out.put("eventType", pb.optString("eventType", "award"));
-                out.put("token", pb.optString("token", ""));
+                out.put("token", token);
                 out.put("implId", pb.optString("implId", ""));
                 out.put("_dur", blk.optInt("rewardDuration", 20));
                 return out;
@@ -417,6 +429,21 @@ public final class RhCashSignTask {
     private static boolean alreadyCounted(String err) {
         return err != null && (err.indexOf("REACH_UPPER_LIMIT") >= 0
                 || err.indexOf("AWARD_REPEAT") >= 0);
+    }
+
+    private static synchronized boolean isTokenUsed(String token) {
+        return USED_TOKENS.contains(token);
+    }
+
+    /** 记一笔已消费 token，超出上限丢最旧的（任务量一天十几条，64 足够覆盖一轮） */
+    private static synchronized void markTokenUsed(String token) {
+        USED_TOKENS.add(token);
+        while (USED_TOKENS.size() > USED_TOKENS_MAX) {
+            Iterator<String> it = USED_TOKENS.iterator();
+            if (!it.hasNext()) break;
+            it.next();
+            it.remove();
+        }
     }
 
     /** 按 deliveryId 重查单任务（推完拿新的 taskParams.implId，或确认已 AWARDING） */
