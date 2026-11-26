@@ -40,18 +40,28 @@ public final class RhFishFloat {
     private static final String TAG_MARK = "rh_fish_float";
     /** 图片查看器路由特征串 */
     private static final String ROUTE_GALLERY = "detail_photo_gallery";
+    /** 原生图片查看器路由特征串（dex 实证：fleamarket://native_detail_photo_gallery?&pageUniqueId=） */
+    private static final String ROUTE_GALLERY_NATIVE = "native_detail_photo_gallery";
     /** 视频预览路由特征串（2026-10-19 实测：videoURL 明文直链挂在参数里） */
     private static final String ROUTE_VIDEO = "video_preview_page";
 
-    /** 7.25.31 实名侦察：Flutter 容器家族 + 原生详情页（hook 挂点，注入时按路由过滤） */
+    /** 7.25.31 实名侦察：Flutter 容器家族 + 原生详情页（hook 挂点，注入时按路由过滤）
+     *  7.29.20 追加：图片查看器已从 Flutter 容器改为原生 Activity
+     *  （实测 2026-11-26：点图集进 com.taobao.idlefish.photo.DetailPhotoGalleryActivity，
+     *   intent 只有 act=android.intent.action.idlefish + component + extras，没有 data URI），
+     *   原 CONTAINERS 全是 Flutter 家族，类名对不上 → onCreate 从未被 hook → 三天日志 [float] 0 行。 */
     private static final String[] CONTAINERS = {
             "com.taobao.idlefish.detail.DetailActivity",
+            "com.taobao.idlefish.photo.DetailPhotoGalleryActivity",
             "com.idlefish.flutterboost.containers.FlutterBoostActivity",
             "com.idlefish.flutterbridge.flutterboost.boost.FishFlutterBoostActivity",
             "com.idlefish.flutterbridge.flutterboost.boost.FishAVFlutterActivity",
             "com.idlefish.flutterbridge.flutterboost.boost.FishFlutterBoostSurfaceActivity",
             "com.idlefish.flutterbridge.flutterboost.boost.FishFlutterBoostTransparencyActivity",
     };
+
+    /** 原生图片查看器类名特征（7.29.20+）：这类 Activity 没有 data URI，按类名判定 */
+    private static final String CLS_NATIVE_GALLERY = "DetailPhotoGalleryActivity";
 
     private RhFishFloat() {}
 
@@ -85,10 +95,8 @@ public final class RhFishFloat {
                             if (thiz instanceof Activity) {
                                 Activity act = (Activity) thiz;
                                 dumpRoute(act);
-                                // 只在图片查看器/视频预览路由贴 🎣（详情页/首页不显示）
-                                android.content.Intent it = act.getIntent();
-                                String data = it == null ? null : it.getDataString();
-                                if (data != null && (data.contains(ROUTE_GALLERY) || data.contains(ROUTE_VIDEO))) {
+                                // 只在图片查看器/视频预览贴 🎣（详情页/首页不显示）
+                                if (isMediaViewer(act)) {
                                     inject(act);
                                 }
                             }
@@ -102,7 +110,110 @@ public final class RhFishFloat {
                 flog("[float] hook fail " + name + ": " + t);
             }
         }
+        // 7.29.20 原生查看器兜底：DetailPhotoGalleryActivity 不 override onCreate
+        // （dex 实证：类方法表只有 <init> / buildUriFromIntent / initHeroTransition /
+        //   finishGallery / showDebugEntryToast 等，onCreate 继承自 BaseFragmentActivity），
+        // 所以「按类名挂 onCreate」这条路对它永远挂不到 —— 上一版加进 CONTAINERS 后
+        // 点开大图依旧零日志，就是这个原因。改成挂 Activity.onCreate 基类，回调里按类名过滤。
+        try {
+            Reflect.hookAllMethods(Activity.class, "onCreate", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    try {
+                        Object thiz = param.thisObject;
+                        if (!(thiz instanceof Activity)) return;
+                        Activity act = (Activity) thiz;
+                        String cn = act.getClass().getName();
+                        if (cn == null || !cn.contains(CLS_NATIVE_GALLERY)) return;
+                        dumpRoute(act);
+                        inject(act);
+                    } catch (Throwable t) {
+                        flog("[float] native gallery err: " + t);
+                    }
+                }
+            });
+            flog("[float] native gallery fallback armed (Activity.onCreate)");
+        } catch (Throwable t) {
+            flog("[float] native gallery fallback fail: " + t);
+        }
+        // 第三道保险：直接挂查看器自己的构造器。Activity.onCreate 是基类方法，
+        // 部分 ROM/LSPosed 组合下对 boot class 的 hook 会静默失败；构造器是应用类方法，
+        // 一定挂得上。构造期 window 还没建，post 到主线程 600ms 后再注入。
+        try {
+            Class<?> g = Reflect.findClassIfExists("com.taobao.idlefish.photo.DetailPhotoGalleryActivity", cl);
+            if (g != null) {
+                Reflect.hookAllConstructors(g, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        try {
+                            Object thiz = param.thisObject;
+                            if (!(thiz instanceof Activity)) return;
+                            final Activity act = (Activity) thiz;
+                            flog("[float] ctor hit: " + act.getClass().getName());
+                            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(new Runnable() {
+                                @Override
+                                public void run() {
+                                    try {
+                                        dumpRoute(act);
+                                        inject(act);
+                                    } catch (Throwable t) {
+                                        flog("[float] ctor inject err: " + t);
+                                    }
+                                }
+                            }, 600);
+                        } catch (Throwable t) {
+                            flog("[float] ctor err: " + t);
+                        }
+                    }
+                });
+                flog("[float] native gallery ctor fallback armed");
+            } else {
+                flog("[float] native gallery class NOT FOUND");
+            }
+        } catch (Throwable t) {
+            flog("[float] native gallery ctor fail: " + t);
+        }
         flog("[float] 🎣 悬浮钮 hook 完成，容器类 " + armed + "/" + CONTAINERS.length);
+    }
+
+    /** 单实例路由日志去重（WeakHashMap：Activity 销毁后自动回收，不泄漏） */
+    private static final java.util.Map<Activity, Boolean> DUMPED =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Activity, Boolean>());
+
+    /** 首次访问返回 true，之后同一实例返回 false */
+    private static boolean dumpOnce(Activity act) {
+        try {
+            return DUMPED.put(act, Boolean.TRUE) == null;
+        } catch (Throwable t) {
+            return true; // 去重失败就退化成每次都打，不影响功能
+        }
+    }
+
+    /**
+     * 判定当前 Activity 是不是「图片查看器 / 视频预览」。
+     *
+     * 两条判定路径并存，覆盖新旧两代实现：
+     *  1. 原生查看器（7.29.20+）：类名含 DetailPhotoGalleryActivity。它的 intent data 是
+     *     fleamarket://native_detail_photo_gallery?...&imageBeans=[...]（实测有值，2344 字符），
+     *     所以 URI 判断也能命中；但该类不 override onCreate，按类名挂 onCreate 挂不到，
+     *     才是 11-26 三天日志 [float] 全 0 的真正原因。
+     *  2. Flutter 容器（7.25.x~7.29.10）：靠 intent data 里的 detail_photo_gallery /
+     *     native_detail_photo_gallery / video_preview_page 判断，逻辑保持不变。
+     */
+    private static boolean isMediaViewer(Activity act) {
+        try {
+            String cn = act.getClass().getName();
+            if (cn != null && cn.contains(CLS_NATIVE_GALLERY)) return true;
+            android.content.Intent it = act.getIntent();
+            String data = it == null ? null : it.getDataString();
+            if (data == null) return false;
+            return data.contains(ROUTE_GALLERY)
+                    || data.contains(ROUTE_GALLERY_NATIVE)
+                    || data.contains(ROUTE_VIDEO);
+        } catch (Throwable t) {
+            flog("[float] isMediaViewer err: " + t);
+            return false;
+        }
     }
 
     /** 路由侦察：intent 结构打日志（收敛注入范围 + 单张定位的数据底料） */
@@ -111,13 +222,23 @@ public final class RhFishFloat {
             android.content.Intent it = act.getIntent();
             if (it == null) return;
             String data = it.getDataString();
-            // 画廊/视频路由喂媒体缓存（每次全量覆盖 → 永远跟随当前查看器）
-            harvestGallery(it);
-            harvestVideo(it);
-            if (data == null) return;
+            // 日志去重：ctor 与 Activity.onCreate 两条路径都会走到这里，同一个 Activity
+            // 只处理一次，否则一次点开大图刷 4 条同样的长 URI
+            boolean firstDump = dumpOnce(act);
+            if (firstDump) {
+                // 画廊/视频路由喂媒体缓存（全量覆盖 → 永远跟随当前查看器）
+                harvestGallery(it);
+                harvestVideo(it);
+                // 7.29.20 原生查看器：真正的图集在 ROUTER_URL_DATA / url_query_param 里
+                harvestGalleryExtras(it);
+                dumpExtrasKeys(it, act.getClass().getSimpleName());
+            }
+            if (data == null || !firstDump) return;
             StringBuilder sb = new StringBuilder("[route] ");
             sb.append(act.getClass().getSimpleName());
-            if (data != null) sb.append(" data=").append(data);
+            // 长 URI 截断：7.29.20 的 native_detail_photo_gallery 把整个 imageBeans 塞进
+            // data（实测 2344 字符），全量打会把日志撑爆
+            sb.append(" data=").append(data.length() > 300 ? data.substring(0, 300) + "..." : data);
             String url = it.getStringExtra("url");
             if (url != null) sb.append(" url=").append(url);
             String s = sb.toString();
@@ -126,6 +247,85 @@ public final class RhFishFloat {
                 flog(s);
             }
         } catch (Throwable ignored) {
+        }
+    }
+
+    /**
+     * extras 侦察：打印 key 名 + 值的类型和长度（不打内容，避免日志爆）。
+     *
+     * 7.29.20 的图片查看器 intent 是
+     *   Intent { act=android.intent.action.idlefish cmp=.../.photo.DetailPhotoGalleryActivity (has extras) }
+     * —— 没有任何 data URI，图集数据只能从 extras 进。先看清楚 key 与类型，再决定取值方式。
+     * 只对图片查看器打，详情页/首页不刷日志。
+     */
+    private static void dumpExtrasKeys(android.content.Intent it, String clsSimple) {
+        try {
+            if (clsSimple == null || !clsSimple.contains(CLS_NATIVE_GALLERY)) return;
+            android.os.Bundle b = it.getExtras();
+            if (b == null) {
+                flog("[route] extras = null (" + clsSimple + ")");
+                return;
+            }
+            StringBuilder sb = new StringBuilder("[route] extras(" + clsSimple + ") keys=");
+            java.util.Set<String> ks = b.keySet();
+            int n = 0;
+            for (String k : ks) {
+                if (n++ > 40) { sb.append("..."); break; }
+                Object v = b.get(k);
+                sb.append(k).append('[');
+                if (v == null) {
+                    sb.append("null");
+                } else {
+                    sb.append(v.getClass().getSimpleName());
+                    if (v instanceof String) {
+                        sb.append(':').append(((String) v).length());
+                    } else if (v instanceof java.util.Collection) {
+                        sb.append(':').append(((java.util.Collection<?>) v).size());
+                    }
+                }
+                sb.append("] ");
+            }
+            flog(sb.toString());
+        } catch (Throwable t) {
+            flog("[route] dumpExtrasKeys err: " + t);
+        }
+    }
+
+    /**
+     * 从 extras 里捞图集（7.29.20 原生查看器兜底路径）。
+     *
+     * 实测这个查看器的 extras 是路由器封装：ROUTER_URL_DATA(HierarchicalUri) +
+     * url_query_param(String,2344) + spm-url，真正的 imageBeans 藏在 url_query_param 的
+     * 查询串里。正常情况 intent 的 data URI 也能拿到同一份数据（harvestGallery 已经处理），
+     * 这里做兜底：万一某天宿主不再把 data 挂到 intent 上，从 extras 的 query 串再抠一次。
+     * 命中才覆盖 RhFishMedia，否则保持旧缓存不动。
+     */
+    private static void harvestGalleryExtras(android.content.Intent it) {
+        try {
+            android.os.Bundle b = it.getExtras();
+            if (b == null) return;
+            for (String k : b.keySet()) {
+                Object v = b.get(k);
+                if (!(v instanceof String)) continue;
+                String s = (String) v;
+                int i = s.indexOf("imageBeans=");
+                if (i < 0) continue;
+                i += "imageBeans=".length();
+                int end = s.indexOf('&', i);
+                String beans = end < 0 ? s.substring(i) : s.substring(i, end);
+                try {
+                    beans = java.net.URLDecoder.decode(beans, "UTF-8");
+                } catch (Throwable ignored) {
+                }
+                List<String> got = parseBeans(beans);
+                if (!got.isEmpty()) {
+                    flog("[float] extras[" + k + "] 图集 " + got.size() + " 张");
+                    RhFishMedia.setImageUrls(got);
+                    return;
+                }
+            }
+        } catch (Throwable t) {
+            flog("[float] harvestGalleryExtras err: " + t);
         }
     }
 
@@ -155,8 +355,17 @@ public final class RhFishFloat {
             int end = data.indexOf('&', i);
             String beans = end < 0 ? data.substring(i) : data.substring(i, end);
             beans = java.net.URLDecoder.decode(beans, "UTF-8");
+            List<String> urls = parseBeans(beans);
+            if (!urls.isEmpty()) RhFishMedia.setImageUrls(urls);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** imageBeans JSON → 无水印 URL 列表（URI 参数版与 extras 版共用同一套字段） */
+    private static List<String> parseBeans(String beans) {
+        List<String> urls = new ArrayList<String>();
+        try {
             org.json.JSONArray arr = new org.json.JSONArray(beans);
-            List<String> urls = new ArrayList<String>();
             for (int k = 0; k < arr.length(); k++) {
                 org.json.JSONObject bean = arr.optJSONObject(k);
                 if (bean == null) continue;
@@ -166,9 +375,9 @@ public final class RhFishFloat {
                 if (u == null || u.length() == 0) u = info.optString("imagePath", "");
                 if (u != null && u.length() > 0) urls.add(u.startsWith("//") ? "https:" + u : u);
             }
-            RhFishMedia.setImageUrls(urls);
         } catch (Throwable ignored) {
         }
+        return urls;
     }
 
     /** 注入 🎣 钮（tag 防重复；延迟 300ms 等 content 就绪） */
@@ -209,9 +418,6 @@ public final class RhFishFloat {
 
             FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                     dp(act, 52), dp(act, 52));
-            lp.gravity = Gravity.BOTTOM | Gravity.END;
-            lp.rightMargin = dp(act, 16);
-            lp.bottomMargin = dp(act, 96);
             btn.setLayoutParams(lp);
             btn.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -221,9 +427,14 @@ public final class RhFishFloat {
             });
 
             wrap.addView(btn);
-            act.addContentView(wrap, new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT));
+            // 容器只占按钮那一小块（WRAP_CONTENT + 右下角定位），不能再铺 MATCH_PARENT：
+            // 原生图片查看器靠全屏 ViewPager 处理滑动/双击缩放，铺满会吃掉手势。
+            FrameLayout.LayoutParams wrapLp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            wrapLp.gravity = Gravity.BOTTOM | Gravity.END;
+            wrapLp.rightMargin = dp(act, 16);
+            wrapLp.bottomMargin = dp(act, 96);
+            act.addContentView(wrap, wrapLp);
             flog("[float] 🎣 注入 " + act.getClass().getSimpleName());
         } catch (Throwable t) {
             flog("[float] addContentView err: " + t);
@@ -428,6 +639,12 @@ public final class RhFishFloat {
 
     /** 双写日志：XposedBridge（不依赖 init 时序）+ 文件 */
     private static void flog(String msg) {
+        // attach 期 RhFileLog 路径还没就绪，写文件会静默失败 —— 先镜像一份 logcat，
+        // 保证 hook 注册结果、extras 结构这类早期/关键信息一定能看到。
+        try {
+            android.util.Log.e("RewardHook", msg);
+        } catch (Throwable ignored) {
+        }
         try {
             de.robv.android.xposed.XposedBridge.log("[RewardHook] " + msg);
         } catch (Throwable ignored) {
