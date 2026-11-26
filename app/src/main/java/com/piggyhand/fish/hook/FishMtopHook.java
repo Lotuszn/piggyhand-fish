@@ -113,6 +113,30 @@ public final class FishMtopHook {
                 FishMtopHook.noteDirectSent(api);
             }
         });
+        /* ---------- 0. 前台 Activity 跟踪（任务线程拉起商城页要用 Activity 上下文） ---------- */
+        try {
+            XposedBridge.hookAllMethods(android.app.Activity.class, "onResume", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    try {
+                        com.piggyhand.fish.core.RhTopActivity.set((android.app.Activity) param.thisObject);
+                    } catch (Throwable ignored) {
+                    }
+                }
+            });
+            XposedBridge.hookAllMethods(android.app.Activity.class, "onDestroy", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    try {
+                        com.piggyhand.fish.core.RhTopActivity.clearIf((android.app.Activity) param.thisObject);
+                    } catch (Throwable ignored) {
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            log("top-activity hook fail: " + t);
+        }
+
         /* ---------- 1. 请求侧侦察 ---------- */
         try {
             Class<?> reqCls = Reflect.findClass("mtopsdk.mtop.domain.MtopRequest", cl);
@@ -1434,5 +1458,24 @@ public final class FishMtopHook {
      *  面板状态从「今日已开红包」退回「今日未执行」）。 */
     public static java.io.File persistDir(android.content.Context ctx) { // 已下沉 core.RhRuntime（Phase 2a），此处保留包内便捷委托
         return com.piggyhand.fish.core.RhRuntime.persistDir(ctx);
+    }
+
+    /* ---- 跨包只读响应桥（task 包用；RespStore 是包内可见类，不能直接对外） ---- */
+
+    /** 按 api 全名取最近一次落盘的响应原文（找不到返回 null） */
+    public static String readRespText(String api) {
+        String base = com.piggyhand.fish.net.RespChannel.respBase(api);
+        return RespStore.readCacheFile("rh_resp_" + base + ".json");
+    }
+
+    /** 该 api 响应文件的落盘时间（毫秒；不存在返回 0）——调用方用它判断是不是本次会话写的 */
+    public static long respStamp(String api) {
+        try {
+            String base = com.piggyhand.fish.net.RespChannel.respBase(api);
+            java.io.File f = RespStore.cacheFile("rh_resp_" + base + ".json");
+            return f == null || !f.exists() ? 0L : f.lastModified();
+        } catch (Throwable t) {
+            return 0L;
+        }
     }
 }

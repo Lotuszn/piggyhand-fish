@@ -2,6 +2,7 @@ package com.piggyhand.fish.task;
 
 import android.app.Application;
 import android.content.Context;
+import android.content.Intent;
 
 import com.piggyhand.fish.config.ConfigManager;
 import com.piggyhand.fish.core.RhFileLog;
@@ -14,7 +15,9 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileWriter;
+import java.net.URLDecoder;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.Random;
 
@@ -47,12 +50,20 @@ public final class RhCashSignTask {
     static final String API_AWARD = "mtop.taobao.pentaprism.scene.award";
     static final String API_MAIN = "mtop.idle.play.signin.cash.main";
     static final String API_OPEN = "mtop.idle.play.signin.cash.open";
+    /** 广告任务：ad.query 由闲鱼自己的商城页发（拿 token），ad.event.push 由我们补 */
+    static final String API_AD_QUERY = "mtop.taobao.idle.play.ad.query";
+    static final String API_AD_PUSH = "mtop.taobao.idle.play.ad.event.push";
 
     /** 开红包单轮上限：redEnvNum 异常大时防死循环（正常十几到几十） */
     private static final int OPEN_MAX = 120;
     /** 单接口等待上限 */
     private static final long T_QUERY = 9000L;
     private static final long T_ACTION = 9000L;
+    /** 等商城页自己发 ad.query（观察值 1~3s，给到 12s 防慢网） */
+    private static final long T_AD_WAIT = 12000L;
+    /** 商城停留秒数上下限：rewardDuration 由回包给（15/20），夹在区间内防脏值 */
+    private static final int AD_BROWSE_MIN = 12;
+    private static final int AD_BROWSE_MAX = 32;
 
     private static final Random RND = new Random();
     /** 进程内防重入：UI 连点 / 自启与手动撞车 */
@@ -191,23 +202,39 @@ public final class RhCashSignTask {
             }
 
             if ("ACCEPTED".equals(status)) {
-                // trigger 只认三字段：带 fromToken/samplingRate 会被服务端按参数非法拒
-                JSONObject body = new JSONObject();
-                body.put("deliveryId", p.optString("deliveryId", ""));
-                body.put("implId", p.optString("implId", ""));
-                body.put("sceneId", p.optString("sceneId", scene));
-                JSONObject r = call(ctx, API_TRIGGER, body.toString(), T_ACTION);
-                String e = errOf(r);
-                if (!"success".equals(e)) return "完成上报失败 " + e;
-                JSONObject model = r.optJSONObject("data") == null ? null
-                        : r.optJSONObject("data").optJSONObject("model");
-                if (model != null) {
-                    // 回包 taskParams.implId 末段 +1（_0 → _1），领奖必须用新值
-                    JSONObject np = model.optJSONObject("taskParams");
-                    if (np != null) p = np;
-                    status = model.optString("status", "AWARDING");
+                AdSpec spec = AdSpec.parse(task);
+                if (spec != null) {
+                    // 广告类任务：trigger 恒被 REQUEST_SOURCE_REJECT 拒，只能走 ad.event.push
+                    String e = adComplete(ctx, spec);
+                    if (e != null) return e;
+                    sleep(1200L + RND.nextInt(600));
+                    JSONObject t2 = findTask(ctx, scene, p.optString("deliveryId", ""));
+                    if (t2 != null) {
+                        JSONObject np = t2.optJSONObject("taskParams");
+                        if (np != null) p = np;
+                        status = t2.optString("status", "AWARDING");
+                    } else {
+                        status = "AWARDING";
+                    }
                 } else {
-                    status = "AWARDING";
+                    // trigger 只认三字段：带 fromToken/samplingRate 会被服务端按参数非法拒
+                    JSONObject body = new JSONObject();
+                    body.put("deliveryId", p.optString("deliveryId", ""));
+                    body.put("implId", p.optString("implId", ""));
+                    body.put("sceneId", p.optString("sceneId", scene));
+                    JSONObject r = call(ctx, API_TRIGGER, body.toString(), T_ACTION);
+                    String e = errOf(r);
+                    if (!"success".equals(e)) return "完成上报失败 " + e;
+                    JSONObject model = r.optJSONObject("data") == null ? null
+                            : r.optJSONObject("data").optJSONObject("model");
+                    if (model != null) {
+                        // 回包 taskParams.implId 末段 +1（_0 → _1），领奖必须用新值
+                        JSONObject np = model.optJSONObject("taskParams");
+                        if (np != null) p = np;
+                        status = model.optString("status", "AWARDING");
+                    } else {
+                        status = "AWARDING";
+                    }
                 }
                 sleep(900 + RND.nextInt(600));
             }
@@ -233,8 +260,232 @@ public final class RhCashSignTask {
         }
     }
 
-    /* ---------------- ② 自动开红包 ---------------- */
+    /* ---------------- ①-b 广告类任务（视频 / 电商商城） ---------------- */
 
+    /**
+     * 广告任务完成上报。两类，判据全在 assets.action 里：
+     *  ① 视频类：action 内嵌 adEventPush（%7B...%7D），原样 push 即可，countdown 是契约字段；
+     *  ② 电商商城类：action 只有 adPositionCode/scenarioId/sourceType，token 必须由闲鱼自己的
+     *     CsjMallActivity 发 ad.query 领取——协议直发的 token 一律 FAIL_BIZ_SERVER_ERROR
+     *     （服务端校验广告曝光会话）。所以这里先起 activity，再从响应落盘里取它的 token，
+     *     等 rewardDuration 秒后补 push。
+     *
+     * @return null 成功；非 null 为失败文案
+     */
+    private static String adComplete(Context ctx, AdSpec spec) {
+        if (spec.inlinePush != null) {
+            JSONObject r = call(ctx, API_AD_PUSH, spec.inlinePush.toString(), T_ACTION);
+            String e = errOf(r);
+            // 已到上限/重复上报 = 服务端已认账（商城页自己的 reporter 可能刚推过），不算失败
+            if (!"success".equals(e) && !alreadyCounted(e)) return "视频上报失败 " + e;
+            return null;
+        }
+        long t0 = System.currentTimeMillis();
+        if (!launchAds(ctx, spec.action)) return "商城页未拉起（需前台）";
+        JSONObject push = waitMallPush(spec.code, t0);
+        if (push == null) return "商城未取到 token（未曝光）";
+        int dur = push.optInt("_dur", 20);
+        if (dur < AD_BROWSE_MIN) dur = AD_BROWSE_MIN;
+        if (dur > AD_BROWSE_MAX) dur = AD_BROWSE_MAX;
+        // 停留时长是服务端校验项（rewardDuration），少一秒都可能被判未浏览
+        sleep(dur * 1000L + 1500L + RND.nextInt(800));
+        push.remove("_dur");
+        JSONObject r = call(ctx, API_AD_PUSH, push.toString(), T_ACTION);
+        String e = errOf(r);
+        if (!"success".equals(e) && !alreadyCounted(e)) {
+            return "商城上报失败 " + e + " " + errMsgOf(r);
+        }
+        return null;
+    }
+
+    /**
+     * 起商城页。Deep link 直接 startActivity 落不到 CsjMallActivity：
+     * 该 Activity 需要 extra fmfa_csj_mall_session_key，而会话（含 ad.query 发 token）
+     * 是闲鱼路由拦截器建的。所以先调 AdsUtil.interceptRouterShowAds 走它自己的路由，
+     * 失败再退回 deep link。
+     */
+    private static boolean launchAds(Context ctx, String action) {
+        // 路由拦截器只认 Activity 上下文（内部先做 instance-of Activity 判定），拿到才调得动
+        final android.app.Activity act = com.piggyhand.fish.core.RhTopActivity.get();
+        if (act != null) {
+            // 它内部 new Handler()：必须在有 Looper 的线程（主线程）调用，否则直接抛
+            final boolean[] ok = new boolean[]{false};
+            final java.util.concurrent.CountDownLatch latch =
+                    new java.util.concurrent.CountDownLatch(1);
+            Runnable call = new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        ClassLoader cl = act.getClassLoader();
+                        Class<?> util = Class.forName("com.taobao.idlefish.ads.util.AdsUtil", false, cl);
+                        Class<?> dlg = Class.forName("com.taobao.idlefish.protocol.ui.ILoadingDialog",
+                                false, cl);
+                        Class<?> cb = Class.forName(
+                                "com.taobao.idlefish.ads.util.AdsUtil$InterceptShowAdsCallback", false, cl);
+                        java.lang.reflect.Method m = util.getMethod("interceptRouterShowAds",
+                                Context.class, String.class, dlg, cb);
+                        Object r = m.invoke(null, act, action, null, null);
+                        log("[cashsign] interceptRouterShowAds -> " + r);
+                        ok[0] = Boolean.TRUE.equals(r);
+                    } catch (Throwable t) {
+                        Throwable c = t.getCause() != null ? t.getCause() : t;
+                        log("[cashsign] interceptRouterShowAds fail: " + c);
+                    } finally {
+                        latch.countDown();
+                    }
+                }
+            };
+            try {
+                if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                    call.run();
+                } else {
+                    new android.os.Handler(android.os.Looper.getMainLooper()).post(call);
+                    latch.await(6, java.util.concurrent.TimeUnit.SECONDS);
+                }
+            } catch (Throwable t) {
+                log("[cashsign] router post fail: " + t);
+            }
+            if (ok[0]) return true;
+        } else {
+            log("[cashsign] no top activity, skip router");
+        }
+        try {
+            Intent it = Intent.parseUri(action, Intent.URI_INTENT_SCHEME);
+            it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(it);
+            return true;
+        } catch (Throwable t) {
+            log("[cashsign] launchAds fail: " + t);
+            return false;
+        }
+    }
+
+    /**
+     * 等商城 activity 自己写出的 ad.query 响应，取走其中的 adEventPush（含一次性 token）。
+     * 只认 since 之后落盘的文件，避免拿到上一个任务的 token。
+     */
+    private static JSONObject waitMallPush(String code, long since) {
+        long end = System.currentTimeMillis() + T_AD_WAIT;
+        while (System.currentTimeMillis() < end) {
+            try {
+                if (com.piggyhand.fish.hook.FishMtopHook.respStamp(API_AD_QUERY) >= since - 1500L) {
+                    String body = com.piggyhand.fish.hook.FishMtopHook.readRespText(API_AD_QUERY);
+                    JSONObject o = body == null ? null : new JSONObject(body);
+                    JSONObject pb = pickPush(o, code);
+                    if (pb != null) return pb;
+                }
+            } catch (Throwable ignored) {
+            }
+            sleep(400);
+        }
+        return null;
+    }
+
+    /** 从 ad.query 回包挑出 adPositionCode 匹配的那条 adEventPush，附 _dur（停留秒数） */
+    private static JSONObject pickPush(JSONObject resp, String code) {
+        try {
+            JSONObject d = resp == null ? null : resp.optJSONObject("data");
+            if (d == null) return null;
+            String attrs = d.optString("attributes", "");
+            if (attrs.length() == 0) return null;
+            JSONObject a = new JSONObject(attrs);
+            JSONObject tc = a.optJSONObject("taskConfig");
+            if (tc == null) return null;
+            Iterator<String> it = tc.keys();
+            while (it.hasNext()) {
+                JSONObject blk = tc.optJSONObject(it.next());
+                if (blk == null) continue;
+                JSONObject pb = blk.optJSONObject("adEventPush");
+                if (pb == null) continue;
+                if (!code.equals(pb.optString("adPositionCode", ""))) continue;
+                if (pb.optString("token", "").length() == 0) continue;
+                // 服务端只认四字段：adPositionCode / eventType / token / implId
+                JSONObject out = new JSONObject();
+                out.put("adPositionCode", pb.optString("adPositionCode", ""));
+                out.put("eventType", pb.optString("eventType", "award"));
+                out.put("token", pb.optString("token", ""));
+                out.put("implId", pb.optString("implId", ""));
+                out.put("_dur", blk.optInt("rewardDuration", 20));
+                return out;
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    /** 上报返回这些错说明服务端已经记过这笔：商城页自身的 reporter / 上一次重试 */
+    private static boolean alreadyCounted(String err) {
+        return err != null && (err.indexOf("REACH_UPPER_LIMIT") >= 0
+                || err.indexOf("AWARD_REPEAT") >= 0);
+    }
+
+    /** 按 deliveryId 重查单任务（推完拿新的 taskParams.implId，或确认已 AWARDING） */
+    private static JSONObject findTask(Context ctx, String scene, String deliveryId) {
+        try {
+            JSONObject q = call(ctx, API_QUERY, "{\"sceneId\":\"" + scene + "\"}", T_QUERY);
+            JSONObject d = q == null ? null : q.optJSONObject("data");
+            JSONArray list = d == null ? null : d.optJSONArray("model");
+            if (list == null) return null;
+            for (int i = 0; i < list.length(); i++) {
+                JSONObject t = list.optJSONObject(i);
+                JSONObject tp = t == null ? null : t.optJSONObject("taskParams");
+                if (tp != null && deliveryId.equals(tp.optString("deliveryId", ""))) return t;
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    /** 拆 fleamarket://showAds?... 的 query 参数（值做 URL 解码） */
+    private static Map<String, String> parseAction(String action) {
+        Map<String, String> m = new HashMap<>();
+        if (action == null) return m;
+        int q = action.indexOf('?');
+        if (q < 0) return m;
+        for (String kv : action.substring(q + 1).split("&")) {
+            int eq = kv.indexOf('=');
+            if (eq <= 0) continue;
+            String k = kv.substring(0, eq);
+            String v = kv.substring(eq + 1);
+            try {
+                v = URLDecoder.decode(v, "UTF-8");
+            } catch (Throwable ignored) {
+            }
+            m.put(k, v);
+        }
+        return m;
+    }
+
+    /** 广告任务规格：视频类带 inlinePush；商城类带 code + action */
+    private static final class AdSpec {
+        String code;
+        String action;
+        JSONObject inlinePush;
+
+        static AdSpec parse(JSONObject task) {
+            try {
+                JSONObject assets = task.optJSONObject("assets");
+                String action = assets == null ? "" : assets.optString("action", "");
+                if (action.indexOf("showAds") < 0) return null;
+                Map<String, String> q = parseAction(action);
+                AdSpec s = new AdSpec();
+                s.action = action;
+                String inline = q.get("adEventPush");
+                if (inline != null && inline.length() > 0) {
+                    s.inlinePush = new JSONObject(inline); // 视频类：countdown 是契约字段，原样带上
+                    return s;
+                }
+                String code = q.get("adPositionCode");
+                if (code == null || code.length() == 0) return null;
+                s.code = code;
+                return s;
+            } catch (Throwable t) {
+                return null;
+            }
+        }
+    }
+
+    /* ---------------- ② 自动开红包 ---------------- */
     /**
      * 查 redEnvNum → 循环 open 直到归零。
      * 每 5 次重查一次 main 校准（open 回包不带剩余数，本地递减会与服务端漂移）。
