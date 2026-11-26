@@ -18,9 +18,11 @@ import org.json.JSONObject;
 /**
  * v1.4.9 「自动兑换」引擎 —— 赚闲鱼币提现 → 攒满自动兑支付宝现金红包10元：
  *
- * 触发（用户口径）：每日「赚游戏币任务」标识落 2 之后，自动检查一次：
- *   - RhCoinTask.run() 复核把标记推到 2 的时刻；
- *   - RhCoinTask.autoRunDaily 发现标识已是 2 而跳过的时刻（覆盖"10 点后才启动闲鱼"场景）。
+ * 触发（v1.5.74 起与「渠道是否全部收口」解耦）：
+ *   - RhCoinTask.run() 每轮跑完无条件调一次（不管标识是否推到 2）；
+ *   - RhCoinTask.autoRunDaily 发现标识已是 2 而跳过时，延迟 60s 调一次；
+ *   - CoinLogger 余额探针（90s±30%）每轮 tick() 一次，覆盖"10 点后才攒满 / 10 点后不重启"场景。
+ *   三处入口都只是"问一句"，兑不兑由下面三道硬性条件自行裁决。
  *
  * 硬性条件（自动流程须全过）：
  *   1. 游戏币余额 >= targetGamePoints（服务端当前 100000 = 10 元档，攒满即兑）；
@@ -78,10 +80,59 @@ public final class RhCoinExchange {
             RhFileLog.write("[exch] auto skip: " + h + " 点 < 10:00 商品未上新（不消耗当日次数，等下次进闲鱼）");
             return;
          }
-         RhFileLog.write("[exch] triggered: 标识=2 且窗口开启，执行今日唯一一次检查");
+         RhFileLog.write("[exch] triggered: 窗口开启且今日未处理，执行今日唯一一次检查");
          runCheck(ctx, false);
       } catch (Throwable t) {
          RhFileLog.write("[exch] onCoinDone err: " + t);
+      }
+   }
+
+   /* ================= v1.5.74 低成本重触发心跳 ================= */
+
+   /** 本进程今日是否已 tick 过（无论最终兑没兑）。跨天靠日期字符串自然失效。 */
+   private static volatile String tickDay = "";
+
+   /**
+    * 自动兑换的心跳探针 —— 由 90s±30% 的余额探针线程顺带调用（CoinLogger）。
+    *
+    * 为什么需要它（2026-11-26 本地日志实证）：兑换入口原先只有两处，都挂在「标识=2」上，
+    * 而标识=2 要求渠道全部收口，浏览类任务收不掉就永远到不了 2；同时 autoRunDaily 只在
+    * app 启动那一刻跑一次，用户 10 点前开机、之后不再重启，10 点后就没有任何检查入口。
+    * 当天余额 08:26 就攒到 106050，到 08:44 日志结束仍零兑换。
+    *
+    * 这里只做四道零请求判断，全部命中才进 onCoinDone：
+    *   1. 本进程今日未 tick 过（防同一进程反复走完整流程）
+    *   2. 今日兑换状态仍是 ST_NONE（已查/已兑直接静默返回，不刷日志）
+    *   3. 配置开启 且 当前小时 >= OPEN_HOUR
+    *   4. 引擎空闲（跑批期间不插队，避免和跑批抢同 api 的响应文件）
+    * 判断全部不打请求，进 onCoinDone 后才发余额查询，成本与一次余额探针同量级。
+    */
+   static void tick(Context ctx) {
+      try {
+         String today = new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date());
+         if (today.equals(tickDay)) return;
+         if (stateOf(ctx) != ST_NONE) return;
+
+         boolean on;
+         try {
+            ConfigManager c = ConfigManager.load();
+            on = c != null && c.coinExchange;
+         } catch (Throwable t) {
+            on = false; // 配置读不到就静默，等下一轮/手动
+         }
+         if (!on) return;
+
+         int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+         if (h < OPEN_HOUR) return;
+
+         if (FishTaskAuto.engineRunning()) return;
+
+         // 先置门再执行：runCheck 内部另有「每日 1 次」状态门，这里防的是同进程重入
+         tickDay = today;
+         RhFileLog.write("[exch] tick: 心跳命中（" + h + " 点 / 状态未处理 / 引擎空闲），执行检查");
+         onCoinDone(ctx);
+      } catch (Throwable t) {
+         RhFileLog.write("[exch] tick err: " + t);
       }
    }
 

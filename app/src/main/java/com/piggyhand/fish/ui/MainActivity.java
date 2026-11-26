@@ -503,14 +503,14 @@ public class MainActivity extends Activity {
                     : "\ud83e\ude99 赚游戏币任务已关闭", 0).show();
          }
       });
-      // v1.4.9 自动兑换：标识 2 后每日一次（≥10:00 且攒满即兑），手动点行不受限
+      // v1.5.74 自动兑换与「赚币标识2」解耦：只要 ≥10:00 且攒满，每日自动兑一次
       this.swCoinExchange.setOnSilent(var7.optBoolean("coinExchange", true));
       this.swCoinExchange.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
          @Override
          public void onToggle(boolean var1) {
             MainActivity.this.put("coinExchange", var1);
             Toast.makeText(MainActivity.this, var1
-                    ? "\ud83e\udde7 自动兑换已开启：赚币标识2后每日一次，≥10:00 且攒满 100000 自动兑支付宝红包"
+                    ? "\ud83e\udde7 自动兑换已开启：≥10:00 且攒满 100000 游戏币，每日自动兑一次支付宝红包"
                     : "\ud83e\udde7 自动兑换已关闭", 0).show();
          }
       });
@@ -705,7 +705,7 @@ public class MainActivity extends Activity {
          }
       });
       // v1.4.9 「自动兑换」行点击：手动执行一次检查+兑换（manual，不受每日 1 次/时间窗限制），
-      // 自动流程由 RhCoinTask 标识 2 挂点触发
+      // v1.5.74 自动流程改由「跑批收尾 + 90s 余额探针心跳」双入口触发，不再依赖赚币标识 2
       this.findViewById(R.id.rowCoinExchange).setOnClickListener(new OnClickListener() {
          public void onClick(View var1) {
             Toast.makeText(MainActivity.this, "\ud83e\udde7 正在执行兑换检查（查余额→攒满判定→兑换）…", 0).show();

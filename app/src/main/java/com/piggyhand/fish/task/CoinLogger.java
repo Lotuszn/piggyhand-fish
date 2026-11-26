@@ -65,6 +65,12 @@ final class CoinLogger {
                   log("[coinlog] engine running, probe skipped this round");
                } else {
                   coinBalanceSnapshot(var0);
+                  // v1.5.74：自动兑换心跳。放在 snapshot 之后且不共用它的 early-return——
+                  // snapshot 会被熔断/拒潮/时段概率跳轮，兑换检查不该被余额日志的熔断连坐。
+                  try {
+                     RhCoinExchange.tick(var0);
+                  } catch (Throwable ignored) {
+                  }
                }
             } catch (Throwable var2) {
             }
