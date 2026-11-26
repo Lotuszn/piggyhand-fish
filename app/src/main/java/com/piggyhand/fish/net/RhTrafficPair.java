@@ -112,6 +112,8 @@ public final class RhTrafficPair {
     private static String summarize(String s) {
         if (s == null) return "";
         String one = s.replace('\n', ' ').replace('\r', ' ');
+        // 请求体里的 asac 等凭证先脱敏，再截断（2026-11-26）
+        one = com.piggyhand.fish.core.RhSecret.maskJson(one);
         return one.length() > SUM_LEN ? one.substring(0, SUM_LEN) + "...(len=" + one.length() + ")" : one;
     }
 }

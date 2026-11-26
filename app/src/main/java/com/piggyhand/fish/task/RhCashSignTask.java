@@ -30,8 +30,8 @@ import de.robv.android.xposed.XposedBridge;
  *       AWARDING → scene.award({sceneId, deliveryId, implId, awardIndex})
  *     奖励是「红包个数」（rewards[].result.finalCount / ownCount，unit=个），不是金额。
  *  ② 自动开红包：signin.cash.main 取 redEnvNum → 循环 signin.cash.open 直到归零。
- *     main/open 都要求 data.asac（H5 硬编码 2A23B27Y9OK8KV7XVSGWIN），缺了恒报
- *     FAIL_SYS_BIZPARAM_MISSED::缺少业务参数asac。
+ *     main/open 都要求 data.asac（会话内从闲鱼自产请求里捕获，见 RhLocationContext），
+ *     缺了恒报 FAIL_SYS_BIZPARAM_MISSED::缺少业务参数asac。包内不放任何固定 asac 字面量。
  *
  * LVL 门（LvlLedger，rh_task_lvl.json）：每个 deliveryId 当日最多推进 2 次，
  * 跨天 ensure 自动清零；失败也计数，避免反复打同一任务把账号钉进风控窗口。
@@ -48,8 +48,6 @@ public final class RhCashSignTask {
     static final String API_MAIN = "mtop.idle.play.signin.cash.main";
     static final String API_OPEN = "mtop.idle.play.signin.cash.open";
 
-    /** H5 包内置 asac（pages/home index.js 常量 EG）；运行时优先用捕获值覆盖 */
-    private static final String H5_ASAC = "2A23B27Y9OK8KV7XVSGWIN";
     /** 开红包单轮上限：redEnvNum 异常大时防死循环（正常十几到几十） */
     private static final int OPEN_MAX = 120;
     /** 单接口等待上限 */
@@ -249,9 +247,15 @@ public final class RhCashSignTask {
         RhReport rep = new RhReport();
         try {
             rep.append("现金签到·自动开红包\n");
+            // asac 必须是本次会话捕获值：包内没有固定 asac，缺了就直说，不发缺参请求
+            String asac = asacOf();
+            if (asac == null || asac.length() == 0) {
+                rep.append("未捕获 asac：先在闲鱼里打开一次天天红包页（或让它跑一次请求），再执行\n");
+                return finish(ctx, rep, t0, "rh_tasks_cashopen.txt", "[cashsign] open");
+            }
             int left = queryRedEnvNum(ctx);
             if (left < 0) {
-                rep.append("查询剩余红包个数失败（main 超时或缺 asac）\n");
+                rep.append("查询剩余红包个数失败（main 超时）\n");
                 return finish(ctx, rep, t0, "rh_tasks_cashopen.txt", "[cashsign] open");
             }
             rep.append("剩余红包 ").append(left).append(" 个\n");
@@ -262,9 +266,10 @@ public final class RhCashSignTask {
 
             int opened = 0, failed = 0;
             long total = 0L;
+            String openBody = "{\"asac\":\"" + asac + "\"}"; // 复用同一份 body，避免循环里重复拼串
             int guard = Math.min(left, OPEN_MAX);
             for (int i = 0; i < guard; i++) {
-                JSONObject r = call(ctx, API_OPEN, "{\"asac\":\"" + asacOf() + "\"}", T_ACTION);
+                JSONObject r = call(ctx, API_OPEN, openBody, T_ACTION);
                 String e = errOf(r);
                 if (!"success".equals(e)) {
                     failed++;
@@ -385,7 +390,10 @@ public final class RhCashSignTask {
         return "7066";
     }
 
-    /** asac：配置 > 运行时捕获 > H5 内置常量 */
+    /**
+     * asac：配置 > 运行时捕获（RhLocationContext，来自闲鱼自产请求并持久化到 rh_loc.json）。
+     * 都没有 → 返回 null，由调用方判空后放弃，不发缺参请求（缺参请求会记账进风控）。
+     */
     static String asacOf() {
         try {
             ConfigManager cfg = ConfigManager.load();
@@ -399,7 +407,13 @@ public final class RhCashSignTask {
             if (a != null && a.trim().length() > 0) return a.trim();
         } catch (Throwable ignored) {
         }
-        return H5_ASAC;
+        return null;
+    }
+
+    /** 会话 asac 是否可用（面板/报告文案用） */
+    static boolean hasAsac() {
+        String a = asacOf();
+        return a != null && a.length() > 0;
     }
 
     private static String errOf(JSONObject r) {

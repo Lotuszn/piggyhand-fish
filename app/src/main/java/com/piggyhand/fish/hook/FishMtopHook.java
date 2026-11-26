@@ -156,7 +156,8 @@ public final class FishMtopHook {
                     // B 类日志体量控制：data 全量可达数 KB（feeds 等高频接口一天几十 MB），截断 300 字符保诊断线索
                     String d = raw;
                     if (d.length() > 300) d = d.substring(0, 300) + "...(len=" + d.length() + ")";
-                    log("[mtop-req] data = " + d);
+                    // asac/token 等会话凭证脱敏后再落盘（2026-11-26，凭据不得明文进 rh_file.log）
+                    log("[mtop-req] data = " + com.piggyhand.fish.core.RhSecret.maskJson(d));
                 }
             });
             log("mtop request spy armed");

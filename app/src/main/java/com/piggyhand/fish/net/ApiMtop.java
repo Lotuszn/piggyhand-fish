@@ -41,7 +41,7 @@ public final class ApiMtop {
                      var12 = var14;
                   }
 
-                  log("[mtop] headers " + var5);
+                  log("[mtop] headers " + maskHeaders(var5));
                }
 
                if (var6 != null && !var6.isEmpty()) {
@@ -106,6 +106,28 @@ public final class ApiMtop {
 
    private static String mask(String var0) {
       return var0 != null && var0.length() > 8 ? var0.substring(0, 4) + "***" + var0.substring(var0.length() - 4) : var0;
+   }
+
+   /**
+    * header 日志脱敏（2026-11-26）：asac 是会话凭证，原样进 logcat / rh_file.log
+    * 等于把凭据落盘。凡是凭据类键一律只留首尾各 4 位。
+    * 复杂度 O(n)，n = header 数（每个接口调用 1~2 个）。
+    */
+   private static String maskHeaders(java.util.Map<String, String> h) {
+      if (h == null) return "null";
+      StringBuilder sb = new StringBuilder("{");
+      boolean first = true;
+      for (java.util.Map.Entry<String, String> e : h.entrySet()) {
+         if (!first) sb.append(", ");
+         first = false;
+         String k = e.getKey();
+         String v = e.getValue();
+         String lk = k == null ? "" : k.toLowerCase();
+         boolean secret = lk.contains("asac") || lk.contains("token") || lk.contains("cookie")
+                 || lk.contains("session") || lk.contains("secret") || lk.contains("auth");
+         sb.append(k).append('=').append(secret ? mask(v) : v);
+      }
+      return sb.append('}').toString();
    }
 
    private static void log(String var0) {

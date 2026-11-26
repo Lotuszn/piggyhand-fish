@@ -87,7 +87,7 @@ public class ConfigManager {
     public boolean cashSignOpen = true;
     /** 现金签到场景 ID（活动切换时改这里即可，默认天天红包 7066） */
     public String cashSignScene = "7066";
-    /** 场景 asac：空 = 运行时取 RhLocationContext 捕获值，再退回 H5 包内置常量 */
+    /** 场景 asac（会话凭证）：空 = 只用 RhLocationContext 运行时捕获值；包内不存任何 asac 字面量 */
     public String cashSignAsac = "";
     /** 💬 禁用聊天页左滑进对方主页手势（RhChatHook 双层拦截：容器触摸+主页跳转） */
     public boolean noChatSwipe = false;
