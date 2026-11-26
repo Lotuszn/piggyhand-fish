@@ -303,10 +303,19 @@ final class LvlLedger {
 
    /** 共享 LVL 查询：当日该键已计满（>=2）→ 自动跑跳过 */
    public static boolean skipShared(Context ctx, String key) {
+      return skipShared(ctx, key, LVL_MAX);
+   }
+
+   /**
+    * 共享 LVL 查询（可指定上限）。循环任务（现金签到「看视频得红包 3 次」）需要当日做满
+    * maxTimes 次，固定上限 2 会让它永远差一次；上限由调用方按服务端下发的 maxTimes 给，
+    * 单次任务仍传 LVL_MAX，语义不变。
+    */
+   public static boolean skipShared(Context ctx, String key, int cap) {
       try {
          loadOnce(ctx != null ? ctx : RhRuntime.appCtx);
          ensure(dayOf(System.currentTimeMillis()));
-         return skip(key);
+         return get(key) >= Math.max(1, cap);
       } catch (Throwable t) {
          return false; // LVL 存档坏了不拦业务
       }
@@ -314,16 +323,22 @@ final class LvlLedger {
 
    /** 共享 LVL 计数 +1：每次引擎运行调用一次，当日累计到 2 后 skipShared 开始返回 true */
    public static void bumpShared(Context ctx, String key) {
+      bumpShared(ctx, key, LVL_MAX);
+   }
+
+   /** 共享 LVL 计数 +1（可指定上限）：达到 cap 后此键不再增长，与 skipShared(cap) 配套 */
+   public static void bumpShared(Context ctx, String key, int cap) {
       try {
          if (key == null || key.length() == 0) return;
          synchronized (LVL_SHARED_LOCK) {
             loadOnce(ctx != null ? ctx : RhRuntime.appCtx);
             ensure(dayOf(System.currentTimeMillis()));
+            int max = Math.max(1, cap);
             int v = get(key);
-            if (v < LVL_MAX) {
+            if (v < max) {
                lvlMap.put(key, v + 1);
                save();
-               log("[lvl] shared bump " + key + " -> " + (v + 1));
+               log("[lvl] shared bump " + key + " -> " + (v + 1) + "/" + max);
             }
          }
       } catch (Throwable t) {

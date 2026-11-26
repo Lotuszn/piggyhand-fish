@@ -64,6 +64,11 @@ public final class RhCashSignTask {
     /** 商城停留秒数上下限：rewardDuration 由回包给（15/20），夹在区间内防脏值 */
     private static final int AD_BROWSE_MIN = 12;
     private static final int AD_BROWSE_MAX = 32;
+    /**
+     * 单任务单轮最多推几轮。循环任务（desc 里写「3次」、progress.maxTimes=3）必须当日做满，
+     * 否则永远差一次；上限 3 与当前服务端下发的 maxTimes 一致，超过也没有第 4 次可做。
+     */
+    private static final int ROUNDS_MAX = 3;
 
     private static final Random RND = new Random();
     /** 进程内防重入：UI 连点 / 自启与手动撞车 */
@@ -84,6 +89,51 @@ public final class RhCashSignTask {
     private static void log(String msg) {
         XposedBridge.log("[RewardHook] " + msg);
         RhFileLog.write(msg);
+    }
+
+    /* ---------------- 进度读数（progress 对象是服务端权威口径） ----------------
+     * scene.query 的每条 task 带 progress：
+     *   times     已做次数（0..maxTimes）
+     *   maxTimes  当日上限（单次任务恒 1，循环任务 3）
+     *   needTimes 还差几次
+     *   reachLimit 是否封顶（true 时再推只会 REACH_UPPER_LIMIT）
+     *   status    progress 侧状态，与外层 task.status 同值
+     * 全部是字符串下发（"3"/"0"/"true"），optInt/optBoolean 读不到，必须走 optString 自己转。
+     */
+    private static int progInt(JSONObject task, String key, int def) {
+        try {
+            JSONObject p = task == null ? null : task.optJSONObject("progress");
+            if (p == null) return def;
+            String v = p.optString(key, "").trim();
+            if (v.length() == 0 || "-1".equals(v)) return def;
+            return Integer.parseInt(v);
+        } catch (Throwable t) {
+            return def;
+        }
+    }
+
+    private static boolean progBool(JSONObject task, String key) {
+        try {
+            JSONObject p = task == null ? null : task.optJSONObject("progress");
+            return p != null && "true".equalsIgnoreCase(p.optString(key, "").trim());
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** "2/3"，单次任务返回空串（不往报告里塞噪音） */
+    private static String progText(JSONObject task) {
+        int m = progInt(task, "maxTimes", 1);
+        if (m <= 1) return "";
+        return progInt(task, "times", 0) + "/" + m;
+    }
+
+    /** 报告用的短名：去掉「（3次）」这类后缀，避免一行放不下 */
+    private static String shortTitle(JSONObject task) {
+        String t = optTitle(task);
+        int i = t.indexOf('（');
+        if (i > 0) t = t.substring(0, i);
+        return t.length() > 8 ? t.substring(0, 8) : t;
     }
 
     /* ---------------- 引擎就绪自启 ---------------- */
@@ -162,28 +212,49 @@ public final class RhCashSignTask {
                 String status = task.optString("status", "");
                 if (deliveryId.length() == 0) continue;
 
-                if ("COMPLETE".equals(status)) {
+                int maxTimes = Math.max(1, progInt(task, "maxTimes", 1));
+                int times = progInt(task, "times", 0);
+                boolean capped = progBool(task, "reachLimit") || times >= maxTimes;
+                // 循环任务（maxTimes>1）在没做满前不能按 COMPLETE 跳过：
+                // 服务端中途也可能回 COMPLETE，真正的判据是 times/needTimes/reachLimit
+                if ("COMPLETE".equals(status) && capped) {
                     skip++;
                     continue;
                 }
                 String lvlKey = "cashsign:" + deliveryId;
-                if (LvlLedger.skipShared(ctx, lvlKey)) {
-                    rep.append("· ").append(title).append(" 当日已推进 2 次，跳过\n");
+                // 循环任务的当日额度 = maxTimes（服务端自己也只有这么多次），单次任务保持 2
+                int cap = Math.min(Math.max(2, maxTimes), ROUNDS_MAX);
+                if (LvlLedger.skipShared(ctx, lvlKey, cap)) {
+                    rep.append("· ").append(title).append(" 当日已推进 ").append(cap)
+                            .append(" 次，跳过\n");
                     skip++;
                     continue;
                 }
-                String msg = advanceOne(ctx, task, tp, scene);
-                // 无论成败都计数：失败重打只会加深风控，留给次日/手动
-                LvlLedger.bumpShared(ctx, lvlKey);
+                String msg = advanceRounds(ctx, task, tp, scene, lvlKey, cap);
                 if (msg.startsWith("OK")) {
                     done++;
                     rep.append("✓ ").append(title).append(' ').append(msg).append('\n');
+                } else if (msg.startsWith("SKIP")) {
+                    skip++;
+                    rep.append("· ").append(title).append(' ')
+                            .append(msg.substring(4).trim()).append('\n');
                 } else {
                     fail++;
                     rep.append("✗ ").append(title).append(' ').append(msg).append('\n');
                 }
                 sleep(1100 + RND.nextInt(900)); // 任务间节奏抖动，避免固定间隔特征
             }
+            // 循环任务单独回显一次进度（times/maxTimes 是服务端权威口径，别只看 status）
+            StringBuilder pg = new StringBuilder();
+            for (int i = 0; list != null && i < list.length(); i++) {
+                JSONObject t = list.optJSONObject(i);
+                if (t == null) continue;
+                String pt = progText(t);
+                if (pt.length() == 0) continue;
+                if (pg.length() > 0) pg.append(" · ");
+                pg.append(shortTitle(t)).append(' ').append(pt);
+            }
+            if (pg.length() > 0) rep.append("循环任务进度：").append(clip(pg.toString())).append('\n');
             rep.append("小结：推进 ").append(done).append(" · 跳过 ").append(skip)
                     .append(" · 失败 ").append(fail).append('\n');
             return finish(ctx, rep, t0, "rh_tasks_cashsign.txt", "[cashsign] claim");
@@ -193,6 +264,65 @@ public final class RhCashSignTask {
         } finally {
             claiming = false;
         }
+    }
+
+    /**
+     * 推进一个任务；循环任务（maxTimes>1）按轮次做满。
+     *
+     * 每轮都是一次完整的 receive→(push/trigger)→award，轮间必须重查 progress：
+     *   times 未到 maxTimes、reachLimit=false、status 不是 COMPLETE 才继续。
+     * 每轮单独过 LVL 门并计数（cap 由调用方按 maxTimes 放宽），失败不重打——
+     * 失败重打只会加深风控，留给次日或手动。
+     */
+    private static String advanceRounds(Context ctx, JSONObject task, JSONObject tp,
+                                        String scene, String lvlKey, int cap) {
+        JSONObject t = task;
+        JSONObject p = tp;
+        String id = tp == null ? "" : tp.optString("deliveryId", "");
+        // status=COMPLETE 但次数没满：服务端没放行下一轮（H5 此时同样点不动），本轮无事可做
+        if ("COMPLETE".equals(task.optString("status", ""))
+                && !progBool(task, "reachLimit")
+                && progInt(task, "times", 0) < Math.max(1, progInt(task, "maxTimes", 1))) {
+            log("[cashsign] " + id + " 进度 " + progText(task) + " 但 status=COMPLETE，服务端未放行下一轮");
+            return "SKIP 进度 " + progText(task) + "（服务端未放行下一轮）";
+        }
+        String last = "";
+        int rounds = 0;
+        while (rounds < ROUNDS_MAX) {
+            if (LvlLedger.skipShared(ctx, lvlKey, cap)) break;
+            last = advanceOne(ctx, t, p, scene);
+            LvlLedger.bumpShared(ctx, lvlKey, cap);
+            if (!last.startsWith("OK")) return last + tail(t, rounds);
+            rounds++;
+            int maxTimes = Math.max(1, progInt(t, "maxTimes", 1));
+            if (maxTimes <= 1) break;          // 单次任务一轮即完
+            sleep(1500L + RND.nextInt(1200));
+            JSONObject t2 = findTask(ctx, scene, id);
+            if (t2 == null) break;
+            int mt2 = Math.max(maxTimes, progInt(t2, "maxTimes", maxTimes));
+            int ti2 = progInt(t2, "times", rounds);
+            t = t2;
+            if (ti2 >= mt2) break;             // 做满了
+            if (progBool(t2, "reachLimit")) break;
+            if ("COMPLETE".equals(t2.optString("status", ""))) {
+                // 次数没满但服务端锁了下限：今天到此为止，明天再续
+                log("[cashsign] " + id + " 次数 " + ti2 + "/" + mt2 + " 但 status=COMPLETE，停止本轮");
+                break;
+            }
+            p = t2.optJSONObject("taskParams");
+            if (p == null) p = new JSONObject();
+        }
+        return last + tail(t, rounds);
+    }
+
+    /** 多轮/循环任务补一句「· 3 轮 · 3/3」；单次任务且一轮时不加噪音 */
+    private static String tail(JSONObject t, int rounds) {
+        String prog = progText(t);
+        if (rounds <= 1 && prog.length() == 0) return "";
+        StringBuilder sb = new StringBuilder();
+        if (rounds > 1) sb.append(" · ").append(rounds).append(" 轮");
+        if (prog.length() > 0) sb.append(" · ").append(prog);
+        return sb.toString();
     }
 
     /** 单任务推进一轮：按 status 决定调哪个接口，最多推进到 AWARDING 并领掉 */
