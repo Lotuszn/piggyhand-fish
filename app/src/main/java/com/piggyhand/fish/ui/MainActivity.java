@@ -178,6 +178,16 @@ public class MainActivity extends Activity {
    private TextView tvDrawerArrowPace;
    private boolean drawerOpenPace = false;
    private final AtomicBoolean drawerBusyPace = new AtomicBoolean(false);
+   // 2026-11-26 「现金签到」一级菜单抽屉：自动领红包 + 自动开红包
+   private View drawerHead5;
+   private View drawerContent5;
+   private TextView tvDrawerArrow5;
+   private boolean drawerOpen5 = false;
+   private final AtomicBoolean drawerBusy5 = new AtomicBoolean(false);
+   private LiquidSwitch swCashSignClaim;
+   private LiquidSwitch swCashOpen;
+   private TextView tvCashSignState;
+   private TextView tvCashOpenState;
    private LiquidSlider slPaceQuery;
    private LiquidSlider slPaceSubmit;
    private LiquidSlider slPaceClaim;
@@ -354,6 +364,13 @@ public class MainActivity extends Activity {
       this.drawerHeadPace = this.findViewById(R.id.drawerHeadPace);
       this.drawerContentPace = this.findViewById(R.id.drawerContentPace);
       this.tvDrawerArrowPace = (TextView)this.findViewById(R.id.tvDrawerArrowPace);
+      this.drawerHead5 = this.findViewById(R.id.drawerHead5);
+      this.drawerContent5 = this.findViewById(R.id.drawerContent5);
+      this.tvDrawerArrow5 = (TextView)this.findViewById(R.id.tvDrawerArrow5);
+      this.swCashSignClaim = (LiquidSwitch)this.findViewById(R.id.swCashSignClaim);
+      this.swCashOpen = (LiquidSwitch)this.findViewById(R.id.swCashOpen);
+      this.tvCashSignState = (TextView)this.findViewById(R.id.tvCashSignState);
+      this.tvCashOpenState = (TextView)this.findViewById(R.id.tvCashOpenState);
       this.slPaceQuery = (LiquidSlider)this.findViewById(R.id.slPaceQuery);
       this.slPaceSubmit = (LiquidSlider)this.findViewById(R.id.slPaceSubmit);
       this.slPaceClaim = (LiquidSlider)this.findViewById(R.id.slPaceClaim);
@@ -491,6 +508,28 @@ public class MainActivity extends Activity {
          public void onToggle(boolean var1) {
             MainActivity.this.put("cashClaim", var1);
             Toast.makeText(MainActivity.this, var1 ? "\ud83e\udde7 自动开红包已开启：开奖当天自动领取" : "\ud83e\udde7 自动开红包已关闭", 0).show();
+         }
+      });
+      // 2026-11-26 现金签到：自动领红包（scene.* 全量推进，LVL 门每日 2 次/任务）
+      this.swCashSignClaim.setOnSilent(var7.optBoolean("cashSignClaim", true));
+      this.swCashSignClaim.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+         @Override
+         public void onToggle(boolean var1) {
+            MainActivity.this.put("cashSignClaim", var1);
+            Toast.makeText(MainActivity.this, var1
+                    ? "\ud83e\udde7 自动领红包已开启：打开闲鱼自动把「更多红包」任务跑一遍"
+                    : "\ud83e\udde7 自动领红包已关闭", 0).show();
+         }
+      });
+      // 2026-11-26 现金签到：自动开红包（查剩余个数 → 开到归零）
+      this.swCashOpen.setOnSilent(var7.optBoolean("cashSignOpen", true));
+      this.swCashOpen.setOnToggleListener(new LiquidSwitch.OnToggleListener() {
+         @Override
+         public void onToggle(boolean var1) {
+            MainActivity.this.put("cashSignOpen", var1);
+            Toast.makeText(MainActivity.this, var1
+                    ? "\ud83c\udf81 自动开红包已开启：打开闲鱼自动开到剩余个数归零"
+                    : "\ud83c\udf81 自动开红包已关闭", 0).show();
          }
       });
       this.swCoinGame.setOnSilent(var7.optBoolean("coinGame", true));
@@ -997,6 +1036,26 @@ public class MainActivity extends Activity {
                }
             }
          );
+      // 2026-11-26 「现金签到」抽屉展开/收起（与鱼塘同一套动画）
+      this.drawerHead5
+         .setOnClickListener(
+            new OnClickListener() {
+               public void onClick(View var1) {
+                  if (!MainActivity.this.drawerBusy5.get()) {
+                     MainActivity.this.drawerOpen5 = !MainActivity.this.drawerOpen5;
+                     MainActivity.this.tvDrawerArrow5
+                        .animate()
+                        .rotation(MainActivity.this.drawerOpen5 ? 0.0F : -90.0F)
+                        .setDuration(MainActivity.this.drawerOpen5 ? 260L : 200L)
+                        .start();
+                     MainActivity.this.animateDrawer(
+                        (ViewGroup)MainActivity.this.drawerContent5,
+                        MainActivity.this.drawerOpen5,
+                        MainActivity.this.drawerBusy5);
+                  }
+               }
+            }
+         );
       this.findViewById(R.id.rowCashJoin).setOnClickListener(new OnClickListener() {
          public void onClick(View var1) {
             final long var2 = System.currentTimeMillis() - 3000L;
@@ -1083,6 +1142,72 @@ public class MainActivity extends Activity {
                   }
                }
             }, "rh-cash-ui").start();
+         }
+      });
+      // 2026-11-26 现金签到·自动领红包：点整行立即跑一轮（开关只管自启，不影响手动）
+      this.findViewById(R.id.rowCashSign).setOnClickListener(new OnClickListener() {
+         public void onClick(View var1) {
+            MainActivity.this.toastUi("\ud83e\udde7 正在跑更多红包任务…");
+            new Thread(new Runnable() {
+               @Override
+               public void run() {
+                  // 先存旧报告快照：轮询只认"内容变了"的那一份，避免把昨天的报告当本轮结果
+                  String before = MainActivity.socketCmd("CASHSIGN_REPORT");
+                  boolean var1 = MainActivity.this.kickEngine("CASHSIGN");
+                  if (!var1) {
+                     MainActivity.this.toastUi("闲鱼未唤醒，正在打开闲鱼执行…");
+                     MainActivity.this.openFishFront();
+
+                     for (int i = 0; i < 8 && !var1; i++) {
+                        MainActivity.sleepQuiet(1500L);
+                        var1 = MainActivity.this.kickEngine("CASHSIGN");
+                     }
+                  }
+
+                  String rep = var1
+                        ? MainActivity.pollReportDelta("CASHSIGN_REPORT", "自动领红包", before, 40)
+                        : null;
+                  if (rep == null) {
+                     MainActivity.this.toastUi("\ud83e\udde7 未拿到报告：先打开闲鱼（引擎随进程加载）再点");
+                     return;
+                  }
+                  MainActivity.this.toastUi(MainActivity.summarizeCashSign(rep));
+                  MainActivity.this.refreshCashSignState();
+               }
+            }, "rh-cashsign-ui").start();
+         }
+      });
+      // 2026-11-26 现金签到·自动开红包：查 redEnvNum → 循环 open 到归零
+      this.findViewById(R.id.rowCashOpen).setOnClickListener(new OnClickListener() {
+         public void onClick(View var1) {
+            MainActivity.this.toastUi("\ud83c\udf81 正在开红包…");
+            new Thread(new Runnable() {
+               @Override
+               public void run() {
+                  String before = MainActivity.socketCmd("CASHOPEN_REPORT");
+                  boolean var1 = MainActivity.this.kickEngine("CASHOPEN");
+                  if (!var1) {
+                     MainActivity.this.toastUi("闲鱼未唤醒，正在打开闲鱼执行…");
+                     MainActivity.this.openFishFront();
+
+                     for (int i = 0; i < 8 && !var1; i++) {
+                        MainActivity.sleepQuiet(1500L);
+                        var1 = MainActivity.this.kickEngine("CASHOPEN");
+                     }
+                  }
+
+                  // 开红包是逐个开，几十个要点时间：轮询窗口放宽到 80×1.5s=120s
+                  String rep = var1
+                        ? MainActivity.pollReportDelta("CASHOPEN_REPORT", "自动开红包", before, 80)
+                        : null;
+                  if (rep == null) {
+                     MainActivity.this.toastUi("\ud83c\udf81 未拿到报告：先打开闲鱼（引擎随进程加载）再点");
+                     return;
+                  }
+                  MainActivity.this.toastUi(MainActivity.summarizeCashOpen(rep));
+                  MainActivity.this.refreshCashSignState();
+               }
+            }, "rh-cashopen-ui").start();
          }
       });
       this.tvStatusMeta.setOnClickListener(new OnClickListener() {
@@ -1291,6 +1416,7 @@ public class MainActivity extends Activity {
       this.startStateCheck();
       this.startCoinUiLoop();
       this.refreshCashState();
+      this.refreshCashSignState();
    }
 
    private void startStateCheck() {
@@ -2430,6 +2556,106 @@ public class MainActivity extends Activity {
             });
          }
       }, "rh-cash-state").start();
+   }
+
+   /**
+    * 轮询报告直到「写入新内容」。
+    * before 是触发前拿到的旧报告全文；只有 body 变了且含 marker 才算本轮结果，
+    * 免得上一次（甚至昨天）的报告被当成本次回执。
+    */
+   private static String pollReportDelta(String cmd, String marker, String before, int tries) {
+      for (int i = 0; i < tries; i++) {
+         sleepQuiet(1500L);
+         String body = socketCmd(cmd);
+         if (body == null || body.length() == 0) {
+            continue; // 引擎刚起、文件还没生成：继续等，不提前放弃
+         }
+         if (body.equals(before)) {
+            continue; // 还是旧的那份，任务尚未收尾
+         }
+         if (marker != null && !body.contains(marker)) {
+            continue;
+         }
+         return body;
+      }
+      return null;
+   }
+
+   /** 领红包回执 → 一行结论：推进几条、跳过几条、失败几条、红包共几个 */
+   private static String summarizeCashSign(String var0) {
+      if (var0 == null) return "\ud83e\udde7 没拿到结果：先打开闲鱼再来点";
+      if (var0.contains("查询任务清单超时")) return "\ud83e\udde7 任务清单超时，隔一分钟再点";
+      if (var0.contains("查询失败")) return "\ud83e\udde7 任务清单拉取失败，详情见日志";
+
+      int done = 0, skip = 0, fail = 0, red = 0;
+      Matcher m = Pattern.compile("小结：推进 (\\d+) · 跳过 (\\d+) · 失败 (\\d+)").matcher(var0);
+      if (m.find()) {
+         done = Integer.parseInt(m.group(1));
+         skip = Integer.parseInt(m.group(2));
+         fail = Integer.parseInt(m.group(3));
+      } else {
+         // 报告被截断时退化成数行数
+         for (String line : var0.split("\n")) {
+            if (line.startsWith("✓")) done++;
+            else if (line.startsWith("✗")) fail++;
+         }
+      }
+      Matcher r = Pattern.compile("红包\\+(\\d+)个").matcher(var0);
+      while (r.find()) red += Integer.parseInt(r.group(1));
+
+      String head = "\ud83e\udde7 领红包：推进 " + done + " · 跳过 " + skip + " · 失败 " + fail;
+      return red > 0 ? head + "，红包 +" + red + " 个" : head;
+   }
+
+   /** 开红包回执 → 一行结论：开了几个、还剩几个 */
+   private static String summarizeCashOpen(String var0) {
+      if (var0 == null) return "\ud83c\udf81 没拿到结果：先打开闲鱼再来点";
+      if (var0.contains("查询剩余红包个数失败")) return "\ud83c\udf81 剩余个数查不到（asac 或网络），隔一分钟再点";
+      if (var0.contains("无需开红包")) return "\ud83c\udf81 剩余 0 个，没有可开的";
+
+      Matcher m = Pattern.compile("已开 (\\d+) 个.*剩余 (\\d+|\\?) 个").matcher(var0);
+      if (m.find()) {
+         return "\ud83c\udf81 开了 " + m.group(1) + " 个，剩余 " + m.group(2) + " 个";
+      }
+      return "\ud83c\udf81 已执行，详情见日志";
+   }
+
+   /** 拉 CASHSIGN_STATE（两个报告末行）刷到面板，不产生任何网络请求 */
+   private void refreshCashSignState() {
+      new Thread(new Runnable() {
+         @Override
+         public void run() {
+            final String var1 = MainActivity.socketCmd("CASHSIGN_STATE");
+            MainActivity.this.runUi(new Runnable() {
+               @Override
+               public void run() {
+                  MainActivity.this.applyCashSignState(var1);
+               }
+            });
+         }
+      }, "rh-cashsign-state").start();
+   }
+
+   /** 解析 "SIGN|...#OPEN|..."：前半给领红包行，后半给开红包行 */
+   private void applyCashSignState(String var1) {
+      String sign = null;
+      String open = null;
+      if (var1 != null) {
+         int cut = var1.indexOf("#OPEN|");
+         if (cut > 0) {
+            sign = var1.substring(0, cut);
+            open = var1.substring(cut + 6);
+            if (sign.startsWith("SIGN|")) sign = sign.substring(5);
+         } else {
+            sign = var1;
+         }
+      }
+      if (this.tvCashSignState != null) {
+         this.tvCashSignState.setText(sign == null ? "今日未领（引擎未在线）" : sign);
+      }
+      if (this.tvCashOpenState != null) {
+         this.tvCashOpenState.setText(open == null ? "今日未开（引擎未在线）" : open);
+      }
    }
 
    private void applyCashState(String var1) {

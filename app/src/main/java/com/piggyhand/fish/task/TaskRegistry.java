@@ -84,6 +84,12 @@ public final class TaskRegistry implements EngineHook {
             log("[autorun] join fail: " + t);
         }
         try {
+            // 2026-11-26 现金签到：scene.* 任务面板全量推进 + 红包开到 0
+            RhCashSignTask.autoRunDaily(appCtx);
+        } catch (Throwable t) {
+            log("[autorun] cashsign fail: " + t);
+        }
+        try {
             RhOlivertask.autoRunDailyExp(appCtx);
         } catch (Throwable t) {
             log("[autorun] oliver-exp fail: " + t);
@@ -114,6 +120,19 @@ public final class TaskRegistry implements EngineHook {
             case "JOIN": // v1.2.9 手动投币一轮（后台执行，结果 JOIN_REPORT 读）
                 async("rh-cash-join-one", "[join] manual", () -> RhCashJoin.run(ctx));
                 return "OK started";
+            case "CASHSIGN": // 2026-11-26 手动推进一轮「更多红包」任务（结果 CASHSIGN_REPORT 读）
+                async("rh-cashsign", "[cashsign] manual claim", () -> RhCashSignTask.runClaim(ctx));
+                return "OK started";
+            case "CASHOPEN": // 2026-11-26 手动开红包到归零（结果 CASHOPEN_REPORT 读）
+                async("rh-cashopen", "[cashsign] manual open", () -> RhCashSignTask.runOpen(ctx));
+                return "OK started";
+            case "CASHSIGN_STATE": // 面板状态条：SIGN|... #OPEN|...
+                try {
+                    return "SIGN|" + RhCashSignTask.stateText(ctx, false)
+                            + "#OPEN|" + RhCashSignTask.stateText(ctx, true);
+                } catch (Throwable t) {
+                    return "NONE";
+                }
             case "CASH_STATE": // v1.2.9 两组状态合并回传：CLAIM|...#JOIN|...
                 try {
                     return "CLAIM|" + RhCashClaim.stateText(ctx)

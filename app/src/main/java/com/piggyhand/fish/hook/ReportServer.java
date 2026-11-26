@@ -142,6 +142,23 @@ final class ReportServer {
                               // v1.2.9 开红包报告读取
                               body = RespStore.readReportFile("rh_tasks_cash.txt");
                               if (body == null) body = "NO_REPORT";
+                           } else if (req != null && req.startsWith("CASHSIGN_REPORT")) {
+                              // 2026-11-26 现金签到·自动领红包报告（必须先于 CASHSIGN 判断）
+                              body = RespStore.readReportFile("rh_tasks_cashsign.txt");
+                              if (body == null) body = "NO_REPORT";
+                           } else if (req != null && req.startsWith("CASHOPEN_REPORT")) {
+                              // 2026-11-26 现金签到·自动开红包报告
+                              body = RespStore.readReportFile("rh_tasks_cashopen.txt");
+                              if (body == null) body = "NO_REPORT";
+                           } else if (req != null && req.startsWith("CASHSIGN_STATE")) {
+                              // 面板状态条（读报告末行，不发请求）
+                              body = FishMtopHook.dispatch("CASHSIGN_STATE", null, "NONE");
+                           } else if (req != null && req.trim().equals("CASHSIGN")) {
+                              // 手动推进一轮任务面板（结果 CASHSIGN_REPORT 读）
+                              body = FishMtopHook.dispatch("CASHSIGN", null, "OK started");
+                           } else if (req != null && req.trim().equals("CASHOPEN")) {
+                              // 手动开红包到归零（结果 CASHOPEN_REPORT 读）
+                              body = FishMtopHook.dispatch("CASHOPEN", null, "OK started");
                            } else if (req != null && req.startsWith("JOIN_REPORT")) {
                               // v1.2.9 投币报告读取（必须先于 JOIN 的前缀匹配）
                               body = RespStore.readReportFile("rh_tasks_join.txt");

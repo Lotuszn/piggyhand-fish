@@ -80,6 +80,15 @@ public class ConfigManager {
     public boolean cycleChallenge = true;
     public boolean cashClaim = true;     // 瓜分现金红包
     public boolean cashJoin = true;      // 瓜分现金报名
+    /** 🧧 现金签到·自动领红包（2026-11-26）：天天红包「更多红包」任务面板，
+     *  走 scene.query/receive/trigger/award 四接口全量协议完成，每个 deliveryId 受 LVL 门每日 2 次限次 */
+    public boolean cashSignClaim = true;
+    /** 🧧 现金签到·自动开红包：先查 signin.cash.main 的 redEnvNum，再循环 signin.cash.open 直到归零 */
+    public boolean cashSignOpen = true;
+    /** 现金签到场景 ID（活动切换时改这里即可，默认天天红包 7066） */
+    public String cashSignScene = "7066";
+    /** 场景 asac：空 = 运行时取 RhLocationContext 捕获值，再退回 H5 包内置常量 */
+    public String cashSignAsac = "";
     /** 💬 禁用聊天页左滑进对方主页手势（RhChatHook 双层拦截：容器触摸+主页跳转） */
     public boolean noChatSwipe = false;
 
@@ -267,6 +276,10 @@ public class ConfigManager {
             c.cycleChallenge = o.optBoolean("cycleChallenge", true);
             c.cashClaim = o.optBoolean("cashClaim", true);
             c.cashJoin = o.optBoolean("cashJoin", true);
+            c.cashSignClaim = o.optBoolean("cashSignClaim", true);
+            c.cashSignOpen = o.optBoolean("cashSignOpen", true);
+            c.cashSignScene = o.optString("cashSignScene", "7066");
+            c.cashSignAsac = o.optString("cashSignAsac", "");
             c.noChatSwipe = o.optBoolean("noChatSwipe", false);
             c.vdKeepAliveOn = o.optBoolean("vdKeepAliveOn", true);
             c.hideIcon = o.optBoolean("hideIcon", false);
