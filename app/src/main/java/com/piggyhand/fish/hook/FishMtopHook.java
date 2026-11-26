@@ -983,7 +983,10 @@ public final class FishMtopHook {
         // 注意 "mtop.taobao.idle" 不带点：兼容 mtop.taobao.idlemtopsearch.*（搜索域）
         // 11-10 补 "mtop.idle."：圈数挑战三接口（multi.day.challenge / challenge.idleCoinSign / interact.cycle.challenge）
         // 用这个短命名空间，之前响应全被丢弃导致只有请求没报文
-        if ((la.startsWith("mtop.taobao.idle") || la.startsWith("mtop.idle."))
+        // 11-26 补 "mtop.taobao.pentaprism"：天天红包「更多红包」任务场景四接口
+        // （scene.query / trigger / receive / award），原白名单不含该域名 → 响应只进请求侧不进落盘
+        if ((la.startsWith("mtop.taobao.idle") || la.startsWith("mtop.idle.")
+                || la.startsWith("mtop.taobao.pentaprism"))
                 && !la.contains("device.report")
                 && !la.contains("ut.log")
                 && !la.contains("highway.upload")
@@ -1041,6 +1044,14 @@ public final class FishMtopHook {
     public static void feedRespCandidate(Object resp, String api) { // 跨包共享：net.ApiDirect 响应通道（模块化 2026-11-15）
         if (resp == null) return;
         try {
+            // 非响应载体直接丢弃，别进 resp-diag 噪音：回调里混着 Context/枚举/字符串参数
+            if (resp instanceof String || resp instanceof Number || resp instanceof Boolean) return;
+            // com.taobao.idlefish.protocol.net.api.Phase 是枚举（request/response/callback 阶段标记），
+            // ApiCallBack.onProcess 的参数，曾被当成"响应但类名不认"刷屏诊断日志
+            if (resp.getClass().getName().endsWith(".Phase")) return;
+            // ① 闲鱼自有协议栈响应（ApiCallBack.onSuccess 参数）
+            if (feedProtoResp(resp)) return;
+            // ② 标准 mtopsdk 响应
             boolean fed = handleMtopFinishEvent(null, resp);
             if (fed) {
                 log("[direct-cb] captured via proxy callback: " + api);
@@ -1048,6 +1059,111 @@ public final class FishMtopHook {
         } catch (Throwable t) {
             logLimit("[direct-cb] feed fail: " + t);
         }
+    }
+
+    /**
+     * 闲鱼自有协议栈响应落盘（2026-11-26）。
+     * ApiCallBack.onSuccess 的唯一参数类型 com.taobao.idlefish.protocol.net.ResponseParameter，
+     * 字段 api/version/code/msg/ret/data/mtopBaseReturn——不是 MtopResponse 子类，
+     * 原 handleMtopFinishEvent 的类名校验会整条丢弃，导致 scene.* 直调"发了没收"。
+     * 归一成 mtop 风格 body（{"api","v","ret":[code::msg],"data"}）写 rh_resp_<crc>.json，
+     * 引擎 callApi 与 CALL 命令不用改读法。
+     * @return true = 命中 ResponseParameter（无论落盘成败，调用方不再走 mtopsdk 分支）
+     */
+    private static boolean feedProtoResp(Object resp) {
+        boolean isRP = false;
+        for (Class<?> k = resp.getClass(); k != null && k != Object.class; k = k.getSuperclass()) {
+            if (k.getName().endsWith(".ResponseParameter")) {
+                isRP = true;
+                break;
+            }
+        }
+        if (!isRP) return false;
+        Object apiO = null, verO = null, codeO = null, msgO = null, dataO = null, retO = null, baseO = null;
+        try { apiO = Reflect.callMethod(resp, "getApi"); } catch (Throwable ignored) {}
+        try { verO = Reflect.callMethod(resp, "getVersion"); } catch (Throwable ignored) {}
+        try { codeO = Reflect.callMethod(resp, "getCode"); } catch (Throwable ignored) {}
+        try { msgO = Reflect.callMethod(resp, "getMsg"); } catch (Throwable ignored) {}
+        try { dataO = Reflect.callMethod(resp, "getData"); } catch (Throwable ignored) {}
+        try { retO = Reflect.callMethod(resp, "getRet"); } catch (Throwable ignored) {}
+        try { baseO = Reflect.callMethod(resp, "getMtopBaseReturn"); } catch (Throwable ignored) {}
+        String api = apiO == null ? "unknown" : String.valueOf(apiO);
+        String code = codeO == null ? "" : String.valueOf(codeO);
+        String msg = msgO == null ? "" : String.valueOf(msgO);
+        try {
+            org.json.JSONObject root = new org.json.JSONObject();
+            root.put("api", api);
+            root.put("v", verO == null ? "1.0" : String.valueOf(verO));
+            org.json.JSONArray ret = new org.json.JSONArray();
+            if (retO instanceof Object[]) {
+                for (Object r : (Object[]) retO) ret.put(String.valueOf(r));
+            }
+            // scene.* 的成功判定在 JS 侧是 data.errorCode==="success"，
+            // code/msg 也要以 mtop ret 形态留给引擎：ret[0] = code::msg
+            if (ret.length() == 0 && (code.length() > 0 || msg.length() > 0)) {
+                ret.put(code + "::" + msg);
+            }
+            root.put("ret", ret);
+            Object payload = dataO != null ? dataO : baseO;
+            if (payload != null) root.put("data", jsonOf(payload, 0));
+            root.put("proto", Boolean.TRUE); // 标记来源，便于与 mtopsdk 落盘区分
+            String body = root.toString();
+            boolean written = RespStore.writeTaskResp(api, body);
+            if (written) {
+                log("[task-resp] captured(proto) " + api + " code=" + code);
+                try {
+                    RhTrafficPair.onResponse(api, body);
+                } catch (Throwable ignored) {
+                }
+            } else {
+                logLimit("[task-resp] proto discard " + api + " code=" + code + " msg=" + msg);
+            }
+        } catch (Throwable t) {
+            logLimit("[task-resp] proto fail " + api + ": " + t);
+        }
+        return true;
+    }
+
+    /**
+     * 把任意响应载荷转成 org.json 可写的结构。
+     * fastjson 的 JSONObject/JSONArray 分别实现 Map/Iterable，这里靠接口类型递归，
+     * 不引第三方依赖（模块只 compileOnly Xposed API）。depth 上限防自引用递归。
+     */
+    private static Object jsonOf(Object o, int depth) {
+        if (o == null) return org.json.JSONObject.NULL;
+        if (depth > 8) return String.valueOf(o);
+        if (o instanceof String || o instanceof Number || o instanceof Boolean) return o;
+        if (o instanceof java.util.Map) {
+            org.json.JSONObject j = new org.json.JSONObject();
+            for (java.util.Map.Entry<?, ?> e : ((java.util.Map<?, ?>) o).entrySet()) {
+                try {
+                    j.put(String.valueOf(e.getKey()), jsonOf(e.getValue(), depth + 1));
+                } catch (Throwable ignored) {
+                }
+            }
+            return j;
+        }
+        if (o instanceof Iterable) {
+            org.json.JSONArray a = new org.json.JSONArray();
+            for (Object v : (Iterable<?>) o) a.put(jsonOf(v, depth + 1));
+            return a;
+        }
+        if (o.getClass().isArray()) {
+            org.json.JSONArray a = new org.json.JSONArray();
+            int n = java.lang.reflect.Array.getLength(o);
+            for (int i = 0; i < n; i++) {
+                a.put(jsonOf(java.lang.reflect.Array.get(o, i), depth + 1));
+            }
+            return a;
+        }
+        String s = String.valueOf(o);
+        if (s.startsWith("{") || s.startsWith("[")) {
+            try {
+                return new org.json.JSONTokener(s).nextValue();
+            } catch (Throwable ignored) {
+            }
+        }
+        return s;
     }
 
     /**
